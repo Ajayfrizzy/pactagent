@@ -1,0 +1,107 @@
+// PactAgent Prisma Schema
+// Using SQLite for MVP simplicity — swap to PostgreSQL by changing provider + url
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id            String   @id @default(uuid())
+  walletAddress String   @unique
+  role          String   @default("client") // client | worker | both
+  createdAt     DateTime @default(now())
+}
+
+model Agreement {
+  id                    String    @id @default(uuid())
+  title                 String
+  description           String
+  clientAddress         String
+  workerAddress         String
+  amount                String    // CKB in shannons, stored as string for bigint safety
+  deadlineAt            DateTime
+  disputeWindowSecs     Int       @default(86400) // 24 hours default
+  proofType             String    @default("URL") // URL | TEXT | FILE_HASH
+  reviewerMode          String    @default("AUTO") // AUTO | HYBRID | MANUAL
+  releaseMode           String    @default("FULL") // FULL | PARTIAL
+  payoutNetwork         String    @default("CKB") // CKB | FIBER
+  ckbTxHashCreate       String?
+  ckbTxHashFund         String?
+  ckbTxHashRelease      String?
+  fiberPaymentReference String?
+  status                String    @default("DRAFT") // AgreementStatus enum
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  milestones Milestone[]
+  proofs    Proof[]
+  disputes  Dispute[]
+  agentLogs AgentLog[]
+}
+
+model Milestone {
+  id          String   @id @default(uuid())
+  agreementId String
+  title       String
+  description String
+  amount      String
+  sortOrder   Int
+  status      String   @default("PENDING")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  agreement Agreement @relation(fields: [agreementId], references: [id])
+  proofs    Proof[]
+  disputes  Dispute[]
+
+  @@unique([agreementId, sortOrder])
+}
+
+model Proof {
+  id          String   @id @default(uuid())
+  agreementId String
+  milestoneId String
+  proofType   String   // URL | TEXT | FILE_HASH
+  content     String
+  contentHash String
+  submittedAt DateTime @default(now())
+
+  agreement Agreement @relation(fields: [agreementId], references: [id])
+  milestone Milestone @relation(fields: [milestoneId], references: [id])
+}
+
+model Dispute {
+  id               String    @id @default(uuid())
+  agreementId      String
+  milestoneId      String
+  openedBy         String    // wallet address
+  reason           String
+  evidenceNotes    String?
+  aiSummary        String?
+  aiRecommendation String?   // DisputeRecommendation enum
+  aiConfidence     Float?
+  aiRationale      String?
+  resolvedAt       DateTime?
+  createdAt        DateTime  @default(now())
+
+  agreement Agreement @relation(fields: [agreementId], references: [id])
+  milestone Milestone @relation(fields: [milestoneId], references: [id])
+}
+
+model AgentLog {
+  id           String   @id @default(uuid())
+  agreementId  String?
+  level        String   // INFO | WARN | ERROR | SUCCESS
+  eventType    String   // AgentEventType enum
+  message      String
+  metadataJson String?  // JSON string for flexible metadata
+  createdAt    DateTime @default(now())
+
+  agreement Agreement? @relation(fields: [agreementId], references: [id])
+}
