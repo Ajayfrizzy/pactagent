@@ -2,6 +2,40 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from '@/lib/store';
 
+function resolveWebSocketUrl() {
+  const configuredWsUrl = process.env.NEXT_PUBLIC_WS_URL;
+  const configuredApiBase = process.env.NEXT_PUBLIC_API_BASE_URL;
+
+  if (typeof window !== 'undefined') {
+    const pageHost = window.location.hostname;
+    const pageProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const isRemotePage = pageHost !== 'localhost' && pageHost !== '127.0.0.1';
+
+    if (configuredWsUrl) {
+      try {
+        const parsed = new URL(configuredWsUrl);
+        const isLocalConfiguredHost =
+          parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+
+        if (!(isRemotePage && isLocalConfiguredHost)) {
+          return configuredWsUrl;
+        }
+      } catch {
+        // If the configured value is malformed, fall through to safer defaults.
+      }
+    }
+
+    if (configuredApiBase && /^https?:\/\//.test(configuredApiBase)) {
+      return `${configuredApiBase.replace(/\/api\/?$/, '').replace(/^http:/, 'ws:').replace(/^https:/, 'wss:')}/ws`;
+    }
+
+    return `${pageProtocol}//${window.location.host}/ws`;
+  }
+
+  const fallbackBase = configuredApiBase?.replace(/\/api\/?$/, '') || 'http://localhost:4000';
+  return configuredWsUrl || `${fallbackBase.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:')}/ws`;
+}
+
 /**
  * WebSocket hook for live Agent Log + Agreement updates.
  * Auto-reconnects on disconnect.
@@ -13,15 +47,8 @@ export function useWebSocket() {
   const triggerAgreementUpdate = useStore((s) => s.triggerAgreementUpdate);
 
   useEffect(() => {
-    const fallbackBase =
-      process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/api\/?$/, '') || 'http://localhost:4000';
-    const configuredWsUrl = process.env.NEXT_PUBLIC_WS_URL;
-
     function connect() {
-      const wsUrl =
-        configuredWsUrl ||
-        `${fallbackBase.replace(/^http/, 'ws').replace(/^https/, 'wss')}/ws`;
-      const ws = new WebSocket(wsUrl);
+      const ws = new WebSocket(resolveWebSocketUrl());
       wsRef.current = ws;
 
       ws.onopen = () => {
