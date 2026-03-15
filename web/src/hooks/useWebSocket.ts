@@ -7,9 +7,9 @@ function resolveWebSocketUrl() {
   const configuredApiBase = process.env.NEXT_PUBLIC_API_BASE_URL;
 
   if (typeof window !== 'undefined') {
-    const pageHost = window.location.hostname;
-    const pageProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const isRemotePage = pageHost !== 'localhost' && pageHost !== '127.0.0.1';
+    const pageUrl = new URL(window.location.href);
+    const pageProtocol = pageUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+    const isRemotePage = pageUrl.hostname !== 'localhost' && pageUrl.hostname !== '127.0.0.1';
 
     if (configuredWsUrl) {
       try {
@@ -29,7 +29,13 @@ function resolveWebSocketUrl() {
       return `${configuredApiBase.replace(/\/api\/?$/, '').replace(/^http:/, 'ws:').replace(/^https:/, 'wss:')}/ws`;
     }
 
-    return `${pageProtocol}//${window.location.host}/ws`;
+    if (!configuredApiBase || configuredApiBase.startsWith('/')) {
+      if (pageUrl.port === '3000') {
+        return `${pageProtocol}//${pageUrl.hostname}:4000/ws`;
+      }
+
+      return `${pageProtocol}//${pageUrl.host}/ws`;
+    }
   }
 
   const fallbackBase = configuredApiBase?.replace(/\/api\/?$/, '') || 'http://localhost:4000';
