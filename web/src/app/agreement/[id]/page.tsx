@@ -9,7 +9,7 @@ import { AgentLogPanel } from '@/components/AgentLogPanel';
 import { StatusBadge, NetworkBadge } from '@/components/StatusBadge';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useStore } from '@/lib/store';
-import { sendCapacityTransfer, shannonsToCKB } from '@/lib/ckb';
+import { sendCapacityTransfer, shannonsToCKB, withTimeout } from '@/lib/ckb';
 import * as api from '@/lib/api';
 import {
   AgentIcon,
@@ -27,6 +27,23 @@ import {
 } from '@/components/Icons';
 
 const currentMilestoneStatuses = ['ACTIVE', 'PROOF_SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'DISPUTED'];
+
+async function addressesMatchOnSignerNetwork(
+  signer: ccc.Signer,
+  leftAddress: string,
+  rightAddress: string
+) {
+  if (leftAddress === rightAddress) {
+    return true;
+  }
+
+  const [left, right] = await Promise.all([
+    ccc.Address.fromString(leftAddress, signer.client),
+    ccc.Address.fromString(rightAddress, signer.client),
+  ]);
+
+  return JSON.stringify(left.script) === JSON.stringify(right.script);
+}
 
 export default function AgreementDetailPage() {
   useWebSocket();
@@ -94,15 +111,47 @@ export default function AgreementDetailPage() {
     setError(null);
 
     try {
-      await signer.connect();
+      // Use the wallet address already stored from auth — avoids calling signer
+      // methods that rely on the wallet extension background messaging which
+      // can become unresponsive between navigations.
+      if (!walletAddress) {
+        throw new Error('Wallet session not found. Please reconnect your wallet.');
+      }
+
+      if (walletAddress !== agreement.clientAddress) {
+        // Quick check using locally-known addresses before touching the signer
+        try {
+          const match = await withTimeout(
+            addressesMatchOnSignerNetwork(signer, walletAddress, agreement.clientAddress),
+            10_000,
+            'skip',
+          );
+          if (!match) {
+            throw new Error('The connected wallet does not match the client wallet for this agreement.');
+          }
+        } catch (err) {
+          // If the deep check timed out, the plain-string comparison already
+          // failed above so the addresses definitely differ on the surface.
+          if (err instanceof Error && err.message !== 'skip') throw err;
+        }
+      }
+
       const txHash = await sendCapacityTransfer({
         signer,
         toAddress: publicConfig.treasuryAddress,
         amount: agreement.amount,
       });
-      await api.fundAgreement(id, txHash);
-      await refreshAgreement();
+
+      await withTimeout(
+        api.fundAgreement(id, String(txHash)),
+        30_000,
+        'Timed out confirming the funding with the server. The transaction may have been sent — please refresh the page.',
+      );
+
+      // Best-effort refresh; the WebSocket update will also trigger a re-fetch
+      await refreshAgreement().catch(() => {});
     } catch (err) {
+      console.error('[Fund] Error:', err);
       setError(err instanceof Error ? err.message : 'Funding failed');
     } finally {
       setActionLoading(null);
@@ -631,6 +680,4 @@ export default function AgreementDetailPage() {
     </div>
   );
 }
-
-
 

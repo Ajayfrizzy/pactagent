@@ -20,12 +20,39 @@ function getTreasurySigner() {
   );
 }
 
+async function getDerivedTreasuryAddress() {
+  const signer = getTreasurySigner();
+  return String(await signer.getRecommendedAddress());
+}
+
 export async function getTreasuryAddress() {
-  if (config.treasuryAddress) {
-    return config.treasuryAddress;
+  const derivedAddress = await getDerivedTreasuryAddress();
+  const configuredAddress = config.treasuryAddress.trim();
+
+  if (!configuredAddress) {
+    return derivedAddress;
   }
 
-  return getTreasurySigner().getRecommendedAddress();
+  try {
+    const client = getClient();
+    const configured = await Address.fromString(configuredAddress, client);
+    const derived = await Address.fromString(derivedAddress, client);
+
+    if (JSON.stringify(configured.script) === JSON.stringify(derived.script)) {
+      return configuredAddress;
+    }
+
+    console.warn(
+      `[CKB] Configured TREASURY_CKB_ADDRESS does not match TREASURY_CKB_PRIVATE_KEY. Falling back to derived address ${derivedAddress}.`
+    );
+    return derivedAddress;
+  } catch (error) {
+    console.warn(
+      `[CKB] Failed to parse configured TREASURY_CKB_ADDRESS. Falling back to derived address ${derivedAddress}.`,
+      error
+    );
+    return derivedAddress;
+  }
 }
 
 export async function sendTreasuryTransfer(toAddress: string, amount: string) {
