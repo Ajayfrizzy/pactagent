@@ -148,6 +148,12 @@ export async function fetchLogs(agreementId?: string, limit = 100) {
   return request<any[]>(`/logs?${params.toString()}`);
 }
 
+export async function fetchPublicLogs(limit = 25) {
+  const params = new URLSearchParams();
+  params.set('limit', String(limit));
+  return request<any[]>(`/logs/public?${params.toString()}`);
+}
+
 export async function fetchAgreementLogs(id: string) {
   return request<any[]>(`/agreements/${id}/logs`);
 }

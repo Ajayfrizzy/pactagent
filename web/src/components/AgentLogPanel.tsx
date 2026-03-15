@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useMemo } from 'react';
 import { useStore } from '@/lib/store';
-import { fetchLogs } from '@/lib/api';
+import { fetchLogs, fetchPublicLogs } from '@/lib/api';
 import { LogLevelBadge } from './StatusBadge';
 import {
   DocumentTextIcon, ClockIcon, CheckCircleIcon, PaperClipIcon,
@@ -43,7 +43,13 @@ interface LogEntry {
   createdAt: string;
 }
 
-export function AgentLogPanel({ agreementId, allowedAgreementIds }: { agreementId?: string; allowedAgreementIds?: string[] }) {
+function maskPublicMessage(message: string) {
+  return message
+    .replace(/ckt1[a-z0-9]{18,}/gi, 'ckt1...redacted')
+    .replace(/0x[a-f0-9]{40}/gi, '0x...redacted');
+}
+
+export function AgentLogPanel({ agreementId, allowedAgreementIds, publicFeed = false }: { agreementId?: string; allowedAgreementIds?: string[]; publicFeed?: boolean }) {
   const liveLogs = useStore((s) => s.logs);
   const wsConnected = useStore((s) => s.wsConnected);
   const authToken = useStore((s) => s.authToken);
@@ -59,6 +65,20 @@ export function AgentLogPanel({ agreementId, allowedAgreementIds }: { agreementI
 
   useEffect(() => {
     async function load() {
+      if (publicFeed) {
+        setLoading(true);
+        try {
+          const logs = await fetchPublicLogs(25);
+          setHistoricalLogs(logs);
+        } catch (err) {
+          console.error('Failed to load public logs:', err);
+          setHistoricalLogs([]);
+        } finally {
+          setLoading(false);
+        }
+        return;
+      }
+
       if (!authToken) {
         setHistoricalLogs([]);
         setLoading(false);
@@ -83,11 +103,15 @@ export function AgentLogPanel({ agreementId, allowedAgreementIds }: { agreementI
       }
     }
     void load();
-  }, [agreementId, allowedAgreementIds, authToken]);
+  }, [agreementId, allowedAgreementIds, authToken, publicFeed]);
 
   const allLogs = [...liveLogs, ...historicalLogs]
     .filter((log, index, self) => self.findIndex((item) => item.id === log.id) === index)
     .filter((log) => {
+      if (publicFeed) {
+        return !!log.agreementId;
+      }
+
       if (agreementId) {
         return log.agreementId === agreementId;
       }
@@ -143,17 +167,24 @@ export function AgentLogPanel({ agreementId, allowedAgreementIds }: { agreementI
           <div className="flex flex-col items-center justify-center py-12 text-gray-500">
             <AgentIcon className="mb-2 h-8 w-8 text-gray-600" />
             <span className="text-sm">No agent activity yet</span>
-            <span className="mt-1 text-center text-xs">Activity will appear here only for agreements tied to this wallet.</span>
+            <span className="mt-1 text-center text-xs">
+              {publicFeed
+                ? 'Recent agreement activity will appear here as the agent works.'
+                : 'Activity will appear here only for agreements tied to this wallet.'}
+            </span>
           </div>
         ) : (
           <div className="divide-y divide-agent-border/50">
             {allLogs.map((log) => {
               const { icon: IconComponent, color } = EVENT_ICON_MAP[log.eventType] || DEFAULT_EVENT_ICON;
+              const showMetadata = Boolean(log.metadataJson && !publicFeed);
+              const displayMessage = publicFeed ? maskPublicMessage(log.message) : log.message;
+
               return (
                 <div
                   key={log.id}
                   className="group cursor-pointer transition-colors hover:bg-agent-bg/30"
-                  onClick={() => setExpandedId(expandedId === log.id ? null : log.id)}
+                  onClick={() => showMetadata && setExpandedId(expandedId === log.id ? null : log.id)}
                 >
                   <div className="flex items-start gap-3 px-4 py-2.5">
                     <IconComponent className={`mt-0.5 h-4 w-4 shrink-0 ${color}`} />
@@ -166,7 +197,7 @@ export function AgentLogPanel({ agreementId, allowedAgreementIds }: { agreementI
                         </span>
                       </div>
                       <p className="truncate text-xs text-gray-200 sm:text-sm">
-                        {log.message}
+                        {displayMessage}
                       </p>
                     </div>
 
@@ -174,17 +205,17 @@ export function AgentLogPanel({ agreementId, allowedAgreementIds }: { agreementI
                       {new Date(log.createdAt).toLocaleTimeString()}
                     </span>
 
-                    {log.metadataJson && (
-                      <span className="mt-0.5 text-gray-600">
-                        {expandedId === log.id ? <ChevronDownIcon className="h-3.5 w-3.5" /> : <ChevronRightIcon className="h-3.5 w-3.5" />}
+                    {showMetadata && (
+                      <span className="mt-0.5 inline-flex items-center justify-center rounded-md bg-agent-bg/80 p-1 text-gray-300 transition-colors group-hover:text-white">
+                        {expandedId === log.id ? <ChevronDownIcon className="h-4 w-4 stroke-[2.5]" /> : <ChevronRightIcon className="h-4 w-4 stroke-[2.5]" />}
                       </span>
                     )}
                   </div>
 
-                  {expandedId === log.id && log.metadataJson && (
+                  {expandedId === log.id && showMetadata && (
                     <div className="px-4 pb-3 pl-12">
                       <pre className="overflow-x-auto rounded-lg bg-agent-bg p-3 text-[11px] font-mono text-gray-400">
-                        {JSON.stringify(JSON.parse(log.metadataJson), null, 2)}
+                        {JSON.stringify(JSON.parse(log.metadataJson as string), null, 2)}
                       </pre>
                     </div>
                   )}

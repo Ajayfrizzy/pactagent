@@ -25,7 +25,6 @@ export async function createLog(params: {
     },
   });
 
-  // Broadcast to all connected WS clients for live Agent Log Panel
   broadcast({
     type: 'LOG',
     payload: {
@@ -38,9 +37,6 @@ export async function createLog(params: {
   return log;
 }
 
-/**
- * Fetch logs for a specific agreement.
- */
 export async function getLogs(agreementId?: string, limit = 100) {
   return prisma.agentLog.findMany({
     where: agreementId ? { agreementId } : undefined,
@@ -49,19 +45,24 @@ export async function getLogs(agreementId?: string, limit = 100) {
   });
 }
 
-/**
- * Fetch logs scoped to agreements that belong to the authenticated participant.
- */
 export async function getLogsForParticipant(address: string, agreementId?: string, limit = 100) {
   return prisma.agentLog.findMany({
     where: {
       agreementId: agreementId ? agreementId : { not: null },
       agreement: {
-        OR: [
-          { clientAddress: address },
-          { workerAddress: address },
-        ],
+        OR: [{ clientAddress: address }, { workerAddress: address }],
       },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+  });
+}
+
+export async function getPublicLogs(limit = 25) {
+  return prisma.agentLog.findMany({
+    where: {
+      agreementId: { not: null },
+      level: { in: ['INFO', 'SUCCESS', 'WARN'] },
     },
     orderBy: { createdAt: 'desc' },
     take: limit,

@@ -1,8 +1,19 @@
 import { Router, Request, Response } from 'express';
 import { requireAuth } from '../middleware/auth';
-import { getLogsForParticipant } from '../services/logService';
+import { getLogsForParticipant, getPublicLogs } from '../services/logService';
 
 const router = Router();
+
+router.get('/public', async (req: Request, res: Response) => {
+  try {
+    const limit = parseInt((req.query.limit as string) || '25', 10);
+    const logs = await getPublicLogs(limit);
+    res.json({ success: true, data: logs });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    res.status(500).json({ success: false, error: msg });
+  }
+});
 
 router.use(requireAuth);
 

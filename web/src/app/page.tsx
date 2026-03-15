@@ -1,15 +1,38 @@
 'use client';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { WalletConnect } from '@/components/WalletConnect';
 import { AgentLogPanel } from '@/components/AgentLogPanel';
 import { NavbarMenu } from '@/components/NavbarMenu';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useStore } from '@/lib/store';
+import { fetchAgreements } from '@/lib/api';
 import { AgentIcon, EyeIcon, CpuChipIcon, BoltIcon } from '@/components/Icons';
 
 export default function HomePage() {
   useWebSocket();
   const walletAddress = useStore((s) => s.walletAddress);
+  const authToken = useStore((s) => s.authToken);
+  const [agreementIds, setAgreementIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    async function loadAgreementIds() {
+      if (!authToken || !walletAddress) {
+        setAgreementIds([]);
+        return;
+      }
+
+      try {
+        const agreements = await fetchAgreements(walletAddress);
+        setAgreementIds(agreements.map((agreement) => agreement.id));
+      } catch (error) {
+        console.error('Failed to load agreement ids for homepage activity:', error);
+        setAgreementIds([]);
+      }
+    }
+
+    void loadAgreementIds();
+  }, [authToken, walletAddress]);
 
   return (
     <div className="min-h-screen">
@@ -113,7 +136,7 @@ export default function HomePage() {
             <span className="h-2 w-2 rounded-full bg-green-400 animate-pulse" />
             Live Agent Activity
           </h2>
-          <AgentLogPanel />
+          <AgentLogPanel allowedAgreementIds={agreementIds} />
         </div>
       </div>
     </div>
