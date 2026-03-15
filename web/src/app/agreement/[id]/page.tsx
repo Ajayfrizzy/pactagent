@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { ccc } from '@ckb-ccc/connector-react';
 import { WalletConnect } from '@/components/WalletConnect';
+import { NavbarMenu } from '@/components/NavbarMenu';
 import { AgentLogPanel } from '@/components/AgentLogPanel';
 import { StatusBadge, NetworkBadge } from '@/components/StatusBadge';
 import { useWebSocket } from '@/hooks/useWebSocket';
@@ -233,26 +234,28 @@ export default function AgreementDetailPage() {
 
   return (
     <div className="min-h-screen">
-      <nav className="border-b border-agent-border bg-agent-card/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Link href="/dashboard" className="flex items-center gap-2 group">
-              <ArrowLeftIcon className="w-4 h-4 text-gray-500 group-hover:text-white transition-colors" />
-              <AgentIcon className="w-5 h-5 text-agent-accent" />
-              <span className="text-lg font-bold text-white">PactAgent</span>
+      <nav className="sticky top-0 z-50 border-b border-agent-border bg-agent-card/50 backdrop-blur-sm">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+          <div className="flex min-w-0 items-center gap-3">
+            <Link href="/" className="flex min-w-0 items-center gap-2">
+              <AgentIcon className="h-5 w-5 shrink-0 text-agent-accent" />
+              <span className="truncate text-lg font-bold text-white">PactAgent</span>
             </Link>
             <span className="text-gray-600">/</span>
-            <Link href="/dashboard" className="text-sm text-gray-400 hover:text-white transition-colors">
-              Dashboard
-            </Link>
-            <span className="text-gray-600">/</span>
-            <span className="text-sm text-gray-400 truncate max-w-[220px]">{agreement.title}</span>
+            <span className="truncate text-sm text-gray-400">{agreement.title}</span>
           </div>
-          <WalletConnect />
+          <NavbarMenu />
         </div>
       </nav>
 
-      <div className="max-w-7xl mx-auto px-6 py-8">
+      <div className="max-w-7xl mx-auto px-4 py-8 sm:px-6">
+        <Link
+          href="/dashboard"
+          className="mb-5 inline-flex items-center gap-2 text-sm text-gray-300 transition-colors hover:text-white"
+        >
+          <ArrowLeftIcon className="h-4 w-4" />
+          Back to Dashboard
+        </Link>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-6">
             <div className="bg-agent-card border border-agent-border rounded-xl p-6">
@@ -628,3 +631,6 @@ export default function AgreementDetailPage() {
     </div>
   );
 }
+
+
+

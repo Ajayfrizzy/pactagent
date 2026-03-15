@@ -5,7 +5,7 @@ import { v4 as uuid } from 'uuid';
 /**
  * Agent Log Service
  * Creates structured logs and broadcasts them to all connected WS clients.
- * This is the core observability layer — every agent action is logged here.
+ * This is the core observability layer - every agent action is logged here.
  */
 export async function createLog(params: {
   agreementId?: string;
@@ -39,11 +39,30 @@ export async function createLog(params: {
 }
 
 /**
- * Fetch logs, optionally filtered by agreementId.
+ * Fetch logs for a specific agreement.
  */
 export async function getLogs(agreementId?: string, limit = 100) {
   return prisma.agentLog.findMany({
     where: agreementId ? { agreementId } : undefined,
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+  });
+}
+
+/**
+ * Fetch logs scoped to agreements that belong to the authenticated participant.
+ */
+export async function getLogsForParticipant(address: string, agreementId?: string, limit = 100) {
+  return prisma.agentLog.findMany({
+    where: {
+      agreementId: agreementId ? agreementId : { not: null },
+      agreement: {
+        OR: [
+          { clientAddress: address },
+          { workerAddress: address },
+        ],
+      },
+    },
     orderBy: { createdAt: 'desc' },
     take: limit,
   });

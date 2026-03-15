@@ -56,6 +56,7 @@ export function createChallenge(address: string) {
 async function deriveAddressFromSignatureIdentity(signature: {
   signType: string;
   identity: string;
+  requestedAddress?: string;
 }) {
   const client = getClient();
 
@@ -64,11 +65,37 @@ async function deriveAddressFromSignatureIdentity(signature: {
   }
 
   if (signature.signType === SignerSignType.JoyId) {
-    const identity = JSON.parse(signature.identity) as { publicKey: string };
-    const publicKey = identity.publicKey.startsWith('0x')
-      ? identity.publicKey
-      : `0x${identity.publicKey}`;
-    return new SignerCkbPublicKey(client, publicKey).getRecommendedAddress();
+    try {
+      const identity = JSON.parse(signature.identity) as {
+        address?: string;
+        publicKey?: string;
+      };
+
+      if (identity.address) {
+        return normalizeAddress(identity.address);
+      }
+
+      if (identity.publicKey) {
+        const publicKey = identity.publicKey.startsWith('0x')
+          ? identity.publicKey
+          : `0x${identity.publicKey}`;
+        const byteLength = (publicKey.length - 2) / 2;
+
+        if (byteLength === 33) {
+          return new SignerCkbPublicKey(client, publicKey).getRecommendedAddress();
+        }
+      }
+    } catch {
+      // Fall back to the requested address after successful signature verification.
+    }
+  }
+
+  if (signature.signType === 'EvmPersonal' && signature.requestedAddress) {
+    return normalizeAddress(signature.requestedAddress);
+  }
+
+  if (signature.signType === SignerSignType.JoyId && signature.requestedAddress) {
+    return normalizeAddress(signature.requestedAddress);
   }
 
   throw new Error(`Unsupported signer type for authentication: ${signature.signType}`);
@@ -110,7 +137,10 @@ export async function verifyChallenge(params: {
     throw new Error('Wallet signature verification failed.');
   }
 
-  const derivedAddress = await deriveAddressFromSignatureIdentity(params.signature);
+  const derivedAddress = await deriveAddressFromSignatureIdentity({
+    ...params.signature,
+    requestedAddress: normalized,
+  });
   if (normalizeAddress(derivedAddress) !== normalized) {
     throw new Error('Signed wallet address does not match the requested account.');
   }

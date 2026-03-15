@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useStore } from '@/lib/store';
 import { fetchLogs } from '@/lib/api';
 import { LogLevelBadge } from './StatusBadge';
@@ -10,12 +10,6 @@ import {
   ArrowUturnLeftIcon, BoltIcon, FireIcon, ChevronDownIcon, ChevronRightIcon,
   ClipboardDocumentCheckIcon,
 } from './Icons';
-
-/**
- * Agent Log Panel — the crown jewel of the demo.
- * Shows real-time agent actions: Observe → Decide → Act
- * Supports filtering, expanding metadata, and live streaming.
- */
 
 const EVENT_ICON_MAP: Record<string, { icon: React.FC<{ className?: string }>; color: string }> = {
   AGREEMENT_CREATED:       { icon: DocumentTextIcon,          color: 'text-blue-400' },
@@ -34,7 +28,7 @@ const EVENT_ICON_MAP: Record<string, { icon: React.FC<{ className?: string }>; c
   REFUND_SENT:             { icon: ArrowUturnLeftIcon,        color: 'text-purple-400' },
   FIBER_PAYOUT_INITIATED:  { icon: BoltIcon,                  color: 'text-violet-400' },
   FIBER_PAYOUT_CONFIRMED:  { icon: BoltIcon,                  color: 'text-violet-300' },
-  ERROR:                   { icon: FireIcon,                   color: 'text-red-500' },
+  ERROR:                   { icon: FireIcon,                  color: 'text-red-500' },
 };
 
 const DEFAULT_EVENT_ICON = { icon: ClipboardDocumentCheckIcon, color: 'text-gray-400' };
@@ -49,79 +43,107 @@ interface LogEntry {
   createdAt: string;
 }
 
-export function AgentLogPanel({ agreementId }: { agreementId?: string }) {
+export function AgentLogPanel({ agreementId, allowedAgreementIds }: { agreementId?: string; allowedAgreementIds?: string[] }) {
   const liveLogs = useStore((s) => s.logs);
   const wsConnected = useStore((s) => s.wsConnected);
+  const authToken = useStore((s) => s.authToken);
   const [historicalLogs, setHistoricalLogs] = useState<LogEntry[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>('ALL');
   const [loading, setLoading] = useState(true);
 
-  // Load historical logs on mount
+  const allowedIds = useMemo(
+    () => new Set((allowedAgreementIds || []).filter(Boolean)),
+    [allowedAgreementIds]
+  );
+
   useEffect(() => {
     async function load() {
+      if (!authToken) {
+        setHistoricalLogs([]);
+        setLoading(false);
+        return;
+      }
+
+      if (!agreementId && allowedAgreementIds && allowedAgreementIds.length === 0) {
+        setHistoricalLogs([]);
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
       try {
         const logs = await fetchLogs(agreementId, 100);
         setHistoricalLogs(logs);
       } catch (err) {
         console.error('Failed to load logs:', err);
+        setHistoricalLogs([]);
       } finally {
         setLoading(false);
       }
     }
-    load();
-  }, [agreementId]);
+    void load();
+  }, [agreementId, allowedAgreementIds, authToken]);
 
-  // Merge live + historical, deduplicate by id
   const allLogs = [...liveLogs, ...historicalLogs]
-    .filter((log, index, self) => self.findIndex(l => l.id === log.id) === index)
-    .filter(log => !agreementId || log.agreementId === agreementId)
-    .filter(log => filter === 'ALL' || log.level === filter)
+    .filter((log, index, self) => self.findIndex((item) => item.id === log.id) === index)
+    .filter((log) => {
+      if (agreementId) {
+        return log.agreementId === agreementId;
+      }
+
+      if (allowedAgreementIds) {
+        return !!log.agreementId && allowedIds.has(log.agreementId);
+      }
+
+      return false;
+    })
+    .filter((log) => filter === 'ALL' || log.level === filter)
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   return (
-    <div className="bg-agent-card border border-agent-border rounded-xl overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-agent-border bg-agent-bg/50">
-        <div className="flex items-center gap-3">
-          <div className={`w-2.5 h-2.5 rounded-full ${wsConnected ? 'bg-green-400 agent-active' : 'bg-red-400'}`} />
-          <div className="flex items-center gap-1.5">
-            <AgentIcon className="w-4 h-4 text-agent-accent" />
-            <h3 className="text-sm font-semibold text-white">Agent Log Panel</h3>
+    <div className="overflow-hidden rounded-xl border border-agent-border bg-agent-card">
+      <div className="border-b border-agent-border bg-agent-bg/50 px-4 py-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <div className={`h-2.5 w-2.5 rounded-full ${wsConnected ? 'bg-green-400 agent-active' : 'bg-red-400'}`} />
+            <div className="flex items-center gap-1.5">
+              <AgentIcon className="h-4 w-4 text-agent-accent" />
+              <h3 className="text-xs font-semibold text-white sm:text-sm">Agent Log Panel</h3>
+            </div>
+            <span className="pl-1 text-[11px] text-gray-500 sm:pl-2 sm:text-xs">
+              {wsConnected ? 'Live' : 'Reconnecting...'}
+            </span>
           </div>
-          <span className="text-xs text-gray-500">
-            {wsConnected ? 'Live' : 'Reconnecting...'}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          {['ALL', 'INFO', 'SUCCESS', 'WARN', 'ERROR'].map((level) => (
-            <button
-              key={level}
-              onClick={() => setFilter(level)}
-              className={`px-2 py-0.5 rounded text-[10px] font-mono transition-colors ${
-                filter === level
-                  ? 'bg-agent-accent text-white'
-                  : 'bg-agent-bg text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              {level}
-            </button>
-          ))}
+          <div className="flex flex-wrap items-center gap-2 pt-1 sm:justify-end sm:pt-0">
+            {['ALL', 'INFO', 'SUCCESS', 'WARN', 'ERROR'].map((level) => (
+              <button
+                key={level}
+                onClick={() => setFilter(level)}
+                className={`rounded px-2 py-0.5 text-[10px] font-mono transition-colors ${
+                  filter === level
+                    ? 'bg-agent-accent text-white'
+                    : 'bg-agent-bg text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                {level}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* Log entries */}
       <div className="max-h-[500px] overflow-y-auto agent-log-scroll">
         {loading ? (
           <div className="flex items-center justify-center py-12 text-gray-500">
-            <div className="animate-spin w-5 h-5 border-2 border-agent-accent border-t-transparent rounded-full mr-3" />
+            <div className="mr-3 h-5 w-5 animate-spin rounded-full border-2 border-agent-accent border-t-transparent" />
             Loading agent logs...
           </div>
         ) : allLogs.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-gray-500">
-            <AgentIcon className="w-8 h-8 text-gray-600 mb-2" />
+            <AgentIcon className="mb-2 h-8 w-8 text-gray-600" />
             <span className="text-sm">No agent activity yet</span>
-            <span className="text-xs mt-1">The agent will appear here once it starts observing</span>
+            <span className="mt-1 text-center text-xs">Activity will appear here only for agreements tied to this wallet.</span>
           </div>
         ) : (
           <div className="divide-y divide-agent-border/50">
@@ -130,43 +152,38 @@ export function AgentLogPanel({ agreementId }: { agreementId?: string }) {
               return (
                 <div
                   key={log.id}
-                  className="group hover:bg-agent-bg/30 transition-colors cursor-pointer"
+                  className="group cursor-pointer transition-colors hover:bg-agent-bg/30"
                   onClick={() => setExpandedId(expandedId === log.id ? null : log.id)}
                 >
                   <div className="flex items-start gap-3 px-4 py-2.5">
-                    {/* Icon */}
-                    <IconComponent className={`w-4 h-4 mt-0.5 shrink-0 ${color}`} />
+                    <IconComponent className={`mt-0.5 h-4 w-4 shrink-0 ${color}`} />
 
-                    {/* Content */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-0.5">
+                    <div className="min-w-0 flex-1">
+                      <div className="mb-0.5 flex flex-wrap items-center gap-2">
                         <LogLevelBadge level={log.level} />
-                        <span className="text-[10px] font-mono text-gray-500">
+                        <span className="text-[9px] font-mono text-gray-500 sm:text-[10px]">
                           {log.eventType}
                         </span>
                       </div>
-                      <p className="text-sm text-gray-200 truncate">
+                      <p className="truncate text-xs text-gray-200 sm:text-sm">
                         {log.message}
                       </p>
                     </div>
 
-                    {/* Timestamp */}
-                    <span className="text-[10px] text-gray-500 font-mono shrink-0 mt-1">
+                    <span className="mt-1 shrink-0 text-[10px] font-mono text-gray-500">
                       {new Date(log.createdAt).toLocaleTimeString()}
                     </span>
 
-                    {/* Expand indicator */}
                     {log.metadataJson && (
-                      <span className="text-gray-600 mt-0.5">
-                        {expandedId === log.id ? <ChevronDownIcon className="w-3.5 h-3.5" /> : <ChevronRightIcon className="w-3.5 h-3.5" />}
+                      <span className="mt-0.5 text-gray-600">
+                        {expandedId === log.id ? <ChevronDownIcon className="h-3.5 w-3.5" /> : <ChevronRightIcon className="h-3.5 w-3.5" />}
                       </span>
                     )}
                   </div>
 
-                  {/* Expanded metadata */}
                   {expandedId === log.id && log.metadataJson && (
                     <div className="px-4 pb-3 pl-12">
-                      <pre className="text-[11px] font-mono text-gray-400 bg-agent-bg rounded-lg p-3 overflow-x-auto">
+                      <pre className="overflow-x-auto rounded-lg bg-agent-bg p-3 text-[11px] font-mono text-gray-400">
                         {JSON.stringify(JSON.parse(log.metadataJson), null, 2)}
                       </pre>
                     </div>
@@ -178,8 +195,7 @@ export function AgentLogPanel({ agreementId }: { agreementId?: string }) {
         )}
       </div>
 
-      {/* Footer */}
-      <div className="flex items-center justify-between px-4 py-2 border-t border-agent-border bg-agent-bg/30 text-[10px] text-gray-500">
+      <div className="flex items-center justify-between border-t border-agent-border bg-agent-bg/30 px-4 py-2 text-[10px] text-gray-500">
         <span>{allLogs.length} events</span>
         <span>Agent cycle: 10s</span>
       </div>

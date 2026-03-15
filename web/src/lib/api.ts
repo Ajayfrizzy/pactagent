@@ -2,6 +2,12 @@ import { useStore } from './store';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || '/api';
 
+type ApiEnvelope<T> = {
+  success?: boolean;
+  data?: T;
+  error?: string;
+};
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const token = useStore.getState().authToken;
   const res = await fetch(`${API_BASE}${path}`, {
@@ -13,11 +19,22 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
   });
 
-  const data = await res.json();
-  if (!data.success) {
-    throw new Error(data.error || 'API request failed');
+  const rawBody = await res.text();
+  let data: ApiEnvelope<T> | null = null;
+
+  if (rawBody) {
+    try {
+      data = JSON.parse(rawBody) as ApiEnvelope<T>;
+    } catch {
+      throw new Error(rawBody || `API request failed with status ${res.status}`);
+    }
   }
-  return data.data;
+
+  if (!res.ok || !data?.success) {
+    throw new Error(data?.error || rawBody || 'API request failed');
+  }
+
+  return data.data as T;
 }
 
 export async function fetchAuthChallenge(address: string) {

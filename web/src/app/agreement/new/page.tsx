@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { WalletConnect } from '@/components/WalletConnect';
+import { NavbarMenu } from '@/components/NavbarMenu';
 import { useStore } from '@/lib/store';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { createAgreement } from '@/lib/api';
@@ -134,24 +134,31 @@ export default function NewAgreementPage() {
 
   return (
     <div className="min-h-screen">
-      <nav className="border-b border-agent-border bg-agent-card/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Link href="/dashboard" className="flex items-center gap-2 group">
-              <ArrowLeftIcon className="w-4 h-4 text-gray-500 group-hover:text-white transition-colors" />
-              <AgentIcon className="w-5 h-5 text-agent-accent" />
-              <span className="text-lg font-bold text-white">PactAgent</span>
+      <nav className="sticky top-0 z-50 border-b border-agent-border bg-agent-card/50 backdrop-blur-sm">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+          <div className="flex min-w-0 items-center gap-3">
+            <Link href="/" className="flex min-w-0 items-center gap-2">
+              <AgentIcon className="h-5 w-5 shrink-0 text-agent-accent" />
+              <span className="truncate text-lg font-bold text-white">PactAgent</span>
             </Link>
             <span className="text-gray-600">/</span>
-            <span className="text-sm text-gray-400">New Agreement</span>
+            <span className="truncate text-sm text-gray-400">New Agreement</span>
           </div>
-          <WalletConnect />
+          <NavbarMenu />
         </div>
       </nav>
 
-      <div className="max-w-3xl mx-auto px-6 py-8">
-        <h1 className="text-2xl font-bold text-white mb-2">Create Milestone Agreement</h1>
-        <p className="text-sm text-gray-400 mb-8">
+      <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+        <Link
+          href="/dashboard"
+          className="mb-5 inline-flex items-center gap-2 text-sm text-gray-300 transition-colors hover:text-white"
+        >
+          <ArrowLeftIcon className="h-4 w-4" />
+          Back to Dashboard
+        </Link>
+
+        <h1 className="mb-2 text-2xl font-bold text-white">Create Milestone Agreement</h1>
+        <p className="mb-8 text-sm text-gray-400">
           Define the overall job, then break payout into real deliverable milestones.
         </p>
 
@@ -171,7 +178,7 @@ export default function NewAgreementPage() {
           <div>
             <label className={labelClass}>Agreement Description</label>
             <textarea
-              className={`${inputClass} h-24 resize-none`}
+              className={`${inputClass} h-28 resize-none`}
               placeholder="Describe the full engagement, expected outcome, and acceptance criteria."
               value={form.description}
               onChange={(e) => updateField('description', e.target.value)}
@@ -191,7 +198,7 @@ export default function NewAgreementPage() {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className={labelClass}>Deadline (days from now)</label>
               <input
@@ -215,7 +222,7 @@ export default function NewAgreementPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <div>
               <label className={labelClass}>Proof Type</label>
               <select className={selectClass} value={form.proofType} onChange={(e) => updateField('proofType', e.target.value)}>
@@ -249,36 +256,36 @@ export default function NewAgreementPage() {
             </select>
           </div>
 
-          <div className="bg-agent-card border border-agent-border rounded-xl p-5 space-y-4">
-            <div className="flex items-center justify-between">
+          <div className="space-y-4 rounded-xl border border-agent-border bg-agent-card p-4 sm:p-5">
+            <div className="flex flex-col items-stretch gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="text-white font-semibold">Milestones</h2>
-                <p className="text-xs text-gray-400 mt-1">
+                <p className="mt-1 text-xs text-gray-400">
                   The worker will deliver and get paid one milestone at a time.
                 </p>
               </div>
               <button
                 type="button"
                 onClick={addMilestone}
-                className="bg-agent-accent hover:bg-blue-600 text-white px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5"
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-agent-accent px-3 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-600 sm:w-auto sm:px-4 sm:py-2"
               >
-                <PlusIcon className="w-4 h-4" />
+                <PlusIcon className="h-4 w-4" />
                 Add Milestone
               </button>
             </div>
 
             <div className="space-y-4">
               {milestones.map((milestone, index) => (
-                <div key={index} className="bg-agent-bg border border-agent-border rounded-xl p-4">
-                  <div className="flex items-center justify-between mb-4">
+                <div key={index} className="rounded-xl border border-agent-border bg-agent-bg p-4">
+                  <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <h3 className="text-sm font-semibold text-white">Milestone {index + 1}</h3>
                     {milestones.length > 1 && (
                       <button
                         type="button"
                         onClick={() => removeMilestone(index)}
-                        className="text-xs text-red-300 hover:text-red-200 flex items-center gap-1"
+                        className="inline-flex items-center gap-1 self-start text-xs text-red-300 hover:text-red-200"
                       >
-                        <XCircleIcon className="w-4 h-4" />
+                        <XCircleIcon className="h-4 w-4" />
                         Remove
                       </button>
                     )}
@@ -298,7 +305,7 @@ export default function NewAgreementPage() {
                     <div>
                       <label className={labelClass}>Milestone Description</label>
                       <textarea
-                        className={`${inputClass} h-20 resize-none`}
+                        className={`${inputClass} h-24 resize-none`}
                         value={milestone.description}
                         onChange={(e) => updateMilestone(index, 'description', e.target.value)}
                         required
@@ -322,14 +329,14 @@ export default function NewAgreementPage() {
               ))}
             </div>
 
-            <div className="flex items-center justify-between text-sm border-t border-agent-border pt-4">
+            <div className="flex items-center justify-between border-t border-agent-border pt-4 text-sm">
               <span className="text-gray-400">Total escrow amount</span>
               <span className="font-mono text-white">{totalCkb || 0} CKB</span>
             </div>
           </div>
 
           {error && (
-            <div className="bg-red-900/30 border border-red-800 rounded-lg px-4 py-3 text-sm text-red-300">
+            <div className="rounded-lg border border-red-800 bg-red-900/30 px-4 py-3 text-sm text-red-300">
               {error}
             </div>
           )}
@@ -337,16 +344,16 @@ export default function NewAgreementPage() {
           <button
             type="submit"
             disabled={submitting || !walletAddress || !authToken}
-            className="w-full bg-agent-accent hover:bg-blue-600 disabled:opacity-50 text-white py-3 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-agent-accent py-3 font-medium text-white transition-colors hover:bg-blue-600 disabled:opacity-50"
           >
             {submitting ? (
               <>
-                <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
                 Creating...
               </>
             ) : (
               <>
-                <DocumentTextIcon className="w-4 h-4" />
+                <DocumentTextIcon className="h-4 w-4" />
                 Create Milestone Agreement
               </>
             )}
