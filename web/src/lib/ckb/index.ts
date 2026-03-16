@@ -49,30 +49,84 @@ export function getCkbClient() {
     : new ccc.ClientPublicTestnet(url ? { url } : undefined);
 }
 
+async function withPinnedSignerAddress<T>(
+  signer: ccc.Signer,
+  fromAddress: string,
+  run: (signer: ccc.Signer) => Promise<T>,
+): Promise<T> {
+  const pinnedAddress = await ccc.Address.fromString(fromAddress, signer.client);
+  const normalizedAddress = pinnedAddress.toString();
+  const signerWithOverrides = signer as ccc.Signer & Record<string, unknown>;
+  const overrides: Record<string, unknown> = {};
+
+  const setOverride = (key: string, value: unknown) => {
+    overrides[key] = signerWithOverrides[key];
+    signerWithOverrides[key] = value;
+  };
+
+  setOverride('getInternalAddress', async () => normalizedAddress);
+  setOverride('getRecommendedAddress', async () => normalizedAddress);
+  setOverride('getAddressObj', async () => pinnedAddress);
+  setOverride('getAddressObjs', async () => [pinnedAddress]);
+  setOverride('getRecommendedAddressObj', async () => pinnedAddress);
+  setOverride('prepareTransaction', async (txLike: ccc.TransactionLike) => {
+    const tx = ccc.Transaction.from(txLike);
+    await tx.addCellDepsOfKnownScripts(
+      signer.client,
+      ccc.KnownScript.Secp256k1Blake160,
+    );
+    await tx.prepareSighashAllWitness(pinnedAddress.script, 65, signer.client);
+    return tx;
+  });
+
+  try {
+    return await run(signer);
+  } finally {
+    for (const key of Object.keys(overrides)) {
+      const value = overrides[key];
+      if (value === undefined) {
+        delete signerWithOverrides[key];
+      } else {
+        signerWithOverrides[key] = value;
+      }
+    }
+  }
+}
+
 export async function sendCapacityTransfer(params: {
   signer: ccc.Signer;
+  fromAddress: string;
   toAddress: string;
   amount: string;
 }): Promise<string> {
-  const tx = ccc.Transaction.from({});
-  const recipient = await ccc.Address.fromString(params.toAddress, params.signer.client);
+  return withPinnedSignerAddress(
+    params.signer,
+    params.fromAddress,
+    async (signer) => {
+      const tx = ccc.Transaction.from({});
+      const recipient = await ccc.Address.fromString(
+        params.toAddress,
+        signer.client,
+      );
 
-  tx.addOutput({
-    lock: recipient.script,
-    capacity: BigInt(params.amount),
-  });
+      tx.addOutput({
+        lock: recipient.script,
+        capacity: BigInt(params.amount),
+      });
 
-  await withTimeout(
-    tx.completeFeeBy(params.signer),
-    60_000,
-    'Your wallet is not responding. Please disconnect your wallet, refresh the page, reconnect, and try funding again.',
+      await withTimeout(
+        tx.completeFeeBy(signer),
+        60_000,
+        'Your wallet is not responding. Please disconnect your wallet, refresh the page, reconnect, and try funding again.',
+      );
+
+      const txHash = await withTimeout(
+        signer.sendTransaction(tx),
+        120_000,
+        'Timed out waiting for wallet approval. Please check your wallet extension for a pending approval popup and try again.',
+      );
+
+      return String(txHash);
+    },
   );
-
-  const txHash = await withTimeout(
-    params.signer.sendTransaction(tx),
-    120_000,
-    'Timed out waiting for wallet approval. Please check your wallet extension for a pending approval popup and try again.',
-  );
-
-  return String(txHash);
 }

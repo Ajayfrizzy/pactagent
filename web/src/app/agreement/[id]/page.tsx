@@ -138,6 +138,7 @@ export default function AgreementDetailPage() {
 
       const txHash = await sendCapacityTransfer({
         signer,
+        fromAddress: walletAddress,
         toAddress: publicConfig.treasuryAddress,
         amount: agreement.amount,
       });
@@ -145,7 +146,7 @@ export default function AgreementDetailPage() {
       await withTimeout(
         api.fundAgreement(id, String(txHash)),
         30_000,
-        'Timed out confirming the funding with the server. The transaction may have been sent — please refresh the page.',
+        'Timed out confirming the funding with the server. The transaction may have been sent - please refresh the page.',
       );
 
       // Best-effort refresh; the WebSocket update will also trigger a re-fetch
@@ -680,4 +681,3 @@ export default function AgreementDetailPage() {
     </div>
   );
 }
-
