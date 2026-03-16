@@ -9,7 +9,7 @@ import { AgentLogPanel } from '@/components/AgentLogPanel';
 import { StatusBadge, NetworkBadge } from '@/components/StatusBadge';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useStore } from '@/lib/store';
-import { sendCapacityTransfer, shannonsToCKB, withTimeout } from '@/lib/ckb';
+import { sendCapacityTransfer, shannonsToCKB, withTimeout, MIN_CELL_CAPACITY } from '@/lib/ckb';
 import * as api from '@/lib/api';
 import {
   AgentIcon,
@@ -64,6 +64,7 @@ export default function AgreementDetailPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [publicConfig, setPublicConfig] = useState<any>(null);
+  const [fundingStatus, setFundingStatus] = useState<string | null>(null);
   const [proofContent, setProofContent] = useState('');
   const [disputeReason, setDisputeReason] = useState('');
   const [evidenceNotes, setEvidenceNotes] = useState('');
@@ -121,17 +122,22 @@ export default function AgreementDetailPage() {
 
     setActionLoading('fund');
     setError(null);
+    setFundingStatus(null);
 
     try {
-      // Use the wallet address already stored from auth — avoids calling signer
-      // methods that rely on the wallet extension background messaging which
-      // can become unresponsive between navigations.
       if (!walletAddress) {
         throw new Error('Wallet session not found. Please reconnect your wallet.');
       }
 
+      // Validate minimum CKB amount before doing anything else
+      if (BigInt(agreement.amount) < MIN_CELL_CAPACITY) {
+        throw new Error(
+          `Agreement amount is too low. CKB requires at least 61 CKB per transaction output. Current amount: ${shannonsToCKB(agreement.amount)} CKB.`,
+        );
+      }
+
+      setFundingStatus('Verifying wallet address...');
       if (walletAddress !== agreement.clientAddress) {
-        // Quick check using locally-known addresses before touching the signer
         try {
           const match = await withTimeout(
             addressesMatchOnSignerNetwork(signer, walletAddress, agreement.clientAddress),
@@ -142,8 +148,6 @@ export default function AgreementDetailPage() {
             throw new Error('The connected wallet does not match the client wallet for this agreement.');
           }
         } catch (err) {
-          // If the deep check timed out, the plain-string comparison already
-          // failed above so the addresses definitely differ on the surface.
           if (err instanceof Error && err.message !== 'skip') throw err;
         }
       }
@@ -153,21 +157,24 @@ export default function AgreementDetailPage() {
         fromAddress: walletAddress,
         toAddress: publicConfig.treasuryAddress,
         amount: agreement.amount,
+        onProgress: (step) => setFundingStatus(step),
       });
 
+      setFundingStatus('Confirming with server...');
       await withTimeout(
         api.fundAgreement(id, String(txHash)),
         30_000,
-        'Timed out confirming the funding with the server. The transaction may have been sent - please refresh the page.',
+        'Timed out confirming the funding with the server. The transaction may have been sent — please refresh the page.',
       );
 
-      // Best-effort refresh; the WebSocket update will also trigger a re-fetch
+      setFundingStatus(null);
       await refreshAgreement().catch(() => {});
     } catch (err) {
       console.error('[Fund] Error:', err);
-      setError(err instanceof Error ? err.message : 'Funding failed');
+      setError(err instanceof Error ? err.message : 'Funding failed — please try again.');
     } finally {
       setActionLoading(null);
+      setFundingStatus(null);
     }
   }
 
@@ -529,6 +536,12 @@ export default function AgreementDetailPage() {
                       </>
                     )}
                   </button>
+                )}
+                {fundingStatus && (
+                  <div className="mt-3 rounded-lg border border-blue-800 bg-blue-900/20 px-3 py-2 text-xs text-blue-200 flex items-center gap-2">
+                    <div className="animate-spin w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full shrink-0" />
+                    {fundingStatus}
+                  </div>
                 )}
               </div>
             )}
