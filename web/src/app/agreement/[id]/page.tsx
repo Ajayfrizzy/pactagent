@@ -28,6 +28,10 @@ import {
 
 const currentMilestoneStatuses = ['ACTIVE', 'PROOF_SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'DISPUTED'];
 
+function canSignerFundAgreement(signer: ccc.Signer | undefined) {
+  return signer?.type === ccc.SignerType.CKB || signer?.type === ccc.SignerType.EVM;
+}
+
 async function addressesMatchOnSignerNetwork(
   signer: ccc.Signer,
   leftAddress: string,
@@ -49,6 +53,7 @@ export default function AgreementDetailPage() {
   useWebSocket();
   const params = useParams();
   const id = params.id as string;
+  const { open } = ccc.useCcc();
   const signer = ccc.useSigner();
   const walletAddress = useStore((s) => s.walletAddress);
   const authToken = useStore((s) => s.authToken);
@@ -98,7 +103,14 @@ export default function AgreementDetailPage() {
 
   async function handleFund() {
     if (!signer) {
-      setError('Connect a CCC wallet before funding this agreement');
+      setError('Reconnect a CKB wallet before funding this agreement');
+      return;
+    }
+
+    if (!canSignerFundAgreement(signer)) {
+      setError(
+        'This wallet can authenticate, but it cannot fund CKB agreements. Use JoyID or an EVM wallet that supports CKB OmniLock funding.',
+      );
       return;
     }
 
@@ -156,6 +168,16 @@ export default function AgreementDetailPage() {
       setError(err instanceof Error ? err.message : 'Funding failed');
     } finally {
       setActionLoading(null);
+    }
+  }
+
+  async function handleReconnectSigner() {
+    setError(null);
+
+    try {
+      await open();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reconnect wallet');
     }
   }
 
@@ -281,6 +303,14 @@ export default function AgreementDetailPage() {
   const paidMilestones = milestones.filter((milestone: any) => milestone.status === 'PAID').length;
   const isClient = walletAddress === agreement.clientAddress;
   const isWorker = walletAddress === agreement.workerAddress;
+  const fundingNeedsReconnect = agreement.status === 'DRAFT' && isClient && !signer;
+  const fundingUnsupportedSigner =
+    agreement.status === 'DRAFT' && isClient && signer != null && !canSignerFundAgreement(signer);
+  const canFundAgreement =
+    agreement.status === 'DRAFT' &&
+    isClient &&
+    canSignerFundAgreement(signer) &&
+    Boolean(publicConfig?.treasuryAddress);
 
   return (
     <div className="min-h-screen">
@@ -460,23 +490,46 @@ export default function AgreementDetailPage() {
                     {publicConfig?.treasuryAddress || 'Treasury not configured'}
                   </div>
                 </div>
-                <button
-                  onClick={handleFund}
-                  disabled={actionLoading === 'fund' || !signer || !publicConfig?.treasuryAddress}
-                  className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-6 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
-                >
-                  {actionLoading === 'fund' ? (
-                    <>
-                      <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                      Funding...
-                    </>
-                  ) : (
-                    <>
-                      <LinkIcon className="w-4 h-4" />
-                      Fund on CKB
-                    </>
-                  )}
-                </button>
+                {fundingNeedsReconnect && (
+                  <div className="mb-4 rounded-lg border border-yellow-800 bg-yellow-900/20 px-3 py-2 text-xs text-yellow-200">
+                    Your wallet session is active, but the live signer is no longer attached. Reconnect JoyID or your
+                    CKB wallet before funding.
+                  </div>
+                )}
+                {fundingUnsupportedSigner && (
+                  <div className="mb-4 rounded-lg border border-yellow-800 bg-yellow-900/20 px-3 py-2 text-xs text-yellow-200">
+                    This agreement was created from a wallet that can authenticate but cannot sign CKB funding
+                    transactions. Use JoyID or an EVM wallet that supports CKB OmniLock funding as the client for
+                    agreements that need funding.
+                  </div>
+                )}
+                {fundingNeedsReconnect ? (
+                  <button
+                    onClick={handleReconnectSigner}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                  >
+                    <LinkIcon className="w-4 h-4" />
+                    Reconnect Wallet
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleFund}
+                    disabled={actionLoading === 'fund' || !canFundAgreement}
+                    className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-6 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                  >
+                    {actionLoading === 'fund' ? (
+                      <>
+                        <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                        Funding...
+                      </>
+                    ) : (
+                      <>
+                        <LinkIcon className="w-4 h-4" />
+                        {fundingUnsupportedSigner ? 'Funding Requires CKB Wallet' : 'Fund on CKB'}
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
             )}
 

@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { ccc } from '@ckb-ccc/connector-react';
 import { NavbarMenu } from '@/components/NavbarMenu';
 import { useStore } from '@/lib/store';
 import { useWebSocket } from '@/hooks/useWebSocket';
@@ -28,9 +29,14 @@ const defaultMilestones: MilestoneDraft[] = [
   },
 ];
 
+function canSignerFundAgreement(signer: ccc.Signer | undefined) {
+  return signer?.type === ccc.SignerType.CKB || signer?.type === ccc.SignerType.EVM;
+}
+
 export default function NewAgreementPage() {
   useWebSocket();
   const router = useRouter();
+  const signer = ccc.useSigner();
   const walletAddress = useStore((s) => s.walletAddress);
   const authToken = useStore((s) => s.authToken);
   const [submitting, setSubmitting] = useState(false);
@@ -81,6 +87,18 @@ export default function NewAgreementPage() {
     e.preventDefault();
     if (!walletAddress || !authToken) {
       setError('Please connect and authenticate your wallet first');
+      return;
+    }
+
+    if (!signer) {
+      setError('Reconnect a CKB wallet before creating an agreement');
+      return;
+    }
+
+    if (!canSignerFundAgreement(signer)) {
+      setError(
+        'This wallet can authenticate, but only CKB-compatible funding wallets can create agreements. Use JoyID or an EVM wallet that supports CKB OmniLock funding.',
+      );
       return;
     }
 
@@ -341,9 +359,23 @@ export default function NewAgreementPage() {
             </div>
           )}
 
+          {walletAddress && authToken && !signer && (
+            <div className="rounded-lg border border-yellow-800 bg-yellow-900/20 px-4 py-3 text-sm text-yellow-200">
+              Your authenticated session is active, but the live wallet signer is missing. Reconnect your CKB wallet
+              before creating an agreement.
+            </div>
+          )}
+
+          {walletAddress && authToken && signer && !canSignerFundAgreement(signer) && (
+            <div className="rounded-lg border border-yellow-800 bg-yellow-900/20 px-4 py-3 text-sm text-yellow-200">
+              This wallet can log in, but it cannot fund CKB escrow agreements. Use JoyID or an EVM wallet that
+              supports CKB OmniLock funding to create agreements as the client.
+            </div>
+          )}
+
           <button
             type="submit"
-            disabled={submitting || !walletAddress || !authToken}
+            disabled={submitting || !walletAddress || !authToken || !canSignerFundAgreement(signer)}
             className="flex w-full items-center justify-center gap-2 rounded-lg bg-agent-accent py-3 font-medium text-white transition-colors hover:bg-blue-600 disabled:opacity-50"
           >
             {submitting ? (

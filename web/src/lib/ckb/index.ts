@@ -69,15 +69,6 @@ async function withPinnedSignerAddress<T>(
   setOverride('getAddressObj', async () => pinnedAddress);
   setOverride('getAddressObjs', async () => [pinnedAddress]);
   setOverride('getRecommendedAddressObj', async () => pinnedAddress);
-  setOverride('prepareTransaction', async (txLike: ccc.TransactionLike) => {
-    const tx = ccc.Transaction.from(txLike);
-    await tx.addCellDepsOfKnownScripts(
-      signer.client,
-      ccc.KnownScript.Secp256k1Blake160,
-    );
-    await tx.prepareSighashAllWitness(pinnedAddress.script, 65, signer.client);
-    return tx;
-  });
 
   try {
     return await run(signer);

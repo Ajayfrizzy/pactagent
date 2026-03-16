@@ -7,7 +7,7 @@ import { useStore } from '@/lib/store';
 import { LinkIcon } from './Icons';
 
 export function WalletConnect() {
-  const { open, disconnect } = ccc.useCcc();
+  const { open, disconnect, wallet, signerInfo } = ccc.useCcc();
   const signer = ccc.useSigner();
   const {
     walletAddress,
@@ -33,6 +33,20 @@ export function WalletConnect() {
 
   const displayAddress = walletAddress || connectedAddress;
   const hasAuthenticatedSession = Boolean(authToken && walletAddress);
+  const hasLiveSigner = Boolean(signer);
+  const signerTypeLabel = signerInfo?.signer.type || null;
+  const connectionLabel = hasAuthenticatedSession
+    ? hasLiveSigner
+      ? 'Signer connected'
+      : 'Session active'
+    : hasLiveSigner
+      ? 'Wallet connected'
+      : 'Disconnected';
+  const statusDotClass = hasAuthenticatedSession
+    ? hasLiveSigner
+      ? 'bg-green-400'
+      : 'bg-yellow-400'
+    : 'bg-sky-400';
 
   useEffect(() => {
     if (hasAuthenticatedSession && authStatus !== 'authenticated') {
@@ -181,15 +195,22 @@ export function WalletConnect() {
       <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-3">
         <div className="flex min-w-0 items-center gap-2 rounded-lg border border-agent-border bg-agent-card px-3 py-2 sm:py-1.5">
           <div
-            className={`h-2 w-2 shrink-0 rounded-full ${hasAuthenticatedSession ? 'bg-green-400' : 'bg-sky-400'}`}
+            className={`h-2 w-2 shrink-0 rounded-full ${statusDotClass}`}
           />
           <div className="flex min-w-0 flex-col">
             <span className="truncate text-xs font-mono text-gray-300">
               {displayAddress.slice(0, 12)}...{displayAddress.slice(-8)}
             </span>
             <span className="text-[10px] text-gray-500">
-              {hasAuthenticatedSession ? 'Connected' : 'Wallet connected'}
+              {connectionLabel}
             </span>
+            {(wallet?.name || signerTypeLabel || (hasAuthenticatedSession && !hasLiveSigner)) && (
+              <span className="text-[10px] text-gray-500">
+                {hasAuthenticatedSession && !hasLiveSigner
+                  ? 'Reconnect wallet to sign transactions'
+                  : [wallet?.name, signerTypeLabel].filter(Boolean).join(' - ')}
+              </span>
+            )}
           </div>
         </div>
         <button
