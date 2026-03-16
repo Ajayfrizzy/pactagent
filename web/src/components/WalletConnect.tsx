@@ -6,6 +6,23 @@ import { fetchAuthChallenge, verifyWalletAuth } from '@/lib/api';
 import { useStore } from '@/lib/store';
 import { LinkIcon } from './Icons';
 
+type PersistedCccConnection = {
+  signerName?: string;
+  walletName?: string;
+};
+
+type CccConnectorElement = HTMLElement & {
+  walletName?: string;
+  signerName?: string;
+  wallet?: ccc.Wallet;
+  signer?: ccc.SignerInfo;
+  signersControllerInner?: {
+    wallets?: Array<ccc.Wallet & { signers: ccc.SignerInfo[] }>;
+  };
+  refreshSigner?: () => void | Promise<void>;
+  requestUpdate?: () => void;
+};
+
 export function WalletConnect() {
   const { open, disconnect, wallet, signerInfo } = ccc.useCcc();
   const signer = ccc.useSigner();
@@ -30,6 +47,7 @@ export function WalletConnect() {
   const [connectedAddress, setConnectedAddress] = useState<string | null>(walletAddress);
   const authenticatedAddressRef = useRef<string | null>(null);
   const manualConnectRequestedRef = useRef(false);
+  const autoReconnectAttemptedRef = useRef<string | null>(null);
 
   const displayAddress = walletAddress || connectedAddress;
   const hasAuthenticatedSession = Boolean(authToken && walletAddress);
@@ -53,6 +71,87 @@ export function WalletConnect() {
       setAuthStatus('authenticated');
     }
   }, [authStatus, hasAuthenticatedSession, setAuthStatus]);
+
+  useEffect(() => {
+    if (!hasAuthenticatedSession || signer) {
+      autoReconnectAttemptedRef.current = null;
+      return;
+    }
+
+    if (autoReconnectAttemptedRef.current === walletAddress) {
+      return;
+    }
+
+    let cancelled = false;
+    autoReconnectAttemptedRef.current = walletAddress;
+
+    async function attemptAutoReconnect() {
+      const raw = window.localStorage.getItem('ccc-connection-info');
+      if (!raw) {
+        return;
+      }
+
+      let persisted: PersistedCccConnection | null = null;
+      try {
+        persisted = JSON.parse(raw) as PersistedCccConnection;
+      } catch {
+        return;
+      }
+
+      if (!persisted?.walletName || !persisted?.signerName) {
+        return;
+      }
+
+      const findConnector = () =>
+        document.querySelector('ccc-connector') as CccConnectorElement | null;
+
+      let connector = findConnector();
+      for (let attempt = 0; attempt < 10 && !cancelled; attempt += 1) {
+        const wallets = connector?.signersControllerInner?.wallets;
+        if (wallets && wallets.length > 0) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        connector = findConnector();
+      }
+
+      if (cancelled || !connector?.signersControllerInner?.wallets?.length) {
+        return;
+      }
+
+      const selectedWallet = connector.signersControllerInner.wallets.find(
+        (item) => item.name === persisted.walletName,
+      );
+      const selectedSigner = selectedWallet?.signers.find(
+        (item) => item.name === persisted.signerName,
+      );
+
+      if (!selectedWallet || !selectedSigner) {
+        return;
+      }
+
+      try {
+        await selectedSigner.signer.connect();
+
+        if (cancelled || !(await selectedSigner.signer.isConnected())) {
+          return;
+        }
+
+        connector.walletName = persisted.walletName;
+        connector.signerName = persisted.signerName;
+        await connector.refreshSigner?.();
+        connector.requestUpdate?.();
+      } catch {
+        // Silent fallback: the UI will keep showing the reconnect hint.
+      }
+    }
+
+    void attemptAutoReconnect();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hasAuthenticatedSession, signer, walletAddress]);
 
   useEffect(() => {
     const activeSigner = signer;
