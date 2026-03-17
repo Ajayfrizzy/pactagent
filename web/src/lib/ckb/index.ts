@@ -119,6 +119,29 @@ export async function sendCapacityTransfer(params: {
   onProgress('Checking wallet connection...');
   await checkSignerAlive(params.signer);
 
+  // Check on-chain balance before attempting the transaction
+  onProgress('Checking wallet balance...');
+  let balance: bigint;
+  try {
+    balance = await withTimeout(
+      params.signer.getBalance(),
+      10_000,
+      'Could not fetch your wallet balance. The CKB node may be unreachable — please try again later.',
+    );
+  } catch (err) {
+    throw err instanceof Error ? err : new Error('Failed to check wallet balance.');
+  }
+
+  // Need amount + at least some extra for fees (roughly 0.01 CKB / 1_000_000 shannons is safe)
+  const FEE_BUFFER = BigInt(1_000_000);
+  if (balance < amountBig + FEE_BUFFER) {
+    const balanceCKB = `${balance / BigInt(10 ** 8)}.${(balance % BigInt(10 ** 8)).toString().padStart(8, '0').replace(/0+$/, '') || '0'}`;
+    const requiredCKB = `${amountBig / BigInt(10 ** 8)}.${(amountBig % BigInt(10 ** 8)).toString().padStart(8, '0').replace(/0+$/, '') || '0'}`;
+    throw new Error(
+      `Insufficient CKB balance. Your wallet has ${balanceCKB} CKB but this agreement requires ${requiredCKB} CKB plus fees. Please fund your wallet on CKB testnet first.`,
+    );
+  }
+
   onProgress('Preparing transaction...');
   return withPinnedSignerAddress(
     params.signer,
@@ -137,11 +160,17 @@ export async function sendCapacityTransfer(params: {
       });
 
       onProgress('Calculating fees — waiting for wallet...');
-      await withTimeout(
-        tx.completeFeeBy(signer),
-        15_000,
-        'Your wallet is not responding. Please disconnect your wallet, refresh the page, reconnect, and try funding again.',
-      );
+      try {
+        await withTimeout(
+          tx.completeFeeBy(signer),
+          15_000,
+          'Timed out while calculating transaction fees. Please disconnect your wallet, refresh the page, reconnect, and try funding again.',
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('Timed out')) throw err;
+        throw new Error(`Failed to build the transaction: ${msg}. Make sure your wallet has enough CKB and try again.`);
+      }
 
       onProgress('Waiting for wallet approval — check your wallet popup...');
       const txHash = await withTimeout(
