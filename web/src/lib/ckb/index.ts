@@ -89,14 +89,28 @@ async function withPinnedSignerAddress<T>(
 
 /**
  * Quick probe to verify the wallet extension is still responsive.
- * Rejects with a clear message if the signer is dormant.
+ * Tries twice (the first attempt may wake a dormant service worker).
+ * Rejects with a clear message if the signer is unresponsive.
  */
 export async function checkSignerAlive(signer: ccc.Signer): Promise<void> {
-  await withTimeout(
-    signer.getRecommendedAddress(),
-    5_000,
-    'Your wallet extension is not responding. Please disconnect your wallet, refresh the page, and reconnect before funding.',
-  );
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await withTimeout(
+        signer.getRecommendedAddress(),
+        8_000,
+        'TIMEOUT',
+      );
+      return; // success
+    } catch (err) {
+      if (attempt === 0 && err instanceof Error && err.message === 'TIMEOUT') {
+        // First attempt timed out — the wallet background worker may be waking up. Retry once.
+        continue;
+      }
+      throw new Error(
+        'Your wallet extension is not responding. Please click "Disconnect", then reconnect your wallet and try again.',
+      );
+    }
+  }
 }
 
 export async function sendCapacityTransfer(params: {

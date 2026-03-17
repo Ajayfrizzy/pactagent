@@ -53,7 +53,7 @@ export default function AgreementDetailPage() {
   useWebSocket();
   const params = useParams();
   const id = params.id as string;
-  const { open } = ccc.useCcc();
+  const { open, disconnect } = ccc.useCcc();
   const signer = ccc.useSigner();
   const walletAddress = useStore((s) => s.walletAddress);
   const authToken = useStore((s) => s.authToken);
@@ -182,9 +182,12 @@ export default function AgreementDetailPage() {
     setError(null);
 
     try {
+      // Disconnect first to clear any stale/corrupt connection state,
+      // then open the wallet picker for a clean reconnect.
+      await disconnect();
       await open();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to reconnect wallet');
+      setError(err instanceof Error ? err.message : 'Failed to reconnect wallet. Try refreshing the page.');
     }
   }
 
@@ -499,8 +502,9 @@ export default function AgreementDetailPage() {
                 </div>
                 {fundingNeedsReconnect && (
                   <div className="mb-4 rounded-lg border border-yellow-800 bg-yellow-900/20 px-3 py-2 text-xs text-yellow-200">
-                    Your wallet session is active, but the live signer is no longer attached. Reconnect JoyID or your
-                    CKB wallet before funding.
+                    Your wallet session is active, but the live signer is no longer attached. Click
+                    &quot;Reconnect Wallet&quot; below to disconnect and re-establish the connection with
+                    your JoyID or CKB wallet.
                   </div>
                 )}
                 {fundingUnsupportedSigner && (
