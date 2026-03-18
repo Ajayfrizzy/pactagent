@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { ccc } from '@ckb-ccc/connector-react';
 import { WalletConnect } from '@/components/WalletConnect';
 import { AgentLogPanel } from '@/components/AgentLogPanel';
 import { NavbarMenu } from '@/components/NavbarMenu';
@@ -11,9 +12,11 @@ import { AgentIcon, EyeIcon, CpuChipIcon, BoltIcon } from '@/components/Icons';
 
 export default function HomePage() {
   useWebSocket();
+  const signer = ccc.useSigner();
   const walletAddress = useStore((s) => s.walletAddress);
   const authToken = useStore((s) => s.authToken);
   const [agreementIds, setAgreementIds] = useState<string[]>([]);
+  const needsSignIn = Boolean(signer && !authToken);
 
   useEffect(() => {
     async function loadAgreementIds() {
@@ -84,7 +87,11 @@ export default function HomePage() {
               </>
             ) : (
               <div className="text-center">
-                <p className="mb-4 text-sm text-gray-500">Connect your wallet to get started</p>
+                <p className="mb-4 text-sm text-gray-500">
+                  {needsSignIn
+                    ? 'Finish wallet sign-in to continue, or disconnect and try again.'
+                    : 'Connect your wallet to get started'}
+                </p>
                 <div className="flex justify-center">
                   <WalletConnect />
                 </div>

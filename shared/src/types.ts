@@ -93,6 +93,7 @@ export interface Dispute {
   openedBy: string;
   reason: string;
   evidenceNotes: string | null;
+  evidenceEntries?: DisputeEvidence[];
   aiSummary: string | null;
   aiRecommendation: DisputeRecommendation | null;
   aiConfidence: number | null;
@@ -101,11 +102,25 @@ export interface Dispute {
   createdAt: string;
 }
 
+export interface DisputeEvidence {
+  id: string;
+  disputeId: string;
+  submittedBy: string;
+  content: string;
+  createdAt: string;
+}
+
 export interface OpenDisputeDTO {
   milestoneId: string;
   openedBy: string;
   reason: string;
   evidenceNotes?: string;
+}
+
+export interface AddDisputeEvidenceDTO {
+  disputeId: string;
+  submittedBy: string;
+  content: string;
 }
 
 export interface AgentLog {

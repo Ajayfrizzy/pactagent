@@ -68,6 +68,7 @@ export default function AgreementDetailPage() {
   const [proofContent, setProofContent] = useState('');
   const [disputeReason, setDisputeReason] = useState('');
   const [evidenceNotes, setEvidenceNotes] = useState('');
+  const [additionalEvidence, setAdditionalEvidence] = useState('');
   const [recommendation, setRecommendation] = useState<any>(null);
 
   useEffect(() => {
@@ -255,6 +256,35 @@ export default function AgreementDetailPage() {
     }
   }
 
+  async function handleSubmitDisputeEvidence() {
+    if (!walletAddress || !agreement) {
+      return;
+    }
+
+    const openDispute = agreement.disputes?.find((item: any) => !item.resolvedAt);
+    if (!openDispute || !additionalEvidence.trim()) {
+      return;
+    }
+
+    setActionLoading('dispute-evidence');
+    setError(null);
+
+    try {
+      await api.addDisputeEvidence(id, {
+        disputeId: openDispute.id,
+        submittedBy: walletAddress,
+        content: additionalEvidence,
+      });
+      setAdditionalEvidence('');
+      setRecommendation(null);
+      await refreshAgreement();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add dispute evidence');
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
   async function handleReviewAction(action: string) {
     if (!walletAddress) {
       return;
@@ -313,6 +343,25 @@ export default function AgreementDetailPage() {
   const paidMilestones = milestones.filter((milestone: any) => milestone.status === 'PAID').length;
   const isClient = walletAddress === agreement.clientAddress;
   const isWorker = walletAddress === agreement.workerAddress;
+  const currentOpenDispute =
+    agreement.disputes?.find((item: any) => !item.resolvedAt) || null;
+  const displayedRecommendation = recommendation || (
+    currentOpenDispute?.aiRecommendation
+      ? {
+          recommendation: currentOpenDispute.aiRecommendation,
+          confidence: currentOpenDispute.aiConfidence,
+          summary: currentOpenDispute.aiSummary,
+          rationale: currentOpenDispute.aiRationale,
+        }
+      : null
+  );
+  const awaitingHybridReview =
+    agreement.reviewerMode === 'HYBRID' && currentMilestone?.status === 'PROOF_SUBMITTED';
+  const canClientReview =
+    isClient &&
+    agreement.reviewerMode !== 'AUTO' &&
+    currentMilestone != null &&
+    ['UNDER_REVIEW', 'DISPUTED'].includes(currentMilestone.status);
   const fundingNeedsReconnect = agreement.status === 'DRAFT' && isClient && !signer;
   const fundingUnsupportedSigner =
     agreement.status === 'DRAFT' && isClient && signer != null && !canSignerFundAgreement(signer);
@@ -585,10 +634,30 @@ export default function AgreementDetailPage() {
               </div>
             )}
 
-            {(agreement.status === 'UNDER_REVIEW' || agreement.status === 'DISPUTED') &&
-              agreement.reviewerMode !== 'AUTO' &&
-              isClient &&
-              currentMilestone && (
+            {awaitingHybridReview && currentMilestone && (
+              <div className="bg-agent-card border border-yellow-800/40 rounded-xl p-6">
+                <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
+                  <ClockIcon className="w-5 h-5 text-yellow-400" />
+                  Awaiting Agent Review
+                </h3>
+                <p className="text-sm text-gray-400 mb-4">
+                  {isClient
+                    ? `The worker has submitted proof for ${currentMilestone.title}. In HYBRID mode, the agent checks the proof first and then your approve or refund buttons will appear here.`
+                    : isWorker
+                      ? `Your proof for ${currentMilestone.title} has been submitted. The agent is reviewing it before the client can approve payout or refund.`
+                      : `Proof has been submitted for ${currentMilestone.title}. The agent needs to review it before the client can take action.`}
+                </p>
+                <button
+                  onClick={() => void refreshAgreement()}
+                  disabled={actionLoading === 'refresh'}
+                  className="rounded-lg border border-yellow-600/40 px-4 py-2 text-sm font-medium text-yellow-300 transition-colors hover:bg-yellow-900/20"
+                >
+                  Refresh Status
+                </button>
+              </div>
+            )}
+
+            {canClientReview && currentMilestone && (
                 <div className="bg-agent-card border border-emerald-800/50 rounded-xl p-6">
                   <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
                     <ScaleIcon className="w-5 h-5 text-emerald-400" />
@@ -647,33 +716,96 @@ export default function AgreementDetailPage() {
               </div>
             )}
 
-            {agreement.status === 'DISPUTED' && currentMilestone && (
+            {agreement.status === 'DISPUTED' && currentMilestone && currentOpenDispute && (
               <div className="bg-agent-card border border-purple-800/50 rounded-xl p-6">
                 <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
                   <AgentIcon className="w-5 h-5 text-purple-400" />
                   AI Recommendation for {currentMilestone.title}
                 </h3>
 
-                {recommendation ? (
+                <div className="mb-5 rounded-lg border border-agent-border bg-agent-bg/60 p-4">
+                  <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                    <span className="rounded-full bg-red-950/30 px-2 py-1 text-red-200">
+                      Dispute opened by {currentOpenDispute.openedBy === agreement.clientAddress ? 'client' : currentOpenDispute.openedBy === agreement.workerAddress ? 'worker' : 'participant'}
+                    </span>
+                    <span>{new Date(currentOpenDispute.createdAt).toLocaleString()}</span>
+                  </div>
+                  <p className="text-sm text-white">{currentOpenDispute.reason}</p>
+                  {currentOpenDispute.evidenceNotes ? (
+                    <p className="mt-2 text-sm text-gray-400">
+                      Initial context: {currentOpenDispute.evidenceNotes}
+                    </p>
+                  ) : null}
+                </div>
+
+                <div className="mb-5 rounded-lg border border-agent-border bg-agent-bg/60 p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-sm font-medium text-white">Dispute Evidence Timeline</h4>
+                      <p className="text-xs text-gray-500">Both sides can add more context before asking the AI again.</p>
+                    </div>
+                    <span className="text-xs text-gray-500">
+                      {currentOpenDispute.evidenceEntries?.length || 0} follow-up notes
+                    </span>
+                  </div>
+
+                  {currentOpenDispute.evidenceEntries?.length ? (
+                    <div className="space-y-3 mb-4">
+                      {currentOpenDispute.evidenceEntries.map((entry: any) => (
+                        <div key={entry.id} className="rounded-lg border border-white/5 bg-slate-950/30 px-3 py-2">
+                          <div className="mb-1 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wide text-gray-500">
+                            <span>
+                              {entry.submittedBy === agreement.clientAddress
+                                ? 'Client'
+                                : entry.submittedBy === agreement.workerAddress
+                                  ? 'Worker'
+                                  : entry.submittedBy}
+                            </span>
+                            <span>{new Date(entry.createdAt).toLocaleString()}</span>
+                          </div>
+                          <p className="text-sm text-gray-300 whitespace-pre-wrap">{entry.content}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mb-4 text-sm text-gray-500">No follow-up evidence has been added yet.</p>
+                  )}
+
+                  <textarea
+                    className="w-full bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 mb-3 h-20 resize-none"
+                    placeholder="Add more context, clarification, or evidence for the dispute..."
+                    value={additionalEvidence}
+                    onChange={(e) => setAdditionalEvidence(e.target.value)}
+                  />
+                  <button
+                    onClick={handleSubmitDisputeEvidence}
+                    disabled={actionLoading === 'dispute-evidence' || !additionalEvidence.trim()}
+                    className="rounded-lg border border-purple-600/40 px-4 py-2 text-sm font-medium text-purple-300 transition-colors hover:bg-purple-900/20 disabled:opacity-50"
+                  >
+                    {actionLoading === 'dispute-evidence' ? 'Saving context...' : 'Add More Context'}
+                  </button>
+                </div>
+
+                {displayedRecommendation ? (
                   <div className="space-y-3">
                     <div className="flex items-center gap-3">
                       <span
                         className={`px-3 py-1 rounded-full text-xs font-bold ${
-                          recommendation.recommendation === 'APPROVE_PAYOUT'
+                          displayedRecommendation.recommendation === 'APPROVE_PAYOUT'
                             ? 'bg-green-900/50 text-green-300'
-                            : recommendation.recommendation === 'REFUND_CLIENT'
+                            : displayedRecommendation.recommendation === 'REFUND_CLIENT'
                               ? 'bg-red-900/50 text-red-300'
-                              : recommendation.recommendation === 'REQUEST_MORE_EVIDENCE'
+                              : displayedRecommendation.recommendation === 'REQUEST_MORE_EVIDENCE'
                                 ? 'bg-yellow-900/50 text-yellow-300'
                                 : 'bg-purple-900/50 text-purple-300'
                         }`}
                       >
-                        {recommendation.recommendation.replace(/_/g, ' ')}
+                        {displayedRecommendation.recommendation.replace(/_/g, ' ')}
                       </span>
-                      <span className="text-xs text-gray-400">Confidence: {recommendation.confidence}%</span>
+                      <span className="text-xs text-gray-400">Confidence: {displayedRecommendation.confidence}%</span>
                     </div>
-                    <p className="text-sm text-gray-300">{recommendation.summary}</p>
-                    <p className="text-xs text-gray-400 italic">{recommendation.rationale}</p>
+                    <p className="text-sm text-gray-300">{displayedRecommendation.summary}</p>
+                    <p className="text-xs text-gray-400 italic">{displayedRecommendation.rationale}</p>
                     <div className="flex items-center gap-1.5 text-[10px] text-gray-600">
                       <ClockIcon className="w-3 h-3" />
                       Advisory only, the final action still follows your reviewer mode.
@@ -701,6 +833,18 @@ export default function AgreementDetailPage() {
                     </button>
                   </div>
                 )}
+
+                {displayedRecommendation ? (
+                  <div className="mt-4">
+                    <button
+                      onClick={handleGetRecommendation}
+                      disabled={actionLoading === 'recommend'}
+                      className="rounded-lg border border-purple-600/40 px-4 py-2 text-sm font-medium text-purple-300 transition-colors hover:bg-purple-900/20 disabled:opacity-50"
+                    >
+                      {actionLoading === 'recommend' ? 'Re-analyzing...' : 'Regenerate Recommendation'}
+                    </button>
+                  </div>
+                ) : null}
               </div>
             )}
 

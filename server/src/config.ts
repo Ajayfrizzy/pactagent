@@ -21,6 +21,8 @@ export const config = {
   aiEnabled: process.env.AI_ENABLED === 'true',
   aiProvider: process.env.AI_PROVIDER || 'mock',
   openaiApiKey: process.env.OPENAI_API_KEY || '',
+  openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+  aiTimeoutMs: parseInt(process.env.AI_TIMEOUT_MS || '30000', 10),
 
   authJwtSecret: process.env.AUTH_JWT_SECRET || '',
   authTokenTtlSecs: parseInt(process.env.AUTH_TOKEN_TTL_SECS || '604800', 10),

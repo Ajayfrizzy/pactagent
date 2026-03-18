@@ -90,8 +90,19 @@ model Dispute {
   resolvedAt       DateTime?
   createdAt        DateTime  @default(now())
 
-  agreement Agreement @relation(fields: [agreementId], references: [id])
-  milestone Milestone @relation(fields: [milestoneId], references: [id])
+  agreement       Agreement       @relation(fields: [agreementId], references: [id])
+  milestone       Milestone       @relation(fields: [milestoneId], references: [id])
+  evidenceEntries DisputeEvidence[]
+}
+
+model DisputeEvidence {
+  id          String   @id @default(uuid())
+  disputeId   String
+  submittedBy String
+  content     String
+  createdAt   DateTime @default(now())
+
+  dispute Dispute @relation(fields: [disputeId], references: [id])
 }
 
 model AgentLog {

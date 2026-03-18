@@ -48,6 +48,12 @@ const openDisputeSchema = z.object({
   evidenceNotes: z.string().optional(),
 });
 
+const addDisputeEvidenceSchema = z.object({
+  disputeId: z.string().min(1),
+  submittedBy: z.string().min(1),
+  content: z.string().min(1),
+});
+
 const reviewActionSchema = z.object({
   action: z.enum(['APPROVE', 'REJECT', 'ESCALATE']),
   reviewerAddress: z.string().min(1),
@@ -200,6 +206,32 @@ router.post('/:id/open-dispute', async (req: Request, res: Response) => {
   }
 });
 
+router.post('/:id/dispute/evidence', async (req: Request, res: Response) => {
+  try {
+    const result = await getAgreementForParticipant(req);
+    if ('error' in result) {
+      return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
+    }
+
+    const authAddress = getAuthAddress(req);
+    const data = addDisputeEvidenceSchema.parse(req.body);
+    if (data.submittedBy !== authAddress) {
+      return res.status(403).json({ success: false, error: 'Authenticated wallet must match the evidence submitter' });
+    }
+
+    const response = await agreementService.addDisputeEvidence(
+      req.params.id,
+      data.disputeId,
+      data.submittedBy,
+      data.content
+    );
+    res.json({ success: true, data: response });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Validation error';
+    res.status(400).json({ success: false, error: msg });
+  }
+});
+
 router.post('/:id/review-action', async (req: Request, res: Response) => {
   try {
     const result = await getAgreementForParticipant(req);
@@ -292,6 +324,11 @@ router.post('/:id/dispute/recommendation', async (req: Request, res: Response) =
       proofType: proof?.proofType || null,
       disputeReason: dispute.reason,
       evidenceNotes: dispute.evidenceNotes,
+      evidenceTimeline: (dispute.evidenceEntries || []).map((entry) => ({
+        submittedBy: entry.submittedBy,
+        content: entry.content,
+        createdAt: entry.createdAt.toISOString(),
+      })),
       deadlineAt: agreement.deadlineAt.toISOString(),
       status: agreement.status,
       milestoneTitle: milestone?.title || null,

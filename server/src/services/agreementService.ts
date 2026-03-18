@@ -101,11 +101,21 @@ async function fetchAgreementOrThrow(agreementId: string) {
         orderBy: { sortOrder: 'asc' },
         include: {
           proofs: { orderBy: { submittedAt: 'desc' } },
-          disputes: { orderBy: { createdAt: 'desc' } },
+          disputes: {
+            orderBy: { createdAt: 'desc' },
+            include: {
+              evidenceEntries: { orderBy: { createdAt: 'asc' } },
+            },
+          },
         },
       },
       proofs: { orderBy: { submittedAt: 'desc' } },
-      disputes: { orderBy: { createdAt: 'desc' } },
+      disputes: {
+        orderBy: { createdAt: 'desc' },
+        include: {
+          evidenceEntries: { orderBy: { createdAt: 'asc' } },
+        },
+      },
       agentLogs: { orderBy: { createdAt: 'desc' }, take: 50 },
     },
   });
@@ -461,6 +471,50 @@ export async function openDispute(
   };
 }
 
+export async function addDisputeEvidence(
+  agreementId: string,
+  disputeId: string,
+  submittedBy: string,
+  content: string
+) {
+  const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
+  const dispute = agreement.disputes.find((item) => item.id === disputeId);
+
+  if (!dispute) {
+    throw new Error('Dispute not found');
+  }
+
+  if (dispute.resolvedAt) {
+    throw new Error('Cannot add evidence to a resolved dispute');
+  }
+
+  const evidence = await prisma.disputeEvidence.create({
+    data: {
+      id: uuid(),
+      disputeId,
+      submittedBy,
+      content,
+    },
+  });
+
+  await createLog({
+    agreementId,
+    level: 'INFO',
+    eventType: 'DISPUTE_OPENED',
+    message: `Additional dispute context submitted by ${submittedBy}`,
+    metadata: {
+      disputeId,
+      evidenceId: evidence.id,
+      submittedBy,
+    },
+  });
+
+  return {
+    evidence,
+    agreement: await getAgreementById(agreementId),
+  };
+}
+
 export async function approveCurrentMilestone(agreementId: string) {
   const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
   const milestone = getCurrentMilestoneFromAgreement(agreement);
@@ -566,7 +620,12 @@ export async function getAgreements(address?: string) {
         orderBy: { sortOrder: 'asc' },
       },
       proofs: true,
-      disputes: true,
+      disputes: {
+        orderBy: { createdAt: 'desc' },
+        include: {
+          evidenceEntries: { orderBy: { createdAt: 'asc' } },
+        },
+      },
     },
   });
 
@@ -581,11 +640,21 @@ export async function getAgreementById(id: string) {
         orderBy: { sortOrder: 'asc' },
         include: {
           proofs: { orderBy: { submittedAt: 'desc' } },
-          disputes: { orderBy: { createdAt: 'desc' } },
+          disputes: {
+            orderBy: { createdAt: 'desc' },
+            include: {
+              evidenceEntries: { orderBy: { createdAt: 'asc' } },
+            },
+          },
         },
       },
       proofs: { orderBy: { submittedAt: 'desc' } },
-      disputes: { orderBy: { createdAt: 'desc' } },
+      disputes: {
+        orderBy: { createdAt: 'desc' },
+        include: {
+          evidenceEntries: { orderBy: { createdAt: 'asc' } },
+        },
+      },
       agentLogs: { orderBy: { createdAt: 'desc' }, take: 50 },
     },
   });

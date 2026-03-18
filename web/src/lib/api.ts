@@ -139,6 +139,17 @@ export async function getDisputeRecommendation(id: string) {
   });
 }
 
+export async function addDisputeEvidence(id: string, data: {
+  disputeId: string;
+  submittedBy: string;
+  content: string;
+}) {
+  return request<any>(`/agreements/${id}/dispute/evidence`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
 export async function fetchLogs(agreementId?: string, limit = 100) {
   const params = new URLSearchParams();
   if (agreementId) {

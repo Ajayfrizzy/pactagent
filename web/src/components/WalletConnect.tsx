@@ -11,6 +11,10 @@ type PersistedCccConnection = {
   walletName?: string;
 };
 
+type SignerWithConnectionState = ccc.Signer & {
+  isConnected?: () => Promise<boolean>;
+};
+
 type CccConnectorElement = HTMLElement & {
   walletName?: string;
   signerName?: string;
@@ -48,23 +52,106 @@ export function WalletConnect() {
   const authenticatedAddressRef = useRef<string | null>(null);
   const manualConnectRequestedRef = useRef(false);
   const autoReconnectAttemptedRef = useRef<string | null>(null);
+  const authInFlightRef = useRef(false);
 
   const displayAddress = walletAddress || connectedAddress;
   const hasAuthenticatedSession = Boolean(authToken && walletAddress);
   const hasLiveSigner = Boolean(signer);
+  const needsAuthentication = Boolean(displayAddress && !hasAuthenticatedSession);
   const signerTypeLabel = signerInfo?.signer.type || null;
+  const walletSummary = [wallet?.name, signerTypeLabel].filter(Boolean).join(' - ');
   const connectionLabel = hasAuthenticatedSession
     ? hasLiveSigner
       ? 'Signer connected'
       : 'Session active'
     : hasLiveSigner
-      ? 'Wallet connected'
-      : 'Disconnected';
+      ? authStatus === 'error'
+        ? 'Sign-in incomplete'
+        : 'Finish sign-in to continue'
+      : 'Reconnect wallet to continue';
   const statusDotClass = hasAuthenticatedSession
     ? hasLiveSigner
       ? 'bg-green-400'
       : 'bg-yellow-400'
-    : 'bg-sky-400';
+    : hasLiveSigner
+      ? authStatus === 'error'
+        ? 'bg-red-400'
+        : 'bg-amber-400'
+      : 'bg-slate-500';
+
+  function formatAuthError(error: unknown) {
+    const fallback = 'Wallet authentication failed.';
+    const message = error instanceof Error ? error.message : String(error || fallback);
+    const normalized = message.toLowerCase();
+
+    if (
+      normalized.includes('rejected')
+      || normalized.includes('denied')
+      || normalized.includes('cancelled')
+      || normalized.includes('canceled')
+      || normalized.includes('declined')
+    ) {
+      return 'Wallet connected, but sign-in was not completed. Try again or disconnect.';
+    }
+
+    return message || fallback;
+  }
+
+  async function authenticateSigner(currentSigner: ccc.Signer, options?: { force?: boolean }) {
+    if (authInFlightRef.current) {
+      return;
+    }
+
+    if (!options?.force && !manualConnectRequestedRef.current && !authToken) {
+      return;
+    }
+
+    authInFlightRef.current = true;
+    setWorking(true);
+
+    try {
+      setAuthStatus('authenticating');
+      const address = await currentSigner.getRecommendedAddress();
+      setConnectedAddress(address);
+
+      if (authToken && walletAddress === address) {
+        authenticatedAddressRef.current = address;
+        setAuthStatus('authenticated');
+        return;
+      }
+
+      const signerWithConnectionState = currentSigner as SignerWithConnectionState;
+      const isConnected = signerWithConnectionState.isConnected
+        ? await signerWithConnectionState.isConnected().catch(() => true)
+        : true;
+
+      if (manualConnectRequestedRef.current && !isConnected) {
+        await currentSigner.connect();
+      }
+
+      const challenge = await fetchAuthChallenge(address);
+      const signature = await currentSigner.signMessage(challenge.message);
+      const session = await verifyWalletAuth({
+        address,
+        message: challenge.message,
+        signature,
+      });
+
+      authenticatedAddressRef.current = address;
+      setWalletSession({
+        walletAddress: session.address,
+        authToken: session.token,
+        authExpiresAt: session.expiresAt,
+      });
+    } catch (error) {
+      clearWalletSession();
+      setAuthStatus('error', formatAuthError(error));
+    } finally {
+      authInFlightRef.current = false;
+      manualConnectRequestedRef.current = false;
+      setWorking(false);
+    }
+  }
 
   useEffect(() => {
     if (hasAuthenticatedSession && authStatus !== 'authenticated') {
@@ -167,8 +254,6 @@ export function WalletConnect() {
       return;
     }
 
-    let cancelled = false;
-
     async function hydrateConnectedAddress() {
       const currentSigner = activeSigner;
       if (!currentSigner) {
@@ -177,89 +262,16 @@ export function WalletConnect() {
 
       try {
         const address = await currentSigner.getRecommendedAddress();
-        if (!cancelled) {
-          setConnectedAddress(address);
-        }
+        setConnectedAddress(address);
       } catch {
         // Ignore passive signer hydration errors.
       }
     }
 
-    async function authenticateWithBackend() {
-      const currentSigner = activeSigner;
-      if (!currentSigner) {
-        return;
-      }
-
-      if (!manualConnectRequestedRef.current && !authToken) {
-        return;
-      }
-
-      try {
-        setAuthStatus('authenticating');
-        const address = await currentSigner.getRecommendedAddress();
-        if (!cancelled) {
-          setConnectedAddress(address);
-        }
-
-        if (authToken && walletAddress === address) {
-          authenticatedAddressRef.current = address;
-          setAuthStatus('authenticated');
-          return;
-        }
-
-        if (manualConnectRequestedRef.current) {
-          await currentSigner.connect();
-        }
-
-        const challenge = await fetchAuthChallenge(address);
-        const signature = await currentSigner.signMessage(challenge.message);
-        const session = await verifyWalletAuth({
-          address,
-          message: challenge.message,
-          signature,
-        });
-
-        if (cancelled) {
-          return;
-        }
-
-        authenticatedAddressRef.current = address;
-        setWalletSession({
-          walletAddress: session.address,
-          authToken: session.token,
-          authExpiresAt: session.expiresAt,
-        });
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-        clearWalletSession();
-        setAuthStatus(
-          'error',
-          error instanceof Error ? error.message : 'Wallet authentication failed'
-        );
-      } finally {
-        manualConnectRequestedRef.current = false;
-        if (!cancelled) {
-          setWorking(false);
-        }
-      }
-    }
-
     void hydrateConnectedAddress();
-    void authenticateWithBackend();
-
-    return () => {
-      cancelled = true;
-    };
+    void authenticateSigner(activeSigner);
   }, [
-    authStatus,
     authToken,
-    clearWalletSession,
-    hasAuthenticatedSession,
-    setAuthStatus,
-    setWalletSession,
     signer,
     walletAddress,
   ]);
@@ -272,8 +284,17 @@ export function WalletConnect() {
     } catch (error) {
       manualConnectRequestedRef.current = false;
       setWorking(false);
-      setAuthStatus('error', error instanceof Error ? error.message : 'Wallet connection failed');
+      setAuthStatus('error', formatAuthError(error));
     }
+  }
+
+  async function handleRetryAuthentication() {
+    if (!signer) {
+      return;
+    }
+
+    manualConnectRequestedRef.current = true;
+    await authenticateSigner(signer, { force: true });
   }
 
   async function handleDisconnect() {
@@ -292,7 +313,13 @@ export function WalletConnect() {
   if (displayAddress) {
     return (
       <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-3">
-        <div className="flex min-w-0 items-center gap-2 rounded-lg border border-agent-border bg-agent-card px-3 py-2 sm:py-1.5">
+        <div className={`flex min-w-0 items-center gap-2 rounded-lg border px-3 py-2 sm:py-1.5 ${
+          hasAuthenticatedSession
+            ? 'border-agent-border bg-agent-card'
+            : authStatus === 'error'
+              ? 'border-red-400/40 bg-red-950/10'
+              : 'border-amber-400/30 bg-amber-950/10'
+        }`}>
           <div
             className={`h-2 w-2 shrink-0 rounded-full ${statusDotClass}`}
           />
@@ -300,31 +327,48 @@ export function WalletConnect() {
             <span className="truncate text-xs font-mono text-gray-300">
               {displayAddress.slice(0, 12)}...{displayAddress.slice(-8)}
             </span>
-            <span className="text-[10px] text-gray-500">
+            <span className={`text-[10px] ${
+              hasAuthenticatedSession ? 'text-gray-500' : 'text-gray-300'
+            }`}>
               {connectionLabel}
             </span>
-            {(wallet?.name || signerTypeLabel || (hasAuthenticatedSession && !hasLiveSigner)) && (
-              <span className="text-[10px] text-gray-500">
+            {(walletSummary || needsAuthentication || (hasAuthenticatedSession && !hasLiveSigner)) && (
+              <span className={`text-[10px] ${
+                hasAuthenticatedSession ? 'text-gray-500' : 'text-gray-400'
+              }`}>
                 {hasAuthenticatedSession && !hasLiveSigner
                   ? 'Reconnect wallet to sign transactions'
-                  : [wallet?.name, signerTypeLabel].filter(Boolean).join(' - ')}
+                  : needsAuthentication
+                    ? `${walletSummary || 'Wallet connected'}${authError ? ' - sign-in not completed' : ' - approve the sign-in prompt'}`
+                    : walletSummary}
               </span>
             )}
           </div>
         </div>
-        <button
-          onClick={handleDisconnect}
-          disabled={working}
-          className="self-start text-xs text-gray-500 transition-colors hover:text-gray-300 disabled:opacity-50 sm:self-auto"
-        >
-          Disconnect
-        </button>
+        <div className="flex items-center gap-3">
+          {needsAuthentication ? (
+            <button
+              onClick={handleRetryAuthentication}
+              disabled={working || authStatus === 'authenticating'}
+              className="rounded-md border border-agent-accent/50 px-3 py-1.5 text-xs font-medium text-agent-accent transition-colors hover:bg-agent-accent/10 disabled:opacity-50"
+            >
+              {authStatus === 'authenticating' ? 'Awaiting signature...' : authError ? 'Retry Sign-In' : 'Complete Sign-In'}
+            </button>
+          ) : null}
+          <button
+            onClick={handleDisconnect}
+            disabled={working}
+            className="self-start text-xs text-gray-500 transition-colors hover:text-gray-300 disabled:opacity-50 sm:self-auto"
+          >
+            Disconnect
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="flex w-full flex-col items-start gap-1.5">
+    <div className="flex w-full flex-col items-start gap-1.5 sm:w-auto">
       <button
         onClick={handleConnect}
         disabled={working || authStatus === 'authenticating'}

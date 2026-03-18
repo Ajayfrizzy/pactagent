@@ -246,45 +246,59 @@ async function processAgreement(agreement: any): Promise<void> {
         break;
       }
 
-      await createLog({
-        agreementId: agreement.id,
-        level: 'INFO',
-        eventType: 'RELEASE_PREPARED',
-        message: `Preparing payout for milestone ${currentMilestone.sortOrder}: ${currentMilestone.title}`,
-        metadata: {
-          milestoneId: currentMilestone.id,
-          milestoneAmount: currentMilestone.amount,
-          payoutNetwork: agreement.payoutNetwork,
-        },
-      });
+      const existingSettlementReference =
+        agreement.fiberPaymentReference || agreement.ckbTxHashRelease;
 
-      if (agreement.payoutNetwork === 'FIBER' || agreement.releaseMode === 'PARTIAL') {
-        const fiberResult = await attemptFiberPayout(
-          agreement.id,
-          agreement.workerAddress,
-          currentMilestone.amount
-        );
-
+      if (!existingSettlementReference) {
         await createLog({
           agreementId: agreement.id,
-          level: fiberResult.route === 'FIBER' ? 'SUCCESS' : 'INFO',
-          eventType: 'RELEASE_SENT',
-          message:
-            fiberResult.route === 'FIBER'
-              ? `Milestone payment released via Fiber: ${currentMilestone.title}`
-              : `Milestone payment released on CKB fallback: ${currentMilestone.title}`,
+          level: 'INFO',
+          eventType: 'RELEASE_PREPARED',
+          message: `Preparing payout for milestone ${currentMilestone.sortOrder}: ${currentMilestone.title}`,
           metadata: {
             milestoneId: currentMilestone.id,
-            milestoneTitle: currentMilestone.title,
-            ...fiberResult,
+            milestoneAmount: currentMilestone.amount,
+            payoutNetwork: agreement.payoutNetwork,
           },
         });
 
-        if (fiberResult.route === 'FIBER') {
-          await recordSettlementReference(agreement.id, {
-            fiberPaymentReference: fiberResult.paymentReference,
-            ckbTxHashRelease: null,
+        if (agreement.payoutNetwork === 'FIBER' || agreement.releaseMode === 'PARTIAL') {
+          const fiberResult = await attemptFiberPayout(
+            agreement.id,
+            agreement.workerAddress,
+            currentMilestone.amount
+          );
+
+          await createLog({
+            agreementId: agreement.id,
+            level: fiberResult.route === 'FIBER' ? 'SUCCESS' : 'INFO',
+            eventType: 'RELEASE_SENT',
+            message:
+              fiberResult.route === 'FIBER'
+                ? `Milestone payment released via Fiber: ${currentMilestone.title}`
+                : `Milestone payment released on CKB fallback: ${currentMilestone.title}`,
+            metadata: {
+              milestoneId: currentMilestone.id,
+              milestoneTitle: currentMilestone.title,
+              ...fiberResult,
+            },
           });
+
+          if (fiberResult.route === 'FIBER') {
+            await recordSettlementReference(agreement.id, {
+              fiberPaymentReference: fiberResult.paymentReference,
+              ckbTxHashRelease: null,
+            });
+          } else {
+            const payoutTxHash = await sendTreasuryTransfer(
+              agreement.workerAddress,
+              currentMilestone.amount
+            );
+            await recordSettlementReference(agreement.id, {
+              ckbTxHashRelease: payoutTxHash,
+              fiberPaymentReference: null,
+            });
+          }
         } else {
           const payoutTxHash = await sendTreasuryTransfer(
             agreement.workerAddress,
@@ -294,27 +308,31 @@ async function processAgreement(agreement: any): Promise<void> {
             ckbTxHashRelease: payoutTxHash,
             fiberPaymentReference: null,
           });
+
+          await createLog({
+            agreementId: agreement.id,
+            level: 'INFO',
+            eventType: 'RELEASE_SENT',
+            message: `Milestone payment prepared on CKB: ${currentMilestone.title}`,
+            metadata: {
+              milestoneId: currentMilestone.id,
+              milestoneTitle: currentMilestone.title,
+              amount: currentMilestone.amount,
+              route: 'CKB',
+            },
+          });
         }
       } else {
-        const payoutTxHash = await sendTreasuryTransfer(
-          agreement.workerAddress,
-          currentMilestone.amount
-        );
-        await recordSettlementReference(agreement.id, {
-          ckbTxHashRelease: payoutTxHash,
-          fiberPaymentReference: null,
-        });
-
         await createLog({
           agreementId: agreement.id,
           level: 'INFO',
-          eventType: 'RELEASE_SENT',
-          message: `Milestone payment prepared on CKB: ${currentMilestone.title}`,
+          eventType: 'RELEASE_PREPARED',
+          message: `Existing settlement reference found for ${currentMilestone.title}; resuming milestone completion`,
           metadata: {
             milestoneId: currentMilestone.id,
             milestoneTitle: currentMilestone.title,
-            amount: currentMilestone.amount,
-            route: 'CKB',
+            ckbTxHashRelease: agreement.ckbTxHashRelease,
+            fiberPaymentReference: agreement.fiberPaymentReference,
           },
         });
       }
