@@ -24,6 +24,7 @@ model Agreement {
   description           String
   clientAddress         String
   workerAddress         String
+  workerFiberPubkey     String?
   amount                String    // CKB in shannons, stored as string for bigint safety
   deadlineAt            DateTime
   disputeWindowSecs     Int       @default(86400) // 24 hours default

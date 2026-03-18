@@ -76,6 +76,17 @@ export interface FiberPaymentStatus {
   created_at: string;
 }
 
+const COMPRESSED_FIBER_PUBKEY_REGEX = /^(?:0x)?(?:02|03)[0-9a-f]{64}$/i;
+const UNCOMPRESSED_FIBER_PUBKEY_REGEX = /^(?:0x)?04[0-9a-f]{128}$/i;
+
+export function isValidFiberPublicKey(value: string): boolean {
+  const trimmed = value.trim();
+  return (
+    COMPRESSED_FIBER_PUBKEY_REGEX.test(trimmed) ||
+    UNCOMPRESSED_FIBER_PUBKEY_REGEX.test(trimmed)
+  );
+}
+
 // ─── JSON-RPC Client ───
 
 let rpcIdCounter = 1;
@@ -152,6 +163,28 @@ export async function attemptFiberPayout(
       paymentReference: null,
       route: 'CKB_FALLBACK',
       message: 'Fiber not enabled. Using CKB on-chain settlement.',
+    };
+  }
+
+  if (!isValidFiberPublicKey(workerAddress)) {
+    await createLog({
+      agreementId,
+      level: 'INFO',
+      eventType: 'FIBER_PAYOUT_INITIATED',
+      message: 'Fiber payout skipped because the recipient is not a valid Fiber public key. Using CKB settlement instead.',
+      metadata: {
+        workerAddress,
+        amount,
+        route: 'CKB_FALLBACK',
+        reason: 'INVALID_FIBER_RECIPIENT',
+      },
+    });
+
+    return {
+      success: true,
+      paymentReference: null,
+      route: 'CKB_FALLBACK',
+      message: 'Recipient is not a valid Fiber public key. Using CKB on-chain settlement.',
     };
   }
 

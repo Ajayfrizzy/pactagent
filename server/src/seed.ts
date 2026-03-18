@@ -10,6 +10,8 @@ async function main() {
     'ckt1qzda0cr08m85hc8jlnfp3zer7xulejywt49kt2rr0vthywaa50xwsqt4z78ng4yutl5u6xpc4jmn98ueg9a90rc2duhtf';
   const workerAddr =
     'ckt1qzda0cr08m85hc8jlnfp3zer7xulejywt49kt2rr0vthywaa50xwsqwgx292hnvmn68xf779vmzrshpmm6epn4c0cgwga';
+  const workerFiberPubkey =
+    '020202020202020202020202020202020202020202020202020202020202020202';
 
   await prisma.user.upsert({
     where: { walletAddress: clientAddr },
@@ -118,6 +120,7 @@ async function main() {
       description: 'Build an API integration with staged releases through Fiber.',
       clientAddress: clientAddr,
       workerAddress: workerAddr,
+      workerFiberPubkey,
       amount: '30000000000',
       deadlineAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
       disputeWindowSecs: 86400,

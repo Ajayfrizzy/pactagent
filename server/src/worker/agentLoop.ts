@@ -14,6 +14,7 @@ import { generateRecommendation, saveRecommendation } from '../services/disputeS
 import { attemptFiberPayout } from '../services/fiberService';
 
 const processedSet = new Set<string>();
+let cycleInProgress = false;
 
 function getCurrentMilestone(agreement: any) {
   const activeStatuses = ['ACTIVE', 'PROOF_SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'DISPUTED'];
@@ -25,6 +26,12 @@ function getCurrentMilestone(agreement: any) {
 }
 
 export async function runAgentCycle(): Promise<void> {
+  if (cycleInProgress) {
+    return;
+  }
+
+  cycleInProgress = true;
+
   try {
     const agreements = await prisma.agreement.findMany({
       where: {
@@ -71,6 +78,8 @@ export async function runAgentCycle(): Promise<void> {
     }
   } catch (err) {
     console.error('[AGENT] Cycle error:', err);
+  } finally {
+    cycleInProgress = false;
   }
 }
 
@@ -250,6 +259,31 @@ async function processAgreement(agreement: any): Promise<void> {
         agreement.fiberPaymentReference || agreement.ckbTxHashRelease;
 
       if (!existingSettlementReference) {
+        const claimResult = await prisma.agreement.updateMany({
+          where: {
+            id: agreement.id,
+            status: 'APPROVED',
+            updatedAt: agreement.updatedAt,
+            ckbTxHashRelease: null,
+            fiberPaymentReference: null,
+          },
+          data: { updatedAt: new Date() },
+        });
+
+        if (claimResult.count === 0) {
+          await createLog({
+            agreementId: agreement.id,
+            level: 'INFO',
+            eventType: 'RELEASE_PREPARED',
+            message: `Skipping duplicate payout attempt for milestone ${currentMilestone.sortOrder}: ${currentMilestone.title}`,
+            metadata: {
+              milestoneId: currentMilestone.id,
+              reason: 'SETTLEMENT_ALREADY_CLAIMED',
+            },
+          });
+          break;
+        }
+
         await createLog({
           agreementId: agreement.id,
           level: 'INFO',
@@ -265,7 +299,7 @@ async function processAgreement(agreement: any): Promise<void> {
         if (agreement.payoutNetwork === 'FIBER' || agreement.releaseMode === 'PARTIAL') {
           const fiberResult = await attemptFiberPayout(
             agreement.id,
-            agreement.workerAddress,
+            agreement.workerFiberPubkey || agreement.workerAddress,
             currentMilestone.amount
           );
 

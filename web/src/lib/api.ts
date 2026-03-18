@@ -77,6 +77,7 @@ export async function createAgreement(data: {
   description: string;
   clientAddress: string;
   workerAddress: string;
+  workerFiberPubkey?: string;
   deadlineAt: string;
   disputeWindowSecs: number;
   proofType: string;

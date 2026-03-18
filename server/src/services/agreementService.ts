@@ -70,6 +70,7 @@ function serializeAgreementForBroadcast(agreement: {
   description: string;
   clientAddress: string;
   workerAddress: string;
+  workerFiberPubkey: string | null;
   amount: string;
   deadlineAt: Date;
   disputeWindowSecs: number;
@@ -269,6 +270,7 @@ export async function createAgreement(data: {
   description: string;
   clientAddress: string;
   workerAddress: string;
+  workerFiberPubkey?: string;
   deadlineAt: string;
   disputeWindowSecs: number;
   proofType: string;
@@ -294,6 +296,7 @@ export async function createAgreement(data: {
       description: data.description,
       clientAddress: data.clientAddress,
       workerAddress: data.workerAddress,
+      workerFiberPubkey: data.workerFiberPubkey || null,
       amount: totalAmount,
       deadlineAt: new Date(data.deadlineAt),
       disputeWindowSecs: data.disputeWindowSecs,
@@ -329,6 +332,7 @@ export async function createAgreement(data: {
       title: agreement.title,
       amount: agreement.amount,
       workerAddress: agreement.workerAddress,
+      workerFiberPubkey: agreement.workerFiberPubkey,
       milestoneCount: agreement.milestones.length,
     },
   });
@@ -576,6 +580,10 @@ export async function completeApprovedMilestone(agreementId: string) {
   const milestone = agreement.milestones.find((item) => item.status === 'APPROVED');
 
   if (!milestone) {
+    if (['FUNDED', 'PAID'].includes(agreement.status)) {
+      return agreement;
+    }
+
     throw new Error('No approved milestone available for settlement');
   }
 

@@ -33,6 +33,11 @@ function canSignerFundAgreement(signer: ccc.Signer | undefined) {
   return signer?.type === ccc.SignerType.CKB || signer?.type === ccc.SignerType.EVM;
 }
 
+function isValidFiberPublicKey(value: string) {
+  const trimmed = value.trim();
+  return /^(?:0x)?(?:02|03)[0-9a-f]{64}$/i.test(trimmed) || /^(?:0x)?04[0-9a-f]{128}$/i.test(trimmed);
+}
+
 export default function NewAgreementPage() {
   useWebSocket();
   const router = useRouter();
@@ -45,6 +50,7 @@ export default function NewAgreementPage() {
     title: '',
     description: '',
     workerAddress: '',
+    workerFiberPubkey: '',
     deadlineDays: '7',
     disputeWindowHours: '24',
     proofType: 'URL',
@@ -110,6 +116,16 @@ export default function NewAgreementPage() {
       return;
     }
 
+    if (form.payoutNetwork === 'FIBER' && !form.workerFiberPubkey.trim()) {
+      setError('Fiber payouts require the worker Fiber public key.');
+      return;
+    }
+
+    if (form.workerFiberPubkey.trim() && !isValidFiberPublicKey(form.workerFiberPubkey)) {
+      setError('The worker Fiber public key format is invalid.');
+      return;
+    }
+
     setError(null);
     setSubmitting(true);
 
@@ -123,6 +139,7 @@ export default function NewAgreementPage() {
         description: form.description,
         clientAddress: walletAddress,
         workerAddress: form.workerAddress,
+        workerFiberPubkey: form.workerFiberPubkey.trim() || undefined,
         deadlineAt,
         disputeWindowSecs: parseInt(form.disputeWindowHours, 10) * 3600,
         proofType: form.proofType,
@@ -214,7 +231,27 @@ export default function NewAgreementPage() {
               onChange={(e) => updateField('workerAddress', e.target.value)}
               required
             />
+            <p className="mt-1.5 text-xs text-gray-500">
+              Enter the worker CKB wallet address for agreement participation, proof submission, and CKB fallback settlement.
+            </p>
           </div>
+
+          {form.payoutNetwork === 'FIBER' && (
+            <div>
+              <label className={labelClass}>Worker Fiber Public Key</label>
+              <input
+                type="text"
+                className={inputClass}
+                placeholder="02ab... or 03ab..."
+                value={form.workerFiberPubkey}
+                onChange={(e) => updateField('workerFiberPubkey', e.target.value)}
+                required
+              />
+              <p className="mt-1.5 text-xs text-gray-500">
+                Ask the worker for the public key from their Fiber node. They can usually get it from their node info output or a `node_info` RPC call.
+              </p>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>

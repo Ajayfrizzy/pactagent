@@ -55,6 +55,7 @@ export default function AgreementDetailPage() {
   const id = params.id as string;
   const { open, disconnect } = ccc.useCcc();
   const signer = ccc.useSigner();
+  const hasHydrated = useStore((s) => s.hasHydrated);
   const walletAddress = useStore((s) => s.walletAddress);
   const authToken = useStore((s) => s.authToken);
   const updateCount = useStore((s) => s.agreementUpdateCount);
@@ -73,10 +74,19 @@ export default function AgreementDetailPage() {
 
   useEffect(() => {
     async function load() {
+      if (!hasHydrated) {
+        return;
+      }
+
       if (!authToken) {
         setAgreement(null);
+        setError(null);
         setLoading(false);
         return;
+      }
+
+      if (!agreement) {
+        setLoading(true);
       }
 
       try {
@@ -89,6 +99,7 @@ export default function AgreementDetailPage() {
         setError(null);
       } catch (err) {
         console.error('Failed to load agreement:', err);
+        setAgreement(null);
         setError(err instanceof Error ? err.message : 'Failed to load agreement');
       } finally {
         setLoading(false);
@@ -96,11 +107,22 @@ export default function AgreementDetailPage() {
     }
 
     void load();
-  }, [authToken, id, updateCount]);
+  }, [authToken, hasHydrated, id, updateCount]);
 
-  async function refreshAgreement() {
-    const data = await api.fetchAgreement(id);
-    setAgreement(data);
+  async function refreshAgreement(actionKey?: string) {
+    if (actionKey) {
+      setActionLoading(actionKey);
+    }
+
+    try {
+      const data = await api.fetchAgreement(id);
+      setAgreement(data);
+      return data;
+    } finally {
+      if (actionKey) {
+        setActionLoading(null);
+      }
+    }
   }
 
   async function handleFund() {
@@ -303,7 +325,7 @@ export default function AgreementDetailPage() {
     }
   }
 
-  if (loading) {
+  if (!hasHydrated || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin w-8 h-8 border-4 border-agent-accent border-t-transparent rounded-full" />
@@ -370,6 +392,9 @@ export default function AgreementDetailPage() {
     isClient &&
     canSignerFundAgreement(signer) &&
     Boolean(publicConfig?.treasuryAddress);
+  const approveLoading = actionLoading === 'APPROVE';
+  const rejectLoading = actionLoading === 'REJECT';
+  const refreshingStatus = actionLoading === 'refresh';
 
   return (
     <div className="min-h-screen">
@@ -432,7 +457,9 @@ export default function AgreementDetailPage() {
                 </div>
               </div>
 
-              <div className="mt-4 pt-4 border-t border-agent-border grid grid-cols-2 gap-4">
+              <div className={`mt-4 pt-4 border-t border-agent-border grid gap-4 ${
+                agreement.payoutNetwork === 'FIBER' && agreement.workerFiberPubkey ? 'grid-cols-1 md:grid-cols-3' : 'grid-cols-2'
+              }`}>
                 <div>
                   <span className="text-[10px] uppercase text-gray-500 block mb-1">Client</span>
                   <span className="text-xs font-mono text-gray-300">{agreement.clientAddress.slice(0, 20)}...</span>
@@ -441,6 +468,12 @@ export default function AgreementDetailPage() {
                   <span className="text-[10px] uppercase text-gray-500 block mb-1">Worker</span>
                   <span className="text-xs font-mono text-gray-300">{agreement.workerAddress.slice(0, 20)}...</span>
                 </div>
+                {agreement.payoutNetwork === 'FIBER' && agreement.workerFiberPubkey && (
+                  <div>
+                    <span className="text-[10px] uppercase text-gray-500 block mb-1">Worker Fiber Key</span>
+                    <span className="text-xs font-mono text-gray-300 break-all">{agreement.workerFiberPubkey}</span>
+                  </div>
+                )}
               </div>
 
               {(agreement.ckbTxHashFund || agreement.ckbTxHashRelease || agreement.fiberPaymentReference) && (
@@ -648,11 +681,18 @@ export default function AgreementDetailPage() {
                       : `Proof has been submitted for ${currentMilestone.title}. The agent needs to review it before the client can take action.`}
                 </p>
                 <button
-                  onClick={() => void refreshAgreement()}
-                  disabled={actionLoading === 'refresh'}
-                  className="rounded-lg border border-yellow-600/40 px-4 py-2 text-sm font-medium text-yellow-300 transition-colors hover:bg-yellow-900/20"
+                  onClick={() => void refreshAgreement('refresh')}
+                  disabled={refreshingStatus}
+                  className="rounded-lg border border-yellow-600/40 px-4 py-2 text-sm font-medium text-yellow-300 transition-colors hover:bg-yellow-900/20 disabled:opacity-60 flex items-center gap-2"
                 >
-                  Refresh Status
+                  {refreshingStatus ? (
+                    <>
+                      <div className="animate-spin w-4 h-4 border-2 border-yellow-300 border-t-transparent rounded-full" />
+                      Refreshing...
+                    </>
+                  ) : (
+                    'Refresh Status'
+                  )}
                 </button>
               </div>
             )}
@@ -670,20 +710,46 @@ export default function AgreementDetailPage() {
                     <button
                       onClick={() => handleReviewAction('APPROVE')}
                       disabled={!!actionLoading}
-                      className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5"
+                      className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 min-w-[150px] justify-center"
                     >
-                      <CheckCircleIcon className="w-4 h-4" />
-                      Approve Payout
+                      {approveLoading ? (
+                        <>
+                          <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                          Approving...
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircleIcon className="w-4 h-4" />
+                          Approve Payout
+                        </>
+                      )}
                     </button>
                     <button
                       onClick={() => handleReviewAction('REJECT')}
                       disabled={!!actionLoading}
-                      className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5"
+                      className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 min-w-[150px] justify-center"
                     >
-                      <XCircleIcon className="w-4 h-4" />
-                      Refund & Close
+                      {rejectLoading ? (
+                        <>
+                          <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                          Refunding...
+                        </>
+                      ) : (
+                        <>
+                          <XCircleIcon className="w-4 h-4" />
+                          Refund & Close
+                        </>
+                      )}
                     </button>
                   </div>
+                  {(approveLoading || rejectLoading) && (
+                    <div className="mt-3 rounded-lg border border-emerald-800/50 bg-emerald-950/20 px-3 py-2 text-xs text-emerald-200 flex items-center gap-2">
+                      <div className="animate-spin w-3 h-3 border-2 border-emerald-300 border-t-transparent rounded-full shrink-0" />
+                      {approveLoading
+                        ? 'Approving payout and syncing the updated agreement state...'
+                        : 'Processing refund and syncing the updated agreement state...'}
+                    </div>
+                  )}
                 </div>
               )}
 

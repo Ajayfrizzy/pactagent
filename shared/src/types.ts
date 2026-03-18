@@ -28,6 +28,7 @@ export interface Agreement {
   description: string;
   clientAddress: string;
   workerAddress: string;
+  workerFiberPubkey: string | null;
   amount: string;
   deadlineAt: string;
   disputeWindowSecs: number;
@@ -56,6 +57,7 @@ export interface CreateAgreementDTO {
   description: string;
   clientAddress: string;
   workerAddress: string;
+  workerFiberPubkey?: string;
   deadlineAt: string;
   disputeWindowSecs: number;
   proofType: ProofType;

@@ -4,6 +4,7 @@ import { requireAuth } from '../middleware/auth';
 import { prisma } from '../db';
 import * as agreementService from '../services/agreementService';
 import { generateRecommendation, saveRecommendation } from '../services/disputeService';
+import { isValidFiberPublicKey } from '../services/fiberService';
 import { getLogs } from '../services/logService';
 
 const router = Router();
@@ -13,6 +14,7 @@ const createAgreementSchema = z.object({
   description: z.string().min(1).max(2000),
   clientAddress: z.string().min(1),
   workerAddress: z.string().min(1),
+  workerFiberPubkey: z.string().min(1).optional(),
   deadlineAt: z.string().datetime(),
   disputeWindowSecs: z.number().int().min(3600).default(86400),
   proofType: z.enum(['URL', 'TEXT', 'FILE_HASH']).default('URL'),
@@ -90,6 +92,20 @@ router.post('/', async (req: Request, res: Response) => {
 
     if (data.clientAddress !== authAddress) {
       return res.status(403).json({ success: false, error: 'Authenticated wallet must match the client address' });
+    }
+
+    if (data.payoutNetwork === 'FIBER' && !data.workerFiberPubkey) {
+      return res.status(400).json({
+        success: false,
+        error: 'Fiber payouts require the worker Fiber public key.',
+      });
+    }
+
+    if (data.workerFiberPubkey && !isValidFiberPublicKey(data.workerFiberPubkey)) {
+      return res.status(400).json({
+        success: false,
+        error: 'The worker Fiber public key format is invalid.',
+      });
     }
 
     const agreement = await agreementService.createAgreement(data);

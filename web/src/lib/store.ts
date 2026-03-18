@@ -15,6 +15,7 @@ interface AppState {
   walletAddress: string | null;
   authToken: string | null;
   authExpiresAt: string | null;
+  hasHydrated: boolean;
   authStatus: 'idle' | 'authenticating' | 'authenticated' | 'error';
   authError: string | null;
   setWalletSession: (params: {
@@ -24,6 +25,7 @@ interface AppState {
   }) => void;
   setAuthStatus: (status: AppState['authStatus'], error?: string | null) => void;
   clearWalletSession: () => void;
+  setHasHydrated: (hydrated: boolean) => void;
 
   logs: AgentLog[];
   addLog: (log: AgentLog) => void;
@@ -42,6 +44,7 @@ export const useStore = create<AppState>()(
       walletAddress: null,
       authToken: null,
       authExpiresAt: null,
+      hasHydrated: false,
       authStatus: 'idle',
       authError: null,
       setWalletSession: ({ walletAddress, authToken, authExpiresAt }) =>
@@ -53,11 +56,13 @@ export const useStore = create<AppState>()(
           authError: null,
         }),
       setAuthStatus: (authStatus, authError = null) => set({ authStatus, authError }),
+      setHasHydrated: (hasHydrated) => set({ hasHydrated }),
       clearWalletSession: () =>
         set({
           walletAddress: null,
           authToken: null,
           authExpiresAt: null,
+          hasHydrated: true,
           authStatus: 'idle',
           authError: null,
         }),
@@ -83,6 +88,9 @@ export const useStore = create<AppState>()(
         authToken: state.authToken,
         authExpiresAt: state.authExpiresAt,
       }),
+      onRehydrateStorage: () => (state) => {
+        state?.setHasHydrated(true);
+      },
     }
   )
 );
