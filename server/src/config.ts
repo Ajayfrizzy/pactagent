@@ -2,9 +2,20 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+function parseCorsOrigins(value?: string) {
+  if (!value) {
+    return ['http://localhost:3000'];
+  }
+
+  return value
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+}
+
 export const config = {
   port: parseInt(process.env.PORT || '4000', 10),
-  corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+  corsOrigins: parseCorsOrigins(process.env.CORS_ORIGIN),
 
   ckbNodeUrl: process.env.CKB_NODE_URL || 'https://testnet.ckb.dev/',
   ckbNetwork: (process.env.CKB_NETWORK || 'testnet') as 'testnet' | 'mainnet',

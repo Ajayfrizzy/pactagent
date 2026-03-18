@@ -14,7 +14,19 @@ import { runAgentCycle } from './worker/agentLoop';
 
 const app = express();
 
-app.use(cors({ origin: config.corsOrigin }));
+app.use(
+  cors({
+    origin(origin, callback) {
+      // Allow curl, server-to-server calls, and configured browser origins.
+      if (!origin || config.corsOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error(`CORS origin not allowed: ${origin}`));
+    },
+  })
+);
 app.use(express.json());
 
 app.use('/api/auth', authRoutes);
