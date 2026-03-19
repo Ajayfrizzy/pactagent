@@ -62,7 +62,7 @@ export function WalletConnect() {
   const walletSummary = [wallet?.name, signerTypeLabel].filter(Boolean).join(' - ');
   const connectionLabel = hasAuthenticatedSession
     ? hasLiveSigner
-      ? 'Signer connected'
+      ? 'Connected'
       : 'Session active'
     : hasLiveSigner
       ? authStatus === 'error'
@@ -332,7 +332,7 @@ export function WalletConnect() {
             }`}>
               {connectionLabel}
             </span>
-            {(walletSummary || needsAuthentication || (hasAuthenticatedSession && !hasLiveSigner)) && (
+            {(walletSummary || needsAuthentication || (hasAuthenticatedSession && !hasLiveSigner)) && !(hasAuthenticatedSession && hasLiveSigner) && (
               <span className={`text-[10px] ${
                 hasAuthenticatedSession ? 'text-gray-500' : 'text-gray-400'
               }`}>
