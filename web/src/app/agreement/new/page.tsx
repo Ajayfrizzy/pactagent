@@ -7,7 +7,7 @@ import { NavbarMenu } from '@/components/NavbarMenu';
 import { useStore } from '@/lib/store';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { createAgreement } from '@/lib/api';
-import { ckbToShannons } from '@/lib/ckb';
+import { ckbToShannons, MIN_CELL_CAPACITY, shannonsToCKB } from '@/lib/ckb';
 import { AgentIcon, ArrowLeftIcon, DocumentTextIcon, PlusIcon, XCircleIcon } from '@/components/Icons';
 
 interface MilestoneDraft {
@@ -29,6 +29,8 @@ const defaultMilestones: MilestoneDraft[] = [
   },
 ];
 
+const MIN_MILESTONE_CKB = Number(shannonsToCKB(MIN_CELL_CAPACITY.toString()));
+
 function canSignerFundAgreement(signer: ccc.Signer | undefined) {
   return signer?.type === ccc.SignerType.CKB || signer?.type === ccc.SignerType.EVM;
 }
@@ -36,6 +38,24 @@ function canSignerFundAgreement(signer: ccc.Signer | undefined) {
 function isValidFiberPublicKey(value: string) {
   const trimmed = value.trim();
   return /^(?:0x)?(?:02|03)[0-9a-f]{64}$/i.test(trimmed) || /^(?:0x)?04[0-9a-f]{128}$/i.test(trimmed);
+}
+
+function getMilestoneAmountError(amountCKB: string) {
+  const trimmed = amountCKB.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const amount = Number(trimmed);
+  if (!Number.isFinite(amount)) {
+    return 'Enter a valid CKB amount';
+  }
+
+  if (amount < MIN_MILESTONE_CKB) {
+    return `Each milestone must be at least ${MIN_MILESTONE_CKB} CKB.`;
+  }
+
+  return null;
 }
 
 export default function NewAgreementPage() {
@@ -88,6 +108,8 @@ export default function NewAgreementPage() {
   }
 
   const totalCkb = milestones.reduce((sum, milestone) => sum + (parseFloat(milestone.amountCKB) || 0), 0);
+  const milestoneAmountErrors = milestones.map((milestone) => getMilestoneAmountError(milestone.amountCKB));
+  const hasInvalidMilestoneAmount = milestoneAmountErrors.some((message) => Boolean(message));
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -113,6 +135,11 @@ export default function NewAgreementPage() {
     );
     if (hasInvalidMilestone) {
       setError('Every milestone needs a title, description, and amount');
+      return;
+    }
+
+    if (hasInvalidMilestoneAmount) {
+      setError(`Each milestone must be at least ${MIN_MILESTONE_CKB} CKB before you can continue.`);
       return;
     }
 
@@ -368,16 +395,26 @@ export default function NewAgreementPage() {
                     </div>
                     <div>
                       <label className={labelClass}>Milestone Amount (CKB)</label>
+                      {(() => {
+                        const amountError = milestoneAmountErrors[index];
+                        return (
+                          <>
                       <input
                         type="number"
-                        className={inputClass}
+                        className={amountError ? `${inputClass} border-red-500 focus:border-red-400` : inputClass}
                         placeholder="100"
-                        min="1"
+                        min={String(MIN_MILESTONE_CKB)}
                         step="any"
                         value={milestone.amountCKB}
                         onChange={(e) => updateMilestone(index, 'amountCKB', e.target.value)}
                         required
                       />
+                            <p className={`mt-1.5 text-xs ${amountError ? 'text-red-300' : 'text-gray-500'}`}>
+                              {amountError || `Minimum ${MIN_MILESTONE_CKB} CKB required per milestone.`}
+                            </p>
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -412,7 +449,7 @@ export default function NewAgreementPage() {
 
           <button
             type="submit"
-            disabled={submitting || !walletAddress || !authToken || !canSignerFundAgreement(signer)}
+            disabled={submitting || !walletAddress || !authToken || !canSignerFundAgreement(signer) || hasInvalidMilestoneAmount}
             className="flex w-full items-center justify-center gap-2 rounded-lg bg-agent-accent py-3 font-medium text-white transition-colors hover:bg-blue-600 disabled:opacity-50"
           >
             {submitting ? (
