@@ -477,6 +477,7 @@ export default function AgreementDetailPage() {
   const approveLoading = actionLoading === 'APPROVE';
   const rejectLoading = actionLoading === 'REJECT';
   const refreshingStatus = actionLoading === 'refresh';
+  const disputeLoading = actionLoading === 'dispute';
   const disputeOpenedByLabel = currentOpenDispute
     ? getParticipantLabel(currentOpenDispute.openedBy, agreement)
     : null;
@@ -877,11 +878,20 @@ export default function AgreementDetailPage() {
                 />
                 <button
                   onClick={() => handleOpenDispute(currentMilestone.id)}
-                  disabled={actionLoading === 'dispute' || !disputeReason.trim()}
+                  disabled={disputeLoading || !disputeReason.trim()}
                   className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-6 py-2.5 rounded-lg text-sm font-medium flex items-center gap-1.5"
                 >
-                  <ExclamationTriangleIcon className="w-4 h-4" />
-                  Open Dispute
+                  {disputeLoading ? (
+                    <>
+                      <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                      Opening Dispute...
+                    </>
+                  ) : (
+                    <>
+                      <ExclamationTriangleIcon className="w-4 h-4" />
+                      Open Dispute
+                    </>
+                  )}
                 </button>
               </div>
             )}
