@@ -73,15 +73,53 @@ export default function AgreementDetailPage() {
   const [recommendation, setRecommendation] = useState<any>(null);
 
   useEffect(() => {
-    async function load() {
+    let cancelled = false;
+
+    async function loadConfig() {
       if (!hasHydrated) {
         return;
       }
 
       if (!authToken) {
-        setAgreement(null);
-        setError(null);
-        setLoading(false);
+        if (!cancelled) {
+          setPublicConfig(null);
+        }
+        return;
+      }
+
+      try {
+        const configData = await api.fetchConfig();
+        if (!cancelled) {
+          setPublicConfig(configData);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.error('Failed to load public config:', err);
+        }
+      }
+    }
+
+    void loadConfig();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authToken, hasHydrated]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadAgreement() {
+      if (!hasHydrated) {
+        return;
+      }
+
+      if (!authToken) {
+        if (!cancelled) {
+          setAgreement(null);
+          setError(null);
+          setLoading(false);
+        }
         return;
       }
 
@@ -90,23 +128,29 @@ export default function AgreementDetailPage() {
       }
 
       try {
-        const [agreementData, configData] = await Promise.all([
-          api.fetchAgreement(id),
-          api.fetchConfig(),
-        ]);
-        setAgreement(agreementData);
-        setPublicConfig(configData);
-        setError(null);
+        const agreementData = await api.fetchAgreement(id);
+        if (!cancelled) {
+          setAgreement(agreementData);
+          setError(null);
+        }
       } catch (err) {
-        console.error('Failed to load agreement:', err);
-        setAgreement(null);
-        setError(err instanceof Error ? err.message : 'Failed to load agreement');
+        if (!cancelled) {
+          console.error('Failed to load agreement:', err);
+          setAgreement(null);
+          setError(err instanceof Error ? err.message : 'Failed to load agreement');
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
 
-    void load();
+    void loadAgreement();
+
+    return () => {
+      cancelled = true;
+    };
   }, [authToken, hasHydrated, id, updateCount]);
 
   async function refreshAgreement(actionKey?: string) {

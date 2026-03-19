@@ -31,6 +31,35 @@ const MILESTONE_VALID_TRANSITIONS: Record<string, string[]> = {
 
 const TERMINAL_MILESTONE_STATUSES = new Set(['PAID', 'REFUNDED', 'EXPIRED']);
 
+const agreementListInclude = {
+  milestones: {
+    orderBy: { sortOrder: 'asc' },
+    select: {
+      id: true,
+      sortOrder: true,
+      status: true,
+    },
+  },
+} as const;
+
+const agreementDetailInclude = {
+  milestones: {
+    orderBy: { sortOrder: 'asc' },
+    include: {
+      proofs: { orderBy: { submittedAt: 'desc' } },
+      disputes: {
+        orderBy: { createdAt: 'desc' },
+      },
+    },
+  },
+  disputes: {
+    orderBy: { createdAt: 'desc' },
+    include: {
+      evidenceEntries: { orderBy: { createdAt: 'asc' } },
+    },
+  },
+} as const;
+
 function canTransitionAgreement(from: string, to: string): boolean {
   return AGREEMENT_VALID_TRANSITIONS[from]?.includes(to) ?? false;
 }
@@ -97,28 +126,7 @@ function serializeAgreementForBroadcast(agreement: {
 async function fetchAgreementOrThrow(agreementId: string) {
   const agreement = await prisma.agreement.findUnique({
     where: { id: agreementId },
-    include: {
-      milestones: {
-        orderBy: { sortOrder: 'asc' },
-        include: {
-          proofs: { orderBy: { submittedAt: 'desc' } },
-          disputes: {
-            orderBy: { createdAt: 'desc' },
-            include: {
-              evidenceEntries: { orderBy: { createdAt: 'asc' } },
-            },
-          },
-        },
-      },
-      proofs: { orderBy: { submittedAt: 'desc' } },
-      disputes: {
-        orderBy: { createdAt: 'desc' },
-        include: {
-          evidenceEntries: { orderBy: { createdAt: 'asc' } },
-        },
-      },
-      agentLogs: { orderBy: { createdAt: 'desc' }, take: 50 },
-    },
+    include: agreementDetailInclude,
   });
 
   if (!agreement) {
@@ -623,18 +631,7 @@ export async function getAgreements(address?: string) {
         }
       : undefined,
     orderBy: { createdAt: 'desc' },
-    include: {
-      milestones: {
-        orderBy: { sortOrder: 'asc' },
-      },
-      proofs: true,
-      disputes: {
-        orderBy: { createdAt: 'desc' },
-        include: {
-          evidenceEntries: { orderBy: { createdAt: 'asc' } },
-        },
-      },
-    },
+    include: agreementListInclude,
   });
 
   return Promise.all(agreements.map((agreement) => ensureAgreementMilestones(agreement)));
@@ -643,28 +640,7 @@ export async function getAgreements(address?: string) {
 export async function getAgreementById(id: string) {
   const agreement = await prisma.agreement.findUnique({
     where: { id },
-    include: {
-      milestones: {
-        orderBy: { sortOrder: 'asc' },
-        include: {
-          proofs: { orderBy: { submittedAt: 'desc' } },
-          disputes: {
-            orderBy: { createdAt: 'desc' },
-            include: {
-              evidenceEntries: { orderBy: { createdAt: 'asc' } },
-            },
-          },
-        },
-      },
-      proofs: { orderBy: { submittedAt: 'desc' } },
-      disputes: {
-        orderBy: { createdAt: 'desc' },
-        include: {
-          evidenceEntries: { orderBy: { createdAt: 'asc' } },
-        },
-      },
-      agentLogs: { orderBy: { createdAt: 'desc' }, take: 50 },
-    },
+    include: agreementDetailInclude,
   });
 
   if (!agreement) {
@@ -672,4 +648,15 @@ export async function getAgreementById(id: string) {
   }
 
   return ensureAgreementMilestones(agreement);
+}
+
+export async function getAgreementParticipantById(id: string) {
+  return prisma.agreement.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      clientAddress: true,
+      workerAddress: true,
+    },
+  });
 }

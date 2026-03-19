@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
+let agreementUpdateTimer: ReturnType<typeof setTimeout> | null = null;
+
 interface AgentLog {
   id: string;
   agreementId: string | null;
@@ -79,7 +81,16 @@ export const useStore = create<AppState>()(
 
       agreementUpdateCount: 0,
       triggerAgreementUpdate: () =>
-        set((state) => ({ agreementUpdateCount: state.agreementUpdateCount + 1 })),
+        {
+          if (agreementUpdateTimer) {
+            return;
+          }
+
+          agreementUpdateTimer = setTimeout(() => {
+            agreementUpdateTimer = null;
+            set((state) => ({ agreementUpdateCount: state.agreementUpdateCount + 1 }));
+          }, 400);
+        },
     }),
     {
       name: 'pact-agent-session',

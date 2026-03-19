@@ -2,13 +2,40 @@ import { useStore } from './store';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || '/api';
 
+const inflightGetRequests = new Map<string, Promise<unknown>>();
+const responseCache = new Map<string, { expiresAt: number; value: unknown }>();
+
 type ApiEnvelope<T> = {
   success?: boolean;
   data?: T;
   error?: string;
 };
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+function getRequestMethod(options?: RequestInit) {
+  return (options?.method || 'GET').toUpperCase();
+}
+
+function getRequestKey(path: string, method: string, token: string | null) {
+  return `${method}:${path}:${token || ''}`;
+}
+
+function getCacheTtlMs(path: string, method: string) {
+  if (method !== 'GET') {
+    return 0;
+  }
+
+  if (path === '/config') {
+    return 30_000;
+  }
+
+  if (path === '/health') {
+    return 5_000;
+  }
+
+  return 0;
+}
+
+async function performRequest<T>(path: string, options?: RequestInit): Promise<T> {
   const token = useStore.getState().authToken;
   const res = await fetch(`${API_BASE}${path}`, {
     headers: {
@@ -35,6 +62,50 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   }
 
   return data.data as T;
+}
+
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const token = useStore.getState().authToken;
+  const method = getRequestMethod(options);
+  const requestKey = getRequestKey(path, method, token);
+  const cacheTtlMs = getCacheTtlMs(path, method);
+
+  if (cacheTtlMs > 0) {
+    const cachedEntry = responseCache.get(requestKey);
+    if (cachedEntry && cachedEntry.expiresAt > Date.now()) {
+      return cachedEntry.value as T;
+    }
+  }
+
+  if (method === 'GET') {
+    const inflightRequest = inflightGetRequests.get(requestKey);
+    if (inflightRequest) {
+      return inflightRequest as Promise<T>;
+    }
+  }
+
+  const requestPromise = performRequest<T>(path, options).then((result) => {
+    if (cacheTtlMs > 0) {
+      responseCache.set(requestKey, {
+        expiresAt: Date.now() + cacheTtlMs,
+        value: result,
+      });
+    }
+
+    return result;
+  });
+
+  if (method !== 'GET') {
+    return requestPromise;
+  }
+
+  inflightGetRequests.set(requestKey, requestPromise as Promise<unknown>);
+
+  try {
+    return await requestPromise;
+  } finally {
+    inflightGetRequests.delete(requestKey);
+  }
 }
 
 export async function fetchAuthChallenge(address: string) {

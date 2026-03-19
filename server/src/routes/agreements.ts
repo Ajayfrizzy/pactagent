@@ -9,6 +9,15 @@ import { getLogs } from '../services/logService';
 
 const router = Router();
 
+type AgreementParticipantRecord = NonNullable<
+  Awaited<ReturnType<typeof agreementService.getAgreementParticipantById>>
+>;
+type AgreementDetailRecord = NonNullable<
+  Awaited<ReturnType<typeof agreementService.getAgreementById>>
+>;
+type AgreementAccessError = 'Agreement not found' | 'You are not a participant in this agreement';
+type AgreementAccessResult<T> = { agreement: T } | { error: AgreementAccessError };
+
 const createAgreementSchema = z.object({
   title: z.string().min(1).max(200),
   description: z.string().min(1).max(2000),
@@ -69,8 +78,8 @@ function getAuthAddress(req: Request) {
   return req.auth.address;
 }
 
-async function getAgreementForParticipant(req: Request) {
-  const agreement = await agreementService.getAgreementById(req.params.id);
+async function getAgreementParticipantRecord(req: Request): Promise<AgreementAccessResult<AgreementParticipantRecord>> {
+  const agreement = await agreementService.getAgreementParticipantById(req.params.id);
   if (!agreement) {
     return { error: 'Agreement not found' as const };
   }
@@ -78,6 +87,20 @@ async function getAgreementForParticipant(req: Request) {
   const authAddress = getAuthAddress(req);
   if (agreement.clientAddress !== authAddress && agreement.workerAddress !== authAddress) {
     return { error: 'You are not a participant in this agreement' as const };
+  }
+
+  return { agreement };
+}
+
+async function getAgreementDetailForParticipant(req: Request): Promise<AgreementAccessResult<AgreementDetailRecord>> {
+  const result = await getAgreementParticipantRecord(req);
+  if ('error' in result) {
+    return result;
+  }
+
+  const agreement = await agreementService.getAgreementById(req.params.id);
+  if (!agreement) {
+    return { error: 'Agreement not found' as const };
   }
 
   return { agreement };
@@ -135,7 +158,7 @@ router.get('/', async (req: Request, res: Response) => {
 
 router.get('/:id', async (req: Request, res: Response) => {
   try {
-    const result = await getAgreementForParticipant(req);
+    const result = await getAgreementDetailForParticipant(req);
     if ('error' in result) {
       return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
     }
@@ -149,7 +172,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 
 router.post('/:id/fund', async (req: Request, res: Response) => {
   try {
-    const result = await getAgreementForParticipant(req);
+    const result = await getAgreementParticipantRecord(req);
     if ('error' in result) {
       return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
     }
@@ -170,7 +193,7 @@ router.post('/:id/fund', async (req: Request, res: Response) => {
 
 router.post('/:id/submit-proof', async (req: Request, res: Response) => {
   try {
-    const result = await getAgreementForParticipant(req);
+    const result = await getAgreementParticipantRecord(req);
     if ('error' in result) {
       return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
     }
@@ -197,7 +220,7 @@ router.post('/:id/submit-proof', async (req: Request, res: Response) => {
 
 router.post('/:id/open-dispute', async (req: Request, res: Response) => {
   try {
-    const result = await getAgreementForParticipant(req);
+    const result = await getAgreementParticipantRecord(req);
     if ('error' in result) {
       return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
     }
@@ -224,7 +247,7 @@ router.post('/:id/open-dispute', async (req: Request, res: Response) => {
 
 router.post('/:id/dispute/evidence', async (req: Request, res: Response) => {
   try {
-    const result = await getAgreementForParticipant(req);
+    const result = await getAgreementParticipantRecord(req);
     if ('error' in result) {
       return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
     }
@@ -250,7 +273,7 @@ router.post('/:id/dispute/evidence', async (req: Request, res: Response) => {
 
 router.post('/:id/review-action', async (req: Request, res: Response) => {
   try {
-    const result = await getAgreementForParticipant(req);
+    const result = await getAgreementParticipantRecord(req);
     if ('error' in result) {
       return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
     }
@@ -284,7 +307,7 @@ router.post('/:id/review-action', async (req: Request, res: Response) => {
 
 router.get('/:id/logs', async (req: Request, res: Response) => {
   try {
-    const result = await getAgreementForParticipant(req);
+    const result = await getAgreementParticipantRecord(req);
     if ('error' in result) {
       return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
     }
@@ -299,7 +322,7 @@ router.get('/:id/logs', async (req: Request, res: Response) => {
 
 router.get('/:id/dispute', async (req: Request, res: Response) => {
   try {
-    const result = await getAgreementForParticipant(req);
+    const result = await getAgreementParticipantRecord(req);
     if ('error' in result) {
       return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
     }
@@ -317,7 +340,7 @@ router.get('/:id/dispute', async (req: Request, res: Response) => {
 
 router.post('/:id/dispute/recommendation', async (req: Request, res: Response) => {
   try {
-    const result = await getAgreementForParticipant(req);
+    const result = await getAgreementDetailForParticipant(req);
     if ('error' in result) {
       return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
     }
@@ -331,7 +354,7 @@ router.post('/:id/dispute/recommendation', async (req: Request, res: Response) =
     const milestone = agreement.milestones?.find((item) => item.id === dispute.milestoneId);
     const proof = milestone && 'proofs' in milestone
       ? milestone.proofs[0]
-      : agreement.proofs.find((item) => item.milestoneId === dispute.milestoneId);
+      : undefined;
 
     const recommendation = await generateRecommendation(req.params.id, {
       agreementTitle: agreement.title,
