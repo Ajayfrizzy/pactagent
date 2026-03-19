@@ -75,6 +75,14 @@ function getRecommendationAvailability(dispute: any, agreement: any) {
   };
 }
 
+type PendingDisputeReply = {
+  id: string;
+  submittedBy: string;
+  content: string;
+  createdAt: string;
+  optimistic: true;
+};
+
 async function addressesMatchOnSignerNetwork(
   signer: ccc.Signer,
   leftAddress: string,
@@ -114,6 +122,7 @@ export default function AgreementDetailPage() {
   const [disputeReason, setDisputeReason] = useState('');
   const [evidenceNotes, setEvidenceNotes] = useState('');
   const [additionalEvidence, setAdditionalEvidence] = useState('');
+  const [pendingDisputeReplies, setPendingDisputeReplies] = useState<PendingDisputeReply[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -373,21 +382,30 @@ export default function AgreementDetailPage() {
       return;
     }
 
-    setActionLoading('dispute-evidence');
     setError(null);
+    const content = additionalEvidence.trim();
+    const optimisticReply: PendingDisputeReply = {
+      id: `pending-${Date.now()}`,
+      submittedBy: walletAddress,
+      content,
+      createdAt: new Date().toISOString(),
+      optimistic: true,
+    };
+    setPendingDisputeReplies((prev) => [...prev, optimisticReply]);
+    setAdditionalEvidence('');
 
     try {
       await api.addDisputeEvidence(id, {
         disputeId: openDispute.id,
         submittedBy: walletAddress,
-        content: additionalEvidence,
+        content,
       });
-      setAdditionalEvidence('');
+      setPendingDisputeReplies((prev) => prev.filter((entry) => entry.id !== optimisticReply.id));
       await refreshAgreement();
     } catch (err) {
+      setPendingDisputeReplies((prev) => prev.filter((entry) => entry.id !== optimisticReply.id));
+      setAdditionalEvidence((currentValue) => currentValue || content);
       setError(err instanceof Error ? err.message : 'Failed to add dispute evidence');
-    } finally {
-      setActionLoading(null);
     }
   }
 
@@ -482,7 +500,11 @@ export default function AgreementDetailPage() {
     ? getParticipantLabel(currentOpenDispute.openedBy, agreement)
     : null;
   const canReplyToDispute = Boolean(currentOpenDispute) && (isClient || isWorker);
-  const disputeReplyCount = currentOpenDispute?.evidenceEntries?.length || 0;
+  const displayedDisputeReplies = [
+    ...(currentOpenDispute?.evidenceEntries || []),
+    ...pendingDisputeReplies,
+  ];
+  const disputeReplyCount = displayedDisputeReplies.length;
   const recommendationAvailability = getRecommendationAvailability(currentOpenDispute, agreement);
   const expectedReplyLabel = recommendationAvailability?.counterpartyAddress
     ? getParticipantLabel(recommendationAvailability.counterpartyAddress, agreement)
@@ -945,13 +967,19 @@ export default function AgreementDetailPage() {
                     </span>
                   </div>
 
-                  {disputeReplyCount ? (
+                  {displayedDisputeReplies.length ? (
                     <div className="mb-4 space-y-3">
-                      {currentOpenDispute.evidenceEntries.map((entry: any) => {
+                      {displayedDisputeReplies.map((entry: any) => {
                         const entryLabel = getParticipantLabel(entry.submittedBy, agreement);
+                        const isPendingReply = Boolean(entry.optimistic);
 
                         return (
-                          <div key={entry.id} className="rounded-lg border border-white/5 bg-slate-950/30 px-3 py-3">
+                          <div
+                            key={entry.id}
+                            className={`rounded-lg border border-white/5 bg-slate-950/30 px-3 py-3 ${
+                              isPendingReply ? 'opacity-80' : ''
+                            }`}
+                          >
                             <div className="mb-2 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wide text-gray-500">
                               <span
                                 className={`rounded-full px-2 py-1 ${
@@ -965,6 +993,9 @@ export default function AgreementDetailPage() {
                                 {entryLabel} reply
                               </span>
                               <span>{new Date(entry.createdAt).toLocaleString()}</span>
+                              {isPendingReply ? (
+                                <span className="text-emerald-300">Sending...</span>
+                              ) : null}
                             </div>
                             <p className="text-sm text-gray-300 whitespace-pre-wrap">{entry.content}</p>
                           </div>
@@ -991,10 +1022,10 @@ export default function AgreementDetailPage() {
                       <p className="mb-3 text-xs text-gray-500">{replyHelpText}</p>
                       <button
                         onClick={handleSubmitDisputeEvidence}
-                        disabled={actionLoading === 'dispute-evidence' || !additionalEvidence.trim()}
+                        disabled={!additionalEvidence.trim()}
                         className="rounded-lg border border-purple-600/40 px-4 py-2 text-sm font-medium text-purple-300 transition-colors hover:bg-purple-900/20 disabled:opacity-50"
                       >
-                        {actionLoading === 'dispute-evidence' ? 'Sending reply...' : 'Send Reply'}
+                        Send Reply
                       </button>
                     </>
                   )}
