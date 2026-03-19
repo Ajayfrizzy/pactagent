@@ -747,14 +747,8 @@ export default function AgreementDetailPage() {
                         <LinkIcon className="w-4 h-4" />
                         {fundingUnsupportedSigner ? 'Funding Requires CKB Wallet' : 'Fund on CKB'}
                       </>
-                    )}
+                      )}
                   </button>
-                )}
-                {fundingStatus && (
-                  <div className="mt-3 rounded-lg border border-blue-800 bg-blue-900/20 px-3 py-2 text-xs text-blue-200 flex items-center gap-2">
-                    <div className="animate-spin w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full shrink-0" />
-                    {fundingStatus}
-                  </div>
                 )}
               </div>
             )}
@@ -869,14 +863,6 @@ export default function AgreementDetailPage() {
                       )}
                     </button>
                   </div>
-                  {(approveLoading || rejectLoading) && (
-                    <div className="mt-3 rounded-lg border border-emerald-800/50 bg-emerald-950/20 px-3 py-2 text-xs text-emerald-200 flex items-center gap-2">
-                      <div className="animate-spin w-3 h-3 border-2 border-emerald-300 border-t-transparent rounded-full shrink-0" />
-                      {approveLoading
-                        ? 'Approving payout and syncing the updated agreement state...'
-                        : 'Processing refund and syncing the updated agreement state...'}
-                    </div>
-                  )}
                 </div>
               )}
 
