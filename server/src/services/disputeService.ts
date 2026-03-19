@@ -1,6 +1,7 @@
 import { prisma } from '../db';
 import { createLog } from './logService';
 import { config } from '../config';
+import { broadcastAgreementUpdateById } from './agreementService';
 
 /**
  * AI Dispute Recommendation Service
@@ -35,6 +36,46 @@ interface RecommendationOutput {
   recommendation: 'APPROVE_PAYOUT' | 'REFUND_CLIENT' | 'REQUEST_MORE_EVIDENCE' | 'ESCALATE_MANUAL_REVIEW';
   confidence: number;
   rationale: string;
+}
+
+type RecommendationReadinessInput = {
+  dispute: {
+    openedBy: string;
+    createdAt: Date | string;
+    evidenceEntries?: Array<{
+      submittedBy: string;
+    }>;
+  };
+  agreement: {
+    clientAddress: string;
+    workerAddress: string;
+    disputeWindowSecs: number;
+  };
+  now?: Date;
+};
+
+export function evaluateRecommendationReadiness(input: RecommendationReadinessInput) {
+  const openedAt = new Date(input.dispute.createdAt);
+  const responseDeadlineAt = new Date(openedAt.getTime() + (input.agreement.disputeWindowSecs * 1000));
+  const currentTime = input.now ?? new Date();
+  const counterpartyAddress =
+    input.dispute.openedBy === input.agreement.clientAddress
+      ? input.agreement.workerAddress
+      : input.dispute.openedBy === input.agreement.workerAddress
+        ? input.agreement.clientAddress
+        : null;
+  const hasCounterpartyReply = counterpartyAddress
+    ? (input.dispute.evidenceEntries || []).some((entry) => entry.submittedBy === counterpartyAddress)
+    : (input.dispute.evidenceEntries || []).some((entry) => entry.submittedBy !== input.dispute.openedBy);
+  const responseWindowExpired = currentTime >= responseDeadlineAt;
+
+  return {
+    ready: hasCounterpartyReply || responseWindowExpired,
+    counterpartyAddress,
+    hasCounterpartyReply,
+    responseWindowExpired,
+    responseDeadlineAt,
+  };
 }
 
 type OpenAIResponse = {
@@ -262,7 +303,7 @@ export async function saveRecommendation(
   disputeId: string,
   result: RecommendationOutput
 ) {
-  return prisma.dispute.update({
+  const updated = await prisma.dispute.update({
     where: { id: disputeId },
     data: {
       aiSummary: result.summary,
@@ -271,4 +312,8 @@ export async function saveRecommendation(
       aiRationale: result.rationale,
     },
   });
+
+  await broadcastAgreementUpdateById(updated.agreementId);
+
+  return updated;
 }

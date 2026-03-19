@@ -10,7 +10,11 @@ import {
   transitionStatus,
 } from '../services/agreementService';
 import { sendTreasuryTransfer } from '../services/ckbService';
-import { generateRecommendation, saveRecommendation } from '../services/disputeService';
+import {
+  evaluateRecommendationReadiness,
+  generateRecommendation,
+  saveRecommendation,
+} from '../services/disputeService';
 import { attemptFiberPayout } from '../services/fiberService';
 
 const processedSet = new Set<string>();
@@ -23,6 +27,43 @@ function getCurrentMilestone(agreement: any) {
     agreement.milestones.find((milestone: any) => milestone.status === 'PENDING') ||
     null
   );
+}
+
+function getOpenDispute(currentMilestone: any) {
+  return currentMilestone?.disputes.find((dispute: any) => !dispute.resolvedAt) ?? null;
+}
+
+function buildProcessKey(agreement: any, now: Date) {
+  const parts = [
+    agreement.id,
+    agreement.status,
+    agreement.updatedAt.toISOString(),
+  ];
+
+  if (agreement.status === 'DRAFT' || agreement.status === 'FUNDED') {
+    parts.push(`deadlinePassed:${now > new Date(agreement.deadlineAt)}`);
+  }
+
+  if (agreement.status === 'DISPUTED') {
+    const currentMilestone = getCurrentMilestone(agreement);
+    const openDispute = getOpenDispute(currentMilestone);
+
+    if (openDispute) {
+      const readiness = evaluateRecommendationReadiness({
+        dispute: openDispute,
+        agreement,
+        now,
+      });
+
+      parts.push(`recommendationReady:${readiness.ready}`);
+      parts.push(`counterpartyReply:${readiness.hasCounterpartyReply}`);
+      parts.push(`responseWindowExpired:${readiness.responseWindowExpired}`);
+      parts.push(`replyCount:${openDispute.evidenceEntries?.length || 0}`);
+      parts.push(`aiRecommendation:${openDispute.aiRecommendation ? 'present' : 'missing'}`);
+    }
+  }
+
+  return parts.join(':');
 }
 
 export async function runAgentCycle(): Promise<void> {
@@ -44,16 +85,26 @@ export async function runAgentCycle(): Promise<void> {
           orderBy: { sortOrder: 'asc' },
           include: {
             proofs: { orderBy: { submittedAt: 'desc' } },
-            disputes: { orderBy: { createdAt: 'desc' } },
+            disputes: {
+              orderBy: { createdAt: 'desc' },
+              include: {
+                evidenceEntries: { orderBy: { createdAt: 'asc' } },
+              },
+            },
           },
         },
         proofs: { orderBy: { submittedAt: 'desc' } },
-        disputes: { orderBy: { createdAt: 'desc' } },
+        disputes: {
+          orderBy: { createdAt: 'desc' },
+          include: {
+            evidenceEntries: { orderBy: { createdAt: 'asc' } },
+          },
+        },
       },
     });
 
     for (const agreement of agreements) {
-      const processKey = `${agreement.id}:${agreement.status}:${agreement.updatedAt.toISOString()}`;
+      const processKey = buildProcessKey(agreement, new Date());
       if (processedSet.has(processKey)) {
         continue;
       }
@@ -403,6 +454,27 @@ async function processAgreement(agreement: any): Promise<void> {
         break;
       }
 
+      const readiness = evaluateRecommendationReadiness({
+        dispute: openDispute,
+        agreement,
+        now,
+      });
+
+      if (!readiness.ready) {
+        await createLog({
+          agreementId: agreement.id,
+          level: 'INFO',
+          eventType: 'RULE_CHECK_STARTED',
+          message: 'AI recommendation is waiting for a counterparty reply or dispute window expiry',
+          metadata: {
+            milestoneId: currentMilestone.id,
+            disputeId: openDispute.id,
+            responseDeadlineAt: readiness.responseDeadlineAt.toISOString(),
+          },
+        });
+        break;
+      }
+
       const proof = currentMilestone.proofs[0];
 
       const recommendation = await generateRecommendation(agreement.id, {
@@ -413,6 +485,11 @@ async function processAgreement(agreement: any): Promise<void> {
         proofType: proof?.proofType || null,
         disputeReason: openDispute.reason,
         evidenceNotes: openDispute.evidenceNotes,
+        evidenceTimeline: (openDispute.evidenceEntries || []).map((entry: any) => ({
+          submittedBy: entry.submittedBy,
+          content: entry.content,
+          createdAt: entry.createdAt.toISOString(),
+        })),
         deadlineAt: agreement.deadlineAt.toISOString(),
         status: agreement.status,
       });

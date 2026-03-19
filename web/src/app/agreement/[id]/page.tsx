@@ -32,6 +32,49 @@ function canSignerFundAgreement(signer: ccc.Signer | undefined) {
   return signer?.type === ccc.SignerType.CKB || signer?.type === ccc.SignerType.EVM;
 }
 
+function getParticipantLabel(
+  address: string,
+  agreement: { clientAddress: string; workerAddress: string }
+) {
+  if (address === agreement.clientAddress) {
+    return 'Client';
+  }
+
+  if (address === agreement.workerAddress) {
+    return 'Worker';
+  }
+
+  return 'Participant';
+}
+
+function getRecommendationAvailability(dispute: any, agreement: any) {
+  if (!dispute) {
+    return null;
+  }
+
+  const responseDeadlineAt = new Date(
+    new Date(dispute.createdAt).getTime() + (agreement.disputeWindowSecs * 1000)
+  );
+  const counterpartyAddress =
+    dispute.openedBy === agreement.clientAddress
+      ? agreement.workerAddress
+      : dispute.openedBy === agreement.workerAddress
+        ? agreement.clientAddress
+        : null;
+  const hasCounterpartyReply = counterpartyAddress
+    ? (dispute.evidenceEntries || []).some((entry: any) => entry.submittedBy === counterpartyAddress)
+    : (dispute.evidenceEntries || []).some((entry: any) => entry.submittedBy !== dispute.openedBy);
+  const responseWindowExpired = Date.now() >= responseDeadlineAt.getTime();
+
+  return {
+    ready: hasCounterpartyReply || responseWindowExpired,
+    counterpartyAddress,
+    hasCounterpartyReply,
+    responseWindowExpired,
+    responseDeadlineAt,
+  };
+}
+
 async function addressesMatchOnSignerNetwork(
   signer: ccc.Signer,
   leftAddress: string,
@@ -59,6 +102,7 @@ export default function AgreementDetailPage() {
   const walletAddress = useStore((s) => s.walletAddress);
   const authToken = useStore((s) => s.authToken);
   const updateCount = useStore((s) => s.agreementUpdateCount);
+  const wsConnected = useStore((s) => s.wsConnected);
 
   const [agreement, setAgreement] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -70,7 +114,6 @@ export default function AgreementDetailPage() {
   const [disputeReason, setDisputeReason] = useState('');
   const [evidenceNotes, setEvidenceNotes] = useState('');
   const [additionalEvidence, setAdditionalEvidence] = useState('');
-  const [recommendation, setRecommendation] = useState<any>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -298,7 +341,6 @@ export default function AgreementDetailPage() {
       });
       setDisputeReason('');
       setEvidenceNotes('');
-      setRecommendation(null);
       await refreshAgreement();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to open dispute');
@@ -312,8 +354,7 @@ export default function AgreementDetailPage() {
     setError(null);
 
     try {
-      const rec = await api.getDisputeRecommendation(id);
-      setRecommendation(rec);
+      await api.getDisputeRecommendation(id);
       await refreshAgreement();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to get recommendation');
@@ -342,7 +383,6 @@ export default function AgreementDetailPage() {
         content: additionalEvidence,
       });
       setAdditionalEvidence('');
-      setRecommendation(null);
       await refreshAgreement();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add dispute evidence');
@@ -411,16 +451,14 @@ export default function AgreementDetailPage() {
   const isWorker = walletAddress === agreement.workerAddress;
   const currentOpenDispute =
     agreement.disputes?.find((item: any) => !item.resolvedAt) || null;
-  const displayedRecommendation = recommendation || (
-    currentOpenDispute?.aiRecommendation
-      ? {
-          recommendation: currentOpenDispute.aiRecommendation,
-          confidence: currentOpenDispute.aiConfidence,
-          summary: currentOpenDispute.aiSummary,
-          rationale: currentOpenDispute.aiRationale,
-        }
-      : null
-  );
+  const displayedRecommendation = currentOpenDispute?.aiRecommendation
+    ? {
+        recommendation: currentOpenDispute.aiRecommendation,
+        confidence: currentOpenDispute.aiConfidence,
+        summary: currentOpenDispute.aiSummary,
+        rationale: currentOpenDispute.aiRationale,
+      }
+    : null;
   const awaitingHybridReview =
     agreement.reviewerMode === 'HYBRID' && currentMilestone?.status === 'PROOF_SUBMITTED';
   const canClientReview =
@@ -439,6 +477,28 @@ export default function AgreementDetailPage() {
   const approveLoading = actionLoading === 'APPROVE';
   const rejectLoading = actionLoading === 'REJECT';
   const refreshingStatus = actionLoading === 'refresh';
+  const disputeOpenedByLabel = currentOpenDispute
+    ? getParticipantLabel(currentOpenDispute.openedBy, agreement)
+    : null;
+  const canReplyToDispute = Boolean(currentOpenDispute) && (isClient || isWorker);
+  const disputeReplyCount = currentOpenDispute?.evidenceEntries?.length || 0;
+  const recommendationAvailability = getRecommendationAvailability(currentOpenDispute, agreement);
+  const expectedReplyLabel = recommendationAvailability?.counterpartyAddress
+    ? getParticipantLabel(recommendationAvailability.counterpartyAddress, agreement)
+    : 'other participant';
+  const recommendationWaitMessage = recommendationAvailability && !recommendationAvailability.ready
+    ? `The AI recommendation unlocks after the ${expectedReplyLabel.toLowerCase()} replies, or after ${recommendationAvailability.responseDeadlineAt.toLocaleString()} if no reply arrives.`
+    : null;
+  const replyPlaceholder = isClient
+    ? 'Reply to the worker with any clarification, screenshots, or acceptance notes...'
+    : isWorker
+      ? 'Reply to the client dispute with your explanation, proof links, or supporting context...'
+      : 'Reply to this dispute...';
+  const replyHelpText = isClient
+    ? 'Your reply is visible to the worker immediately while both pages are open.'
+    : isWorker
+      ? 'Use this to answer the client dispute directly. Your reply appears in the shared thread.'
+      : 'Replies appear in the shared dispute thread.';
 
   return (
     <div className="min-h-screen">
@@ -828,22 +888,38 @@ export default function AgreementDetailPage() {
 
             {agreement.status === 'DISPUTED' && currentMilestone && currentOpenDispute && (
               <div className="bg-agent-card border border-purple-800/50 rounded-xl p-6">
-                <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
-                  <AgentIcon className="w-5 h-5 text-purple-400" />
-                  AI Recommendation for {currentMilestone.title}
-                </h3>
+                <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
+                      <ScaleIcon className="w-5 h-5 text-purple-400" />
+                      Dispute Conversation for {currentMilestone.title}
+                    </h3>
+                    <p className="text-sm text-gray-400">
+                      Both participants can reply here. {wsConnected ? 'New replies appear automatically while this page is open.' : 'Reconnect to live updates to see new replies automatically.'}
+                    </p>
+                  </div>
+                  <span
+                    className={`rounded-full border px-3 py-1 text-[11px] font-medium ${
+                      wsConnected
+                        ? 'border-emerald-800/40 bg-emerald-950/40 text-emerald-300'
+                        : 'border-white/10 bg-slate-900/60 text-gray-300'
+                    }`}
+                  >
+                    {wsConnected ? 'Live updates on' : 'Live updates off'}
+                  </span>
+                </div>
 
-                <div className="mb-5 rounded-lg border border-agent-border bg-agent-bg/60 p-4">
-                  <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-gray-500">
-                    <span className="rounded-full bg-red-950/30 px-2 py-1 text-red-200">
-                      Dispute opened by {currentOpenDispute.openedBy === agreement.clientAddress ? 'client' : currentOpenDispute.openedBy === agreement.workerAddress ? 'worker' : 'participant'}
+                <div className="mb-5 rounded-lg border border-red-900/50 bg-red-950/20 p-4">
+                  <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-gray-400">
+                    <span className="rounded-full bg-red-950/40 px-2 py-1 text-red-200">
+                      {disputeOpenedByLabel} opened this dispute
                     </span>
                     <span>{new Date(currentOpenDispute.createdAt).toLocaleString()}</span>
                   </div>
-                  <p className="text-sm text-white">{currentOpenDispute.reason}</p>
+                  <p className="text-sm font-medium text-white whitespace-pre-wrap">{currentOpenDispute.reason}</p>
                   {currentOpenDispute.evidenceNotes ? (
-                    <p className="mt-2 text-sm text-gray-400">
-                      Initial context: {currentOpenDispute.evidenceNotes}
+                    <p className="mt-3 text-sm text-gray-300 whitespace-pre-wrap">
+                      {currentOpenDispute.evidenceNotes}
                     </p>
                   ) : null}
                 </div>
@@ -851,110 +927,141 @@ export default function AgreementDetailPage() {
                 <div className="mb-5 rounded-lg border border-agent-border bg-agent-bg/60 p-4">
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <div>
-                      <h4 className="text-sm font-medium text-white">Dispute Evidence Timeline</h4>
-                      <p className="text-xs text-gray-500">Both sides can add more context before asking the AI again.</p>
+                      <h4 className="text-sm font-medium text-white">Replies</h4>
+                      <p className="text-xs text-gray-500">This thread is where the client and worker answer each other.</p>
                     </div>
                     <span className="text-xs text-gray-500">
-                      {currentOpenDispute.evidenceEntries?.length || 0} follow-up notes
+                      {disputeReplyCount} {disputeReplyCount === 1 ? 'reply' : 'replies'}
                     </span>
                   </div>
 
-                  {currentOpenDispute.evidenceEntries?.length ? (
-                    <div className="space-y-3 mb-4">
-                      {currentOpenDispute.evidenceEntries.map((entry: any) => (
-                        <div key={entry.id} className="rounded-lg border border-white/5 bg-slate-950/30 px-3 py-2">
-                          <div className="mb-1 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wide text-gray-500">
-                            <span>
-                              {entry.submittedBy === agreement.clientAddress
-                                ? 'Client'
-                                : entry.submittedBy === agreement.workerAddress
-                                  ? 'Worker'
-                                  : entry.submittedBy}
-                            </span>
-                            <span>{new Date(entry.createdAt).toLocaleString()}</span>
+                  {disputeReplyCount ? (
+                    <div className="mb-4 space-y-3">
+                      {currentOpenDispute.evidenceEntries.map((entry: any) => {
+                        const entryLabel = getParticipantLabel(entry.submittedBy, agreement);
+
+                        return (
+                          <div key={entry.id} className="rounded-lg border border-white/5 bg-slate-950/30 px-3 py-3">
+                            <div className="mb-2 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wide text-gray-500">
+                              <span
+                                className={`rounded-full px-2 py-1 ${
+                                  entryLabel === 'Client'
+                                    ? 'bg-blue-950/40 text-blue-300'
+                                    : entryLabel === 'Worker'
+                                      ? 'bg-amber-950/40 text-amber-300'
+                                      : 'bg-slate-900/60 text-gray-300'
+                                }`}
+                              >
+                                {entryLabel} reply
+                              </span>
+                              <span>{new Date(entry.createdAt).toLocaleString()}</span>
+                            </div>
+                            <p className="text-sm text-gray-300 whitespace-pre-wrap">{entry.content}</p>
                           </div>
-                          <p className="text-sm text-gray-300 whitespace-pre-wrap">{entry.content}</p>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   ) : (
-                    <p className="mb-4 text-sm text-gray-500">No follow-up evidence has been added yet.</p>
+                    <p className="mb-4 text-sm text-gray-500">
+                      No one has replied yet. The worker can answer the client dispute here, and the client can respond back in the same thread.
+                    </p>
                   )}
 
-                  <textarea
-                    className="w-full bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 mb-3 h-20 resize-none"
-                    placeholder="Add more context, clarification, or evidence for the dispute..."
-                    value={additionalEvidence}
-                    onChange={(e) => setAdditionalEvidence(e.target.value)}
-                  />
-                  <button
-                    onClick={handleSubmitDisputeEvidence}
-                    disabled={actionLoading === 'dispute-evidence' || !additionalEvidence.trim()}
-                    className="rounded-lg border border-purple-600/40 px-4 py-2 text-sm font-medium text-purple-300 transition-colors hover:bg-purple-900/20 disabled:opacity-50"
-                  >
-                    {actionLoading === 'dispute-evidence' ? 'Saving context...' : 'Add More Context'}
-                  </button>
+                  {canReplyToDispute && (
+                    <>
+                      <label className="mb-2 block text-sm font-medium text-white">
+                        {isWorker ? 'Worker Reply' : isClient ? 'Client Reply' : 'Reply'}
+                      </label>
+                      <textarea
+                        className="w-full bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 mb-2 h-24 resize-none"
+                        placeholder={replyPlaceholder}
+                        value={additionalEvidence}
+                        onChange={(e) => setAdditionalEvidence(e.target.value)}
+                      />
+                      <p className="mb-3 text-xs text-gray-500">{replyHelpText}</p>
+                      <button
+                        onClick={handleSubmitDisputeEvidence}
+                        disabled={actionLoading === 'dispute-evidence' || !additionalEvidence.trim()}
+                        className="rounded-lg border border-purple-600/40 px-4 py-2 text-sm font-medium text-purple-300 transition-colors hover:bg-purple-900/20 disabled:opacity-50"
+                      >
+                        {actionLoading === 'dispute-evidence' ? 'Sending reply...' : 'Send Reply'}
+                      </button>
+                    </>
+                  )}
                 </div>
 
-                {displayedRecommendation ? (
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-3">
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-bold ${
-                          displayedRecommendation.recommendation === 'APPROVE_PAYOUT'
-                            ? 'bg-green-900/50 text-green-300'
-                            : displayedRecommendation.recommendation === 'REFUND_CLIENT'
-                              ? 'bg-red-900/50 text-red-300'
-                              : displayedRecommendation.recommendation === 'REQUEST_MORE_EVIDENCE'
-                                ? 'bg-yellow-900/50 text-yellow-300'
-                                : 'bg-purple-900/50 text-purple-300'
-                        }`}
-                      >
-                        {displayedRecommendation.recommendation.replace(/_/g, ' ')}
-                      </span>
-                      <span className="text-xs text-gray-400">Confidence: {displayedRecommendation.confidence}%</span>
-                    </div>
-                    <p className="text-sm text-gray-300">{displayedRecommendation.summary}</p>
-                    <p className="text-xs text-gray-400 italic">{displayedRecommendation.rationale}</p>
-                    <div className="flex items-center gap-1.5 text-[10px] text-gray-600">
-                      <ClockIcon className="w-3 h-3" />
-                      Advisory only, the final action still follows your reviewer mode.
-                    </div>
-                  </div>
-                ) : (
-                  <div>
-                    <p className="text-sm text-gray-400 mb-4">Generate a recommendation for the disputed milestone.</p>
-                    <button
-                      onClick={handleGetRecommendation}
-                      disabled={actionLoading === 'recommend'}
-                      className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white px-6 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2"
-                    >
-                      {actionLoading === 'recommend' ? (
-                        <>
-                          <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                          Analyzing...
-                        </>
-                      ) : (
-                        <>
-                          <AgentIcon className="w-4 h-4" />
-                          Get Recommendation
-                        </>
-                      )}
-                    </button>
-                  </div>
-                )}
+                <div>
+                  <h4 className="text-sm font-medium text-white mb-3 flex items-center gap-2">
+                    <AgentIcon className="w-4 h-4 text-purple-400" />
+                    AI Recommendation
+                  </h4>
 
-                {displayedRecommendation ? (
-                  <div className="mt-4">
-                    <button
-                      onClick={handleGetRecommendation}
-                      disabled={actionLoading === 'recommend'}
-                      className="rounded-lg border border-purple-600/40 px-4 py-2 text-sm font-medium text-purple-300 transition-colors hover:bg-purple-900/20 disabled:opacity-50"
-                    >
-                      {actionLoading === 'recommend' ? 'Re-analyzing...' : 'Regenerate Recommendation'}
-                    </button>
-                  </div>
-                ) : null}
+                  {displayedRecommendation ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-3">
+                        <span
+                          className={`px-3 py-1 rounded-full text-xs font-bold ${
+                            displayedRecommendation.recommendation === 'APPROVE_PAYOUT'
+                              ? 'bg-green-900/50 text-green-300'
+                              : displayedRecommendation.recommendation === 'REFUND_CLIENT'
+                                ? 'bg-red-900/50 text-red-300'
+                                : displayedRecommendation.recommendation === 'REQUEST_MORE_EVIDENCE'
+                                  ? 'bg-yellow-900/50 text-yellow-300'
+                                  : 'bg-purple-900/50 text-purple-300'
+                          }`}
+                        >
+                          {displayedRecommendation.recommendation.replace(/_/g, ' ')}
+                        </span>
+                        <span className="text-xs text-gray-400">Confidence: {displayedRecommendation.confidence}%</span>
+                      </div>
+                      <p className="text-sm text-gray-300">{displayedRecommendation.summary}</p>
+                      <p className="text-xs text-gray-400 italic">{displayedRecommendation.rationale}</p>
+                      <div className="flex items-center gap-1.5 text-[10px] text-gray-600">
+                        <ClockIcon className="w-3 h-3" />
+                        Advisory only, the final action still follows your reviewer mode.
+                      </div>
+                    </div>
+                  ) : recommendationAvailability && !recommendationAvailability.ready ? (
+                    <div className="rounded-lg border border-purple-900/40 bg-purple-950/20 px-4 py-3">
+                      <p className="text-sm text-gray-300">{recommendationWaitMessage}</p>
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="text-sm text-gray-400 mb-4">
+                        Generate a recommendation for the disputed milestone now that the response step is complete.
+                      </p>
+                      <button
+                        onClick={handleGetRecommendation}
+                        disabled={actionLoading === 'recommend'}
+                        className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white px-6 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2"
+                      >
+                        {actionLoading === 'recommend' ? (
+                          <>
+                            <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                            Analyzing...
+                          </>
+                        ) : (
+                          <>
+                            <AgentIcon className="w-4 h-4" />
+                            Get Recommendation
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
+
+                  {displayedRecommendation ? (
+                    <div className="mt-4">
+                      <button
+                        onClick={handleGetRecommendation}
+                        disabled={actionLoading === 'recommend'}
+                        className="rounded-lg border border-purple-600/40 px-4 py-2 text-sm font-medium text-purple-300 transition-colors hover:bg-purple-900/20 disabled:opacity-50"
+                      >
+                        {actionLoading === 'recommend' ? 'Re-analyzing...' : 'Regenerate Recommendation'}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             )}
 

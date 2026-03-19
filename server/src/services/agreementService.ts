@@ -123,6 +123,23 @@ function serializeAgreementForBroadcast(agreement: {
   };
 }
 
+export async function broadcastAgreementUpdateById(agreementId: string) {
+  const agreement = await prisma.agreement.findUnique({
+    where: { id: agreementId },
+  });
+
+  if (!agreement) {
+    return null;
+  }
+
+  broadcast({
+    type: 'AGREEMENT_UPDATE',
+    payload: serializeAgreementForBroadcast(agreement),
+  });
+
+  return agreement;
+}
+
 async function fetchAgreementOrThrow(agreementId: string) {
   const agreement = await prisma.agreement.findUnique({
     where: { id: agreementId },
@@ -509,6 +526,16 @@ export async function addDisputeEvidence(
     },
   });
 
+  await prisma.dispute.update({
+    where: { id: disputeId },
+    data: {
+      aiSummary: null,
+      aiRecommendation: null,
+      aiConfidence: null,
+      aiRationale: null,
+    },
+  });
+
   await createLog({
     agreementId,
     level: 'INFO',
@@ -520,6 +547,8 @@ export async function addDisputeEvidence(
       submittedBy,
     },
   });
+
+  await broadcastAgreementUpdateById(agreementId);
 
   return {
     evidence,

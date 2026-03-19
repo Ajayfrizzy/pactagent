@@ -3,7 +3,11 @@ import { z } from 'zod';
 import { requireAuth } from '../middleware/auth';
 import { prisma } from '../db';
 import * as agreementService from '../services/agreementService';
-import { generateRecommendation, saveRecommendation } from '../services/disputeService';
+import {
+  evaluateRecommendationReadiness,
+  generateRecommendation,
+  saveRecommendation,
+} from '../services/disputeService';
 import { isValidFiberPublicKey } from '../services/fiberService';
 import { getLogs } from '../services/logService';
 
@@ -349,6 +353,18 @@ router.post('/:id/dispute/recommendation', async (req: Request, res: Response) =
     const dispute = agreement.disputes.find((item) => !item.resolvedAt);
     if (!dispute) {
       return res.status(404).json({ success: false, error: 'No open dispute found' });
+    }
+
+    const readiness = evaluateRecommendationReadiness({
+      dispute,
+      agreement,
+    });
+
+    if (!readiness.ready) {
+      return res.status(409).json({
+        success: false,
+        error: `AI recommendation is not available yet. It unlocks after the other participant replies or after ${readiness.responseDeadlineAt.toISOString()}.`,
+      });
     }
 
     const milestone = agreement.milestones?.find((item) => item.id === dispute.milestoneId);
