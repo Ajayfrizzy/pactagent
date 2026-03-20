@@ -7,6 +7,18 @@ import { createLog } from '../services/logService';
  * Runs the agent loop on a configurable interval.
  * Can be started separately: npm run worker
  */
+let agentTimer: NodeJS.Timeout | null = null;
+
+function scheduleNextCycle() {
+  agentTimer = setTimeout(async () => {
+    try {
+      await runAgentCycle();
+    } finally {
+      scheduleNextCycle();
+    }
+  }, config.agentIntervalMs);
+}
+
 async function main() {
   console.log(`[AGENT] PactAgent Worker starting...`);
   console.log(`[AGENT] Cycle interval: ${config.agentIntervalMs}ms`);
@@ -24,9 +36,7 @@ async function main() {
   await runAgentCycle();
 
   // Then run on interval
-  setInterval(async () => {
-    await runAgentCycle();
-  }, config.agentIntervalMs);
+  scheduleNextCycle();
 }
 
 main().catch((err) => {

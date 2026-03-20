@@ -59,7 +59,17 @@ app.get('/api/config', async (_req, res) => {
 const server = http.createServer(app);
 initWebSocket(server);
 
-let agentInterval: NodeJS.Timeout | null = null;
+let agentTimer: NodeJS.Timeout | null = null;
+
+function scheduleNextAgentCycle() {
+  agentTimer = setTimeout(async () => {
+    try {
+      await runAgentCycle();
+    } finally {
+      scheduleNextAgentCycle();
+    }
+  }, config.agentIntervalMs);
+}
 
 async function startAgent() {
   console.log(`[AGENT] Starting embedded agent watcher (interval: ${config.agentIntervalMs}ms)`);
@@ -73,9 +83,7 @@ async function startAgent() {
 
   await runAgentCycle();
 
-  agentInterval = setInterval(async () => {
-    await runAgentCycle();
-  }, config.agentIntervalMs);
+  scheduleNextAgentCycle();
 }
 
 server.listen(config.port, () => {

@@ -2,6 +2,11 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+function parseNumber(value: string | undefined, fallback: number) {
+  const parsed = parseInt(value || '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 function parseCorsOrigins(value?: string) {
   if (!value) {
     return ['http://localhost:3000'];
@@ -14,7 +19,7 @@ function parseCorsOrigins(value?: string) {
 }
 
 export const config = {
-  port: parseInt(process.env.PORT || '4000', 10),
+  port: parseNumber(process.env.PORT, 4000),
   corsOrigins: parseCorsOrigins(process.env.CORS_ORIGIN),
 
   ckbNodeUrl: process.env.CKB_NODE_URL || 'https://testnet.ckb.dev/',
@@ -23,7 +28,7 @@ export const config = {
   treasuryAddress: process.env.TREASURY_CKB_ADDRESS || '',
   defaultCkbFeeRate: process.env.DEFAULT_CKB_FEE_RATE || '1200',
 
-  agentIntervalMs: parseInt(process.env.AGENT_INTERVAL_MS || '10000', 10),
+  agentIntervalMs: parseNumber(process.env.AGENT_INTERVAL_MS, 5000),
 
   fiberEnabled: process.env.FIBER_ENABLED === 'true',
   fiberNodeUrl: process.env.FIBER_NODE_URL || 'http://localhost:8227',
@@ -33,11 +38,11 @@ export const config = {
   aiProvider: process.env.AI_PROVIDER || 'mock',
   openaiApiKey: process.env.OPENAI_API_KEY || '',
   openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-  aiTimeoutMs: parseInt(process.env.AI_TIMEOUT_MS || '30000', 10),
+  aiTimeoutMs: parseNumber(process.env.AI_TIMEOUT_MS, 30000),
 
   authJwtSecret: process.env.AUTH_JWT_SECRET || '',
-  authTokenTtlSecs: parseInt(process.env.AUTH_TOKEN_TTL_SECS || '604800', 10),
-  authChallengeTtlSecs: parseInt(process.env.AUTH_CHALLENGE_TTL_SECS || '600', 10),
+  authTokenTtlSecs: parseNumber(process.env.AUTH_TOKEN_TTL_SECS, 604800),
+  authChallengeTtlSecs: parseNumber(process.env.AUTH_CHALLENGE_TTL_SECS, 600),
 };
 
 export function requireConfig(value: string, name: string) {
