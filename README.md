@@ -438,6 +438,145 @@ Potential next steps:
 - add notifications, audit exports, and compliance-friendly reporting
 - expose PactAgent as infrastructure for third-party apps
 
+## Recommended Improvements And High-Impact Features
+
+If you want to push PactAgent from a strong prototype into a much more serious product, these are the most valuable additions to prioritize.
+
+### 1. Trustless Escrow And Safer Settlement
+
+- move from treasury custody toward true on-chain escrow with custom CKB lock scripts
+- assign a unique funding destination or escrow cell per agreement instead of using a shared treasury flow
+- verify funding transactions on-chain before changing agreement status to `FUNDED`
+- store settlement references per milestone, not only at the agreement level
+- support confirmation tracking for funding, payout, and refund transactions
+- add explicit failure recovery flows for payout and refund retries
+
+Why this matters:
+
+This is the biggest step toward making PactAgent feel credible for real value transfer. It reduces trust assumptions and makes the product much stronger technically and commercially.
+
+### 2. Better Dispute And Review Infrastructure
+
+- add a dedicated arbitrator role with a separate review dashboard
+- support dispute states like `OPEN`, `RESPONDED`, `UNDER_ARBITRATION`, and `RESOLVED`
+- allow structured evidence uploads such as files, URLs, images, hashes, and timestamps
+- support milestone-specific acceptance criteria that are defined up front and reviewed later
+- add signed reviewer decisions and immutable dispute history
+- let the client choose between self-review, named arbitrator review, or DAO/community review
+
+Why this matters:
+
+Disputes are one of the core reasons a system like PactAgent exists. Strong dispute tooling makes the platform more defensible and much more useful for professional work.
+
+### 3. Richer Proof Systems
+
+- support file attachments through IPFS or another object storage layer
+- add proof templates by job type such as design review, code delivery, audit report, content delivery, and consulting
+- support proof bundles with multiple artifacts per milestone
+- add optional oracle or attestation checks for objective milestones
+- include proof expiry, revision history, and resubmission workflows
+- add previewable proof panels in the agreement UI
+
+Why this matters:
+
+Right now proof is mostly text or link based. Richer proof handling makes the review flow more realistic and much easier for real users to trust.
+
+### 4. Stronger Agent Architecture
+
+- move the worker loop from a polling-only model to a queue-backed job system
+- add distributed locking so only one worker instance can process a given agreement at a time
+- break agent actions into explicit jobs like funding verification, proof review, dispute analysis, payout, and refund
+- add retry limits, dead-letter handling, and alerting for stuck agreements
+- support scheduled reminders before deadlines and dispute window expiry
+- expose an internal agent timeline for debugging and replay
+
+Why this matters:
+
+This would make the automation layer more production-ready and easier to operate once usage grows beyond a demo environment.
+
+### 5. Access Control, Privacy, And Security Hardening
+
+- authenticate WebSocket connections and scope updates by agreement participant
+- protect Fiber admin routes behind admin-only authentication
+- add role-separated admin, operator, and arbitrator permissions
+- store less sensitive operational data in public feeds
+- add rate limiting on auth, funding, dispute, and recommendation endpoints
+- add stronger wallet identity normalization and signer verification rules
+- introduce audit logs for privileged actions
+
+Why this matters:
+
+These changes make PactAgent safer to deploy publicly and help prevent accidental data exposure or unauthorized operational actions.
+
+### 6. Product Experience And Workflow Features
+
+- support draft editing and milestone re-ordering before funding
+- add agreement cancellation before funding and controlled amendment proposals after funding
+- support milestone comments and participant chat per agreement
+- show clearer transaction progress, confirmations, and failure states in the UI
+- add mobile-friendly evidence and proof submission flows
+- add participant notifications by email, Telegram, Discord, or wallet-native alerts
+- add saved templates for common agreement types
+
+Why this matters:
+
+A strong workflow experience is what turns technical infrastructure into a product people actually want to keep using.
+
+### 7. Marketplace And Ecosystem Expansion
+
+- add public worker/client profiles with lightweight reputation history
+- support invite links for new agreements
+- expose embeddable API and webhook integrations for third-party platforms
+- integrate with DAO contributor tooling, grants systems, and bounty platforms
+- support multi-party agreements for agencies, teams, or milestone committees
+- add optional stablecoin or multi-asset settlement paths if the chain stack allows it
+
+Why this matters:
+
+This is where PactAgent starts becoming not just an app, but a reusable agreement engine for broader ecosystems.
+
+### 8. Reporting, Analytics, And Compliance Tooling
+
+- add downloadable agreement reports and dispute summaries
+- create dashboards for settlement success rate, dispute rate, payout speed, and agent actions
+- support searchable activity history across agreements
+- add export formats for finance, operations, and legal review
+- include treasury balance health checks and payout runway visibility
+- add agreement lifecycle metrics for marketplaces or enterprise teams
+
+Why this matters:
+
+Reporting turns PactAgent into something teams and organizations can rely on operationally, not just interact with occasionally.
+
+### 9. Engineering Quality And Developer Experience
+
+- add unit tests for state transitions, auth validation, and dispute logic
+- add integration tests for funding, payout, refund, and Fiber fallback behavior
+- add end-to-end tests for the main client and worker flows
+- remove duplicated transition rules by using the shared state machine as the single source of truth
+- add schema-level indexes for status, participant address, and log-heavy queries
+- add CI for linting, type-checking, tests, and Prisma validation
+- document deployment environments for local, staging, and production
+
+Why this matters:
+
+This is the layer that will make the project easier to maintain, easier to contribute to, and much more trustworthy over time.
+
+### 10. A Strong Product Version To Aim For
+
+An excellent next major version of PactAgent could include:
+
+- verified on-chain funding confirmation
+- milestone-level payout tracking
+- secure participant-scoped realtime updates
+- full dispute workspace with arbitrator mode
+- richer proof artifacts and evidence attachments
+- notification system and reporting exports
+- production-grade worker orchestration with retries and locks
+- test coverage around all money-moving flows
+
+That combination would make PactAgent feel much closer to a real crypto-native escrow platform rather than only a promising prototype.
+
 ## Why This Could Become A Real Product
 
 PactAgent is viable both as an end-user product and as infrastructure.
