@@ -10,6 +10,8 @@ async function main() {
     'ckt1qzda0cr08m85hc8jlnfp3zer7xulejywt49kt2rr0vthywaa50xwsqt4z78ng4yutl5u6xpc4jmn98ueg9a90rc2duhtf';
   const workerAddr =
     'ckt1qzda0cr08m85hc8jlnfp3zer7xulejywt49kt2rr0vthywaa50xwsqwgx292hnvmn68xf779vmzrshpmm6epn4c0cgwga';
+  const arbitratorAddr =
+    'ckt1qzda0cr08m85hc8jlnfp3zer7xulejywt49kt2rr0vthywaa50xwsq04g0372a9z33k20qx4wwvq85d9fllwuecamflgu';
   const workerFiberPubkey =
     '020202020202020202020202020202020202020202020202020202020202020202';
 
@@ -25,6 +27,12 @@ async function main() {
     create: { id: uuid(), walletAddress: workerAddr, role: 'worker' },
   });
 
+  await prisma.user.upsert({
+    where: { walletAddress: arbitratorAddr },
+    update: {},
+    create: { id: uuid(), walletAddress: arbitratorAddr, role: 'both' },
+  });
+
   const ag1Id = uuid();
   const ag1m1 = uuid();
   const ag1m2 = uuid();
@@ -35,6 +43,7 @@ async function main() {
       description: 'Redesign the landing page with milestone-based delivery and staged approval.',
       clientAddress: clientAddr,
       workerAddress: workerAddr,
+      arbitratorAddress: arbitratorAddr,
       amount: '50000000000',
       deadlineAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       disputeWindowSecs: 86400,
@@ -42,6 +51,12 @@ async function main() {
       reviewerMode: 'AUTO',
       releaseMode: 'PARTIAL',
       payoutNetwork: 'CKB',
+      escrowModel: 'TREASURY_BRIDGE',
+      escrowAddress: clientAddr,
+      agreementDigest: 'demo-agreement-digest-1',
+      milestoneDigest: 'demo-milestone-digest-1',
+      settlementStatus: 'FUNDED',
+      fundingConfirmedAt: new Date(),
       status: 'FUNDED',
       ckbTxHashFund: '0xdemo1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab',
       milestones: {
@@ -64,6 +79,19 @@ async function main() {
           },
         ],
       },
+      settlements: {
+        create: [
+          {
+            id: uuid(),
+            direction: 'FUNDING',
+            network: 'CKB',
+            status: 'CONFIRMED',
+            amount: '50000000000',
+            txHash: '0xdemo1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab',
+            confirmedAt: new Date(),
+          },
+        ],
+      },
     },
   });
 
@@ -77,6 +105,7 @@ async function main() {
       description: 'Audit delivered in two phases with an interim findings milestone.',
       clientAddress: clientAddr,
       workerAddress: workerAddr,
+      arbitratorAddress: arbitratorAddr,
       amount: '100000000000',
       deadlineAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
       disputeWindowSecs: 172800,
@@ -84,6 +113,12 @@ async function main() {
       reviewerMode: 'HYBRID',
       releaseMode: 'PARTIAL',
       payoutNetwork: 'CKB',
+      escrowModel: 'TREASURY_BRIDGE',
+      escrowAddress: clientAddr,
+      agreementDigest: 'demo-agreement-digest-2',
+      milestoneDigest: 'demo-milestone-digest-2',
+      settlementStatus: 'DISPUTE_LOCKED',
+      fundingConfirmedAt: new Date(),
       status: 'DISPUTED',
       ckbTxHashFund: '0xdemo2234567890abcdef1234567890abcdef1234567890abcdef1234567890ab',
       milestones: {
@@ -106,6 +141,19 @@ async function main() {
           },
         ],
       },
+      settlements: {
+        create: [
+          {
+            id: uuid(),
+            direction: 'FUNDING',
+            network: 'CKB',
+            status: 'CONFIRMED',
+            amount: '100000000000',
+            txHash: '0xdemo2234567890abcdef1234567890abcdef1234567890abcdef1234567890ab',
+            confirmedAt: new Date(),
+          },
+        ],
+      },
     },
   });
 
@@ -120,6 +168,7 @@ async function main() {
       description: 'Build an API integration with staged releases through Fiber.',
       clientAddress: clientAddr,
       workerAddress: workerAddr,
+      arbitratorAddress: arbitratorAddr,
       workerFiberPubkey,
       amount: '30000000000',
       deadlineAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
@@ -128,6 +177,11 @@ async function main() {
       reviewerMode: 'AUTO',
       releaseMode: 'PARTIAL',
       payoutNetwork: 'FIBER',
+      escrowModel: 'TREASURY_BRIDGE',
+      escrowAddress: clientAddr,
+      agreementDigest: 'demo-agreement-digest-3',
+      milestoneDigest: 'demo-milestone-digest-3',
+      settlementStatus: 'UNFUNDED',
       status: 'DRAFT',
       milestones: {
         create: [

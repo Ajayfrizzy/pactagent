@@ -18,6 +18,17 @@ function parseCorsOrigins(value?: string) {
     .filter(Boolean);
 }
 
+function parseCsv(value?: string) {
+  if (!value) {
+    return [];
+  }
+
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 export const config = {
   port: parseNumber(process.env.PORT, 4000),
   corsOrigins: parseCorsOrigins(process.env.CORS_ORIGIN),
@@ -28,7 +39,7 @@ export const config = {
   treasuryAddress: process.env.TREASURY_CKB_ADDRESS || '',
   defaultCkbFeeRate: process.env.DEFAULT_CKB_FEE_RATE || '1200',
 
-  agentIntervalMs: parseNumber(process.env.AGENT_INTERVAL_MS, 5000),
+  agentIntervalMs: parseNumber(process.env.AGENT_INTERVAL_MS, 2000),
 
   fiberEnabled: process.env.FIBER_ENABLED === 'true',
   fiberNodeUrl: process.env.FIBER_NODE_URL || 'http://localhost:8227',
@@ -43,6 +54,20 @@ export const config = {
   authJwtSecret: process.env.AUTH_JWT_SECRET || '',
   authTokenTtlSecs: parseNumber(process.env.AUTH_TOKEN_TTL_SECS, 604800),
   authChallengeTtlSecs: parseNumber(process.env.AUTH_CHALLENGE_TTL_SECS, 600),
+
+  adminAddresses: parseCsv(process.env.ADMIN_ADDRESSES).map((address) => address.toLowerCase()),
+  authRateLimitWindowMs: parseNumber(process.env.AUTH_RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000),
+  authRateLimitMax: parseNumber(process.env.AUTH_RATE_LIMIT_MAX, 20),
+  actionRateLimitWindowMs: parseNumber(process.env.ACTION_RATE_LIMIT_WINDOW_MS, 60 * 1000),
+  actionRateLimitMax: parseNumber(process.env.ACTION_RATE_LIMIT_MAX, 12),
+
+  onchainEscrowEnabled: process.env.ONCHAIN_ESCROW_ENABLED === 'true',
+  onchainLockCodeHash: process.env.ONCHAIN_LOCK_CODE_HASH || '',
+  onchainLockHashType: (process.env.ONCHAIN_LOCK_HASH_TYPE || 'type') as 'type' | 'data' | 'data1',
+  onchainLockTxHash: process.env.ONCHAIN_LOCK_TX_HASH || '',
+  onchainLockIndex: process.env.ONCHAIN_LOCK_INDEX || '',
+  onchainLockDepType: (process.env.ONCHAIN_LOCK_DEP_TYPE || 'code') as 'code' | 'depGroup',
+  onchainEscrowArgsSalt: process.env.ONCHAIN_ESCROW_ARGS_SALT || '',
 };
 
 export function requireConfig(value: string, name: string) {

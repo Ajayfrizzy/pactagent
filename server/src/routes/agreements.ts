@@ -1,8 +1,11 @@
 import { Request, Response, Router } from 'express';
 import { z } from 'zod';
+import { config } from '../config';
 import { requireAuth } from '../middleware/auth';
+import { createRateLimit } from '../middleware/rateLimit';
 import { prisma } from '../db';
 import * as agreementService from '../services/agreementService';
+import { createAuditLog, getAuditLogsForAgreement } from '../services/auditLogService';
 import {
   evaluateRecommendationReadiness,
   generateRecommendation,
@@ -10,8 +13,14 @@ import {
 } from '../services/disputeService';
 import { isValidFiberPublicKey } from '../services/fiberService';
 import { getLogs } from '../services/logService';
+import { runAgentCycle } from '../worker/agentLoop';
 
 const router = Router();
+const actionRateLimit = createRateLimit({
+  namespace: 'agreement-action',
+  windowMs: config.actionRateLimitWindowMs,
+  max: config.actionRateLimitMax,
+});
 
 type AgreementParticipantRecord = NonNullable<
   Awaited<ReturnType<typeof agreementService.getAgreementParticipantById>>
@@ -34,6 +43,7 @@ const createAgreementSchema = z.object({
   reviewerMode: z.enum(['AUTO', 'HYBRID', 'MANUAL']).default('AUTO'),
   releaseMode: z.enum(['FULL', 'PARTIAL']).default('FULL'),
   payoutNetwork: z.enum(['CKB', 'FIBER']).default('CKB'),
+  escrowModel: z.enum(['TREASURY_BRIDGE', 'ONCHAIN_LOCK']).default('TREASURY_BRIDGE'),
   milestones: z
     .array(
       z.object({
@@ -47,6 +57,14 @@ const createAgreementSchema = z.object({
 
 const fundSchema = z.object({
   txHash: z.string().min(1),
+  milestoneOutputs: z.array(
+    z.object({
+      milestoneId: z.string().min(1),
+      outputIndex: z.number().int().min(0),
+      escrowCellData: z.string().min(1),
+      refundTimeoutBlock: z.string().min(1),
+    })
+  ).optional(),
 });
 
 const submitProofSchema = z.object({
@@ -69,9 +87,19 @@ const addDisputeEvidenceSchema = z.object({
   content: z.string().min(1),
 });
 
+const mutualRefundConsentSchema = z.object({
+  actorAddress: z.string().min(1),
+});
+
 const reviewActionSchema = z.object({
   action: z.enum(['APPROVE', 'REJECT', 'ESCALATE']),
   reviewerAddress: z.string().min(1),
+});
+
+const onchainResolutionSchema = z.object({
+  milestoneId: z.string().min(1),
+  txHash: z.string().min(1),
+  direction: z.enum(['PAYOUT', 'REFUND']),
 });
 
 function getAuthAddress(req: Request) {
@@ -82,6 +110,12 @@ function getAuthAddress(req: Request) {
   return req.auth.address;
 }
 
+function triggerAgentCycleSoon(reason: string) {
+  void runAgentCycle().catch((err) => {
+    console.error(`[AGENT] Immediate cycle failed after ${reason}:`, err);
+  });
+}
+
 async function getAgreementParticipantRecord(req: Request): Promise<AgreementAccessResult<AgreementParticipantRecord>> {
   const agreement = await agreementService.getAgreementParticipantById(req.params.id);
   if (!agreement) {
@@ -89,7 +123,11 @@ async function getAgreementParticipantRecord(req: Request): Promise<AgreementAcc
   }
 
   const authAddress = getAuthAddress(req);
-  if (agreement.clientAddress !== authAddress && agreement.workerAddress !== authAddress) {
+  if (
+    agreement.clientAddress !== authAddress &&
+    agreement.workerAddress !== authAddress &&
+    agreement.arbitratorAddress !== authAddress
+  ) {
     return { error: 'You are not a participant in this agreement' as const };
   }
 
@@ -112,13 +150,20 @@ async function getAgreementDetailForParticipant(req: Request): Promise<Agreement
 
 router.use(requireAuth);
 
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', actionRateLimit, async (req: Request, res: Response) => {
   try {
     const authAddress = getAuthAddress(req);
     const data = createAgreementSchema.parse(req.body);
 
     if (data.clientAddress !== authAddress) {
       return res.status(403).json({ success: false, error: 'Authenticated wallet must match the client address' });
+    }
+
+    if (data.escrowModel === 'ONCHAIN_LOCK') {
+      return res.status(400).json({
+        success: false,
+        error: 'On-chain lock escrow is temporarily unavailable while mutual settlement replaces the arbitrator flow.',
+      });
     }
 
     if (data.payoutNetwork === 'FIBER' && !data.workerFiberPubkey) {
@@ -136,6 +181,18 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     const agreement = await agreementService.createAgreement(data);
+    await createAuditLog({
+      agreementId: agreement.id,
+      actorAddress: authAddress,
+      action: 'AGREEMENT_CREATED',
+      resourceType: 'AGREEMENT',
+      resourceId: agreement.id,
+      metadata: {
+        payoutNetwork: agreement.payoutNetwork,
+        reviewerMode: agreement.reviewerMode,
+        escrowModel: agreement.escrowModel,
+      },
+    });
     res.json({ success: true, data: agreement });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Validation error';
@@ -174,7 +231,7 @@ router.get('/:id', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/:id/fund', async (req: Request, res: Response) => {
+router.post('/:id/fund', actionRateLimit, async (req: Request, res: Response) => {
   try {
     const result = await getAgreementParticipantRecord(req);
     if ('error' in result) {
@@ -186,16 +243,73 @@ router.post('/:id/fund', async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, error: 'Only the client can fund this agreement' });
     }
 
-    const { txHash } = fundSchema.parse(req.body);
-    const agreement = await agreementService.fundAgreement(req.params.id, txHash);
-    res.json({ success: true, data: agreement });
+    const { txHash, milestoneOutputs } = fundSchema.parse(req.body);
+    const agreement = result.agreement.id && (await agreementService.getAgreementById(req.params.id));
+    const updated = agreement?.escrowModel === 'ONCHAIN_LOCK'
+      ? await agreementService.registerOnchainFundingIntent(req.params.id, txHash, milestoneOutputs || [])
+      : await agreementService.fundAgreement(req.params.id, txHash);
+    await createAuditLog({
+      agreementId: req.params.id,
+      actorAddress: authAddress,
+      action: 'AGREEMENT_FUNDING_SUBMITTED',
+      resourceType: 'SETTLEMENT',
+      resourceId: req.params.id,
+      metadata: { txHash },
+    });
+    res.json({ success: true, data: updated });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Validation error';
     res.status(400).json({ success: false, error: msg });
   }
 });
 
-router.post('/:id/submit-proof', async (req: Request, res: Response) => {
+router.post('/:id/onchain-resolution', actionRateLimit, async (req: Request, res: Response) => {
+  try {
+    const result = await getAgreementDetailForParticipant(req);
+    if ('error' in result) {
+      return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
+    }
+
+    const authAddress = getAuthAddress(req);
+    const { milestoneId, txHash, direction } = onchainResolutionSchema.parse(req.body);
+    const agreement = result.agreement;
+    const isClient = agreement.clientAddress === authAddress;
+    const isArbitrator = agreement.arbitratorAddress === authAddress;
+
+    if (agreement.escrowModel !== 'ONCHAIN_LOCK') {
+      return res.status(400).json({ success: false, error: 'This agreement does not use the on-chain lock settlement path' });
+    }
+
+    if (direction === 'PAYOUT' && !isClient && !isArbitrator) {
+      return res.status(403).json({ success: false, error: 'Only the client or appointed arbitrator can submit an on-chain payout resolution' });
+    }
+
+    if (direction === 'REFUND' && !isArbitrator && agreement.status !== 'DRAFT' && agreement.status !== 'FUNDED' && agreement.status !== 'PROOF_SUBMITTED' && agreement.status !== 'UNDER_REVIEW' && agreement.status !== 'DISPUTED') {
+      return res.status(403).json({ success: false, error: 'Only the arbitrator can submit an on-chain refund resolution unless the refund is handled by timeout.' });
+    }
+
+    const updated = await agreementService.recordOnchainResolutionIntent({
+      agreementId: req.params.id,
+      milestoneId,
+      txHash,
+      direction,
+    });
+    await createAuditLog({
+      agreementId: req.params.id,
+      actorAddress: authAddress,
+      action: direction === 'PAYOUT' ? 'ONCHAIN_PAYOUT_SUBMITTED' : 'ONCHAIN_REFUND_SUBMITTED',
+      resourceType: 'SETTLEMENT',
+      resourceId: req.params.id,
+      metadata: { txHash, milestoneId },
+    });
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to submit on-chain resolution';
+    res.status(400).json({ success: false, error: msg });
+  }
+});
+
+router.post('/:id/submit-proof', actionRateLimit, async (req: Request, res: Response) => {
   try {
     const result = await getAgreementParticipantRecord(req);
     if ('error' in result) {
@@ -215,6 +329,18 @@ router.post('/:id/submit-proof', async (req: Request, res: Response) => {
       data.content,
       data.contentHash
     );
+    await createAuditLog({
+      agreementId: req.params.id,
+      actorAddress: authAddress,
+      action: 'PROOF_SUBMITTED',
+      resourceType: 'AGREEMENT',
+      resourceId: req.params.id,
+      metadata: {
+        milestoneId: data.milestoneId,
+        proofType: data.proofType,
+      },
+    });
+    triggerAgentCycleSoon('proof submission');
     res.json({ success: true, data: response });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Validation error';
@@ -222,7 +348,7 @@ router.post('/:id/submit-proof', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/:id/open-dispute', async (req: Request, res: Response) => {
+router.post('/:id/open-dispute', actionRateLimit, async (req: Request, res: Response) => {
   try {
     const result = await getAgreementParticipantRecord(req);
     if ('error' in result) {
@@ -242,6 +368,16 @@ router.post('/:id/open-dispute', async (req: Request, res: Response) => {
       data.reason,
       data.evidenceNotes
     );
+    await createAuditLog({
+      agreementId: req.params.id,
+      actorAddress: authAddress,
+      action: 'DISPUTE_OPENED',
+      resourceType: 'DISPUTE',
+      resourceId: response.dispute.id,
+      metadata: {
+        milestoneId: data.milestoneId,
+      },
+    });
     res.json({ success: true, data: response });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Validation error';
@@ -249,7 +385,7 @@ router.post('/:id/open-dispute', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/:id/dispute/evidence', async (req: Request, res: Response) => {
+router.post('/:id/dispute/evidence', actionRateLimit, async (req: Request, res: Response) => {
   try {
     const result = await getAgreementParticipantRecord(req);
     if ('error' in result) {
@@ -268,6 +404,17 @@ router.post('/:id/dispute/evidence', async (req: Request, res: Response) => {
       data.submittedBy,
       data.content
     );
+    await createAuditLog({
+      agreementId: req.params.id,
+      actorAddress: authAddress,
+      action: 'DISPUTE_EVIDENCE_ADDED',
+      resourceType: 'DISPUTE',
+      resourceId: data.disputeId,
+      metadata: {
+        evidenceLength: data.content.length,
+      },
+    });
+    triggerAgentCycleSoon('dispute evidence');
     res.json({ success: true, data: response });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Validation error';
@@ -275,7 +422,7 @@ router.post('/:id/dispute/evidence', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/:id/review-action', async (req: Request, res: Response) => {
+router.post('/:id/dispute/refund-consent', actionRateLimit, async (req: Request, res: Response) => {
   try {
     const result = await getAgreementParticipantRecord(req);
     if ('error' in result) {
@@ -283,8 +430,31 @@ router.post('/:id/review-action', async (req: Request, res: Response) => {
     }
 
     const authAddress = getAuthAddress(req);
-    if (result.agreement.clientAddress !== authAddress) {
-      return res.status(403).json({ success: false, error: 'Only the client can review milestones' });
+    const data = mutualRefundConsentSchema.parse(req.body);
+    if (data.actorAddress !== authAddress) {
+      return res.status(403).json({ success: false, error: 'Authenticated wallet must match the refund approver' });
+    }
+
+    const response = await agreementService.recordMutualRefundConsent(req.params.id, data.actorAddress);
+    res.json({ success: true, data: response });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Validation error';
+    res.status(400).json({ success: false, error: msg });
+  }
+});
+
+router.post('/:id/review-action', actionRateLimit, async (req: Request, res: Response) => {
+  try {
+    const result = await getAgreementParticipantRecord(req);
+    if ('error' in result) {
+      return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
+    }
+
+    const authAddress = getAuthAddress(req);
+    const isClient = result.agreement.clientAddress === authAddress;
+
+    if (!isClient) {
+      return res.status(403).json({ success: false, error: 'Only the client can approve payout from the review panel' });
     }
 
     const { action, reviewerAddress } = reviewActionSchema.parse(req.body);
@@ -294,17 +464,50 @@ router.post('/:id/review-action', async (req: Request, res: Response) => {
 
     if (action === 'APPROVE') {
       const updated = await agreementService.approveCurrentMilestone(req.params.id);
+      await createAuditLog({
+        agreementId: req.params.id,
+        actorAddress: authAddress,
+        action: 'MILESTONE_APPROVED',
+        resourceType: 'AGREEMENT',
+        resourceId: req.params.id,
+      });
+      triggerAgentCycleSoon('milestone approval');
       return res.json({ success: true, data: updated });
     }
 
     if (action === 'REJECT') {
-      const updated = await agreementService.refundCurrentMilestone(req.params.id);
-      return res.json({ success: true, data: updated });
+      return res.status(409).json({
+        success: false,
+        error: 'Direct refunds are disabled. Open a dispute first, then both client and worker must approve the refund.',
+      });
     }
 
     res.json({ success: true, data: { message: 'Escalated for manual review' } });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Validation error';
+    res.status(400).json({ success: false, error: msg });
+  }
+});
+
+router.post('/:id/reconcile', actionRateLimit, async (req: Request, res: Response) => {
+  try {
+    const result = await getAgreementParticipantRecord(req);
+    if ('error' in result) {
+      return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
+    }
+
+    const authAddress = getAuthAddress(req);
+    const updated = await agreementService.reconcileAgreementSettlement(req.params.id);
+    await createAuditLog({
+      agreementId: req.params.id,
+      actorAddress: authAddress,
+      action: 'SETTLEMENT_RECHECK_REQUESTED',
+      resourceType: 'SETTLEMENT',
+      resourceId: req.params.id,
+    });
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unable to reconcile agreement settlement';
     res.status(400).json({ success: false, error: msg });
   }
 });
@@ -317,6 +520,22 @@ router.get('/:id/logs', async (req: Request, res: Response) => {
     }
 
     const logs = await getLogs(req.params.id);
+    res.json({ success: true, data: logs });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    res.status(500).json({ success: false, error: msg });
+  }
+});
+
+router.get('/:id/audit', async (req: Request, res: Response) => {
+  try {
+    const result = await getAgreementParticipantRecord(req);
+    if ('error' in result) {
+      return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
+    }
+
+    const limit = parseInt((req.query.limit as string) || '100', 10);
+    const logs = await getAuditLogsForAgreement(req.params.id, limit);
     res.json({ success: true, data: logs });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
@@ -350,7 +569,7 @@ router.post('/:id/dispute/recommendation', async (req: Request, res: Response) =
     }
 
     const agreement = result.agreement;
-    const dispute = agreement.disputes.find((item) => !item.resolvedAt);
+    const dispute = agreement.disputes.find((item: any) => !item.resolvedAt);
     if (!dispute) {
       return res.status(404).json({ success: false, error: 'No open dispute found' });
     }
@@ -367,7 +586,7 @@ router.post('/:id/dispute/recommendation', async (req: Request, res: Response) =
       });
     }
 
-    const milestone = agreement.milestones?.find((item) => item.id === dispute.milestoneId);
+    const milestone = agreement.milestones?.find((item: any) => item.id === dispute.milestoneId);
     const proof = milestone && 'proofs' in milestone
       ? milestone.proofs[0]
       : undefined;
@@ -379,7 +598,7 @@ router.post('/:id/dispute/recommendation', async (req: Request, res: Response) =
       proofType: proof?.proofType || null,
       disputeReason: dispute.reason,
       evidenceNotes: dispute.evidenceNotes,
-      evidenceTimeline: (dispute.evidenceEntries || []).map((entry) => ({
+      evidenceTimeline: (dispute.evidenceEntries || []).map((entry: any) => ({
         submittedBy: entry.submittedBy,
         content: entry.content,
         createdAt: entry.createdAt.toISOString(),

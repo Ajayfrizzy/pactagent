@@ -18,8 +18,10 @@ web/env
 server/.env
 web/.env
 server/prisma/dev.db
+contracts/target
+contracts/build
+contracts/deployed
 
 *.log
 .DS_Store
 Thumbs.db
-

@@ -1,5 +1,10 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { config } from '../config';
+import { requireAdmin } from '../middleware/admin';
+import { requireAuth } from '../middleware/auth';
+import { createRateLimit } from '../middleware/rateLimit';
+import { createAuditLog } from '../services/auditLogService';
 import {
   getNodeInfo,
   checkFiberHealth,
@@ -12,9 +17,15 @@ import {
   payInvoice,
   getPaymentStatus,
 } from '../services/fiberService';
-import { config } from '../config';
 
 const router = Router();
+const fiberRateLimit = createRateLimit({
+  namespace: 'fiber-admin',
+  windowMs: config.actionRateLimitWindowMs,
+  max: config.actionRateLimitMax,
+});
+
+router.use(requireAuth, requireAdmin, fiberRateLimit);
 
 // ─── Node Info & Health ───
 
@@ -95,6 +106,13 @@ router.post('/channels/open', async (req, res) => {
       return res.status(500).json({ success: false, error: 'Failed to open channel' });
     }
 
+    await createAuditLog({
+      actorAddress: req.auth?.address,
+      action: 'FIBER_CHANNEL_OPENED',
+      resourceType: 'FIBER',
+      resourceId: channelId,
+      metadata: { peerId: peer_id, fundingAmount: funding_amount },
+    });
     res.json({ success: true, data: { temporary_channel_id: channelId } });
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Unknown error';
@@ -127,6 +145,13 @@ router.post('/channels/close', async (req, res) => {
       return res.status(500).json({ success: false, error: 'Failed to close channel' });
     }
 
+    await createAuditLog({
+      actorAddress: req.auth?.address,
+      action: 'FIBER_CHANNEL_CLOSE_REQUESTED',
+      resourceType: 'FIBER',
+      resourceId: channel_id,
+      metadata: { peerId: peer_id, force },
+    });
     res.json({ success: true, data: { message: 'Channel close initiated' } });
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Unknown error';
@@ -157,6 +182,12 @@ router.post('/peers/connect', async (req, res) => {
       return res.status(500).json({ success: false, error: 'Failed to connect to peer' });
     }
 
+    await createAuditLog({
+      actorAddress: req.auth?.address,
+      action: 'FIBER_PEER_CONNECTED',
+      resourceType: 'FIBER',
+      resourceId: parsed.data.address,
+    });
     res.json({ success: true, data: { message: 'Connected to peer' } });
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Unknown error';
@@ -185,6 +216,12 @@ router.post('/peers/disconnect', async (req, res) => {
       return res.status(500).json({ success: false, error: 'Failed to disconnect peer' });
     }
 
+    await createAuditLog({
+      actorAddress: req.auth?.address,
+      action: 'FIBER_PEER_DISCONNECTED',
+      resourceType: 'FIBER',
+      resourceId: parsed.data.peer_id,
+    });
     res.json({ success: true, data: { message: 'Disconnected from peer' } });
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Unknown error';
@@ -239,6 +276,13 @@ router.post('/invoices/create', async (req, res) => {
       return res.status(500).json({ success: false, error: 'Failed to generate invoice' });
     }
 
+    await createAuditLog({
+      actorAddress: req.auth?.address,
+      action: 'FIBER_INVOICE_CREATED',
+      resourceType: 'FIBER',
+      resourceId: invoice.paymentHash || invoice.invoice || 'invoice',
+      metadata: { amount, expiry },
+    });
     res.json({ success: true, data: invoice });
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Unknown error';
@@ -267,6 +311,12 @@ router.post('/invoices/pay', async (req, res) => {
       return res.status(500).json({ success: false, error: 'Failed to pay invoice' });
     }
 
+    await createAuditLog({
+      actorAddress: req.auth?.address,
+      action: 'FIBER_INVOICE_PAID',
+      resourceType: 'FIBER',
+      resourceId: paymentHash,
+    });
     res.json({ success: true, data: { payment_hash: paymentHash } });
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Unknown error';

@@ -48,13 +48,19 @@ function resolveWebSocketUrl() {
  */
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
+  const authToken = useStore((s) => s.authToken);
   const addLog = useStore((s) => s.addLog);
   const setWsConnected = useStore((s) => s.setWsConnected);
   const triggerAgreementUpdate = useStore((s) => s.triggerAgreementUpdate);
 
   useEffect(() => {
     function connect() {
-      const ws = new WebSocket(resolveWebSocketUrl());
+      const url = new URL(resolveWebSocketUrl(), typeof window !== 'undefined' ? window.location.href : 'http://localhost');
+      if (authToken) {
+        url.searchParams.set('token', authToken);
+      }
+
+      const ws = new WebSocket(url.toString());
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -91,5 +97,5 @@ export function useWebSocket() {
     return () => {
       wsRef.current?.close();
     };
-  }, [addLog, setWsConnected, triggerAgreementUpdate]);
+  }, [addLog, authToken, setWsConnected, triggerAgreementUpdate]);
 }

@@ -9,7 +9,14 @@ import { AgentLogPanel } from '@/components/AgentLogPanel';
 import { StatusBadge, NetworkBadge } from '@/components/StatusBadge';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useStore } from '@/lib/store';
-import { sendCapacityTransfer, shannonsToCKB, withTimeout, MIN_CELL_CAPACITY } from '@/lib/ckb';
+import {
+  sendCapacityTransfer,
+  sendOnchainEscrowFunding,
+  sendOnchainEscrowResolution,
+  shannonsToCKB,
+  withTimeout,
+  MIN_CELL_CAPACITY,
+} from '@/lib/ckb';
 import * as api from '@/lib/api';
 import {
   AgentIcon,
@@ -43,7 +50,6 @@ function getParticipantLabel(
   if (address === agreement.workerAddress) {
     return 'Worker';
   }
-
   return 'Participant';
 }
 
@@ -113,6 +119,7 @@ export default function AgreementDetailPage() {
   const wsConnected = useStore((s) => s.wsConnected);
 
   const [agreement, setAgreement] = useState<any>(null);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -205,6 +212,37 @@ export default function AgreementDetailPage() {
     };
   }, [authToken, hasHydrated, id, updateCount]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadAuditLogs() {
+      if (!hasHydrated || !authToken) {
+        if (!cancelled) {
+          setAuditLogs([]);
+        }
+        return;
+      }
+
+      try {
+        const logs = await api.fetchAgreementAuditLogs(id, 40);
+        if (!cancelled) {
+          setAuditLogs(logs);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.error('Failed to load audit logs:', err);
+          setAuditLogs([]);
+        }
+      }
+    }
+
+    void loadAuditLogs();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authToken, hasHydrated, id, updateCount]);
+
   async function refreshAgreement(actionKey?: string) {
     if (actionKey) {
       setActionLoading(actionKey);
@@ -221,6 +259,13 @@ export default function AgreementDetailPage() {
     }
   }
 
+  function applyAgreementPayload(payload: any) {
+    const nextAgreement = payload?.agreement ?? payload;
+    if (nextAgreement?.id) {
+      setAgreement(nextAgreement);
+    }
+  }
+
   async function handleFund() {
     if (!signer) {
       setError('Reconnect a CKB wallet before funding this agreement');
@@ -234,8 +279,10 @@ export default function AgreementDetailPage() {
       return;
     }
 
-    if (!publicConfig?.treasuryAddress) {
-      setError('Treasury address is not configured on the server');
+    const fundingAddress = agreement?.escrowAddress || publicConfig?.treasuryAddress;
+
+    if (!fundingAddress) {
+      setError('Escrow funding address is not configured on the server');
       return;
     }
 
@@ -271,17 +318,37 @@ export default function AgreementDetailPage() {
         }
       }
 
-      const txHash = await sendCapacityTransfer({
-        signer,
-        fromAddress: walletAddress,
-        toAddress: publicConfig.treasuryAddress,
-        amount: agreement.amount,
-        onProgress: (step) => setFundingStatus(step),
-      });
+      let txHash: string;
+      let milestoneOutputs:
+        | Array<{
+            milestoneId: string;
+            outputIndex: number;
+            escrowCellData: string;
+            refundTimeoutBlock: string;
+          }>
+        | undefined;
+
+      if (agreement.escrowModel === 'ONCHAIN_LOCK') {
+        const funding = await sendOnchainEscrowFunding({
+          signer,
+          agreement,
+          onProgress: (step) => setFundingStatus(step),
+        });
+        txHash = funding.txHash;
+        milestoneOutputs = funding.milestoneOutputs;
+      } else {
+        txHash = await sendCapacityTransfer({
+          signer,
+          fromAddress: walletAddress,
+          toAddress: fundingAddress,
+          amount: agreement.amount,
+          onProgress: (step) => setFundingStatus(step),
+        });
+      }
 
       setFundingStatus('Confirming with server...');
       await withTimeout(
-        api.fundAgreement(id, String(txHash)),
+        api.fundAgreement(id, String(txHash), milestoneOutputs),
         30_000,
         'Timed out confirming the funding with the server. The transaction may have been sent — please refresh the page.',
       );
@@ -319,13 +386,13 @@ export default function AgreementDetailPage() {
     setError(null);
 
     try {
-      await api.submitProof(id, {
+      const response = await api.submitProof(id, {
         milestoneId,
         proofType: agreement.proofType,
         content: proofContent,
       });
       setProofContent('');
-      await refreshAgreement();
+      applyAgreementPayload(response);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Proof submission failed');
     } finally {
@@ -342,7 +409,7 @@ export default function AgreementDetailPage() {
     setError(null);
 
     try {
-      await api.openDispute(id, {
+      const response = await api.openDispute(id, {
         milestoneId,
         openedBy: walletAddress,
         reason: disputeReason,
@@ -350,7 +417,7 @@ export default function AgreementDetailPage() {
       });
       setDisputeReason('');
       setEvidenceNotes('');
-      await refreshAgreement();
+      applyAgreementPayload(response);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to open dispute');
     } finally {
@@ -395,13 +462,13 @@ export default function AgreementDetailPage() {
     setAdditionalEvidence('');
 
     try {
-      await api.addDisputeEvidence(id, {
+      const response = await api.addDisputeEvidence(id, {
         disputeId: openDispute.id,
         submittedBy: walletAddress,
         content,
       });
       setPendingDisputeReplies((prev) => prev.filter((entry) => entry.id !== optimisticReply.id));
-      await refreshAgreement();
+      applyAgreementPayload(response);
     } catch (err) {
       setPendingDisputeReplies((prev) => prev.filter((entry) => entry.id !== optimisticReply.id));
       setAdditionalEvidence((currentValue) => currentValue || content);
@@ -418,10 +485,93 @@ export default function AgreementDetailPage() {
     setError(null);
 
     try {
-      await api.reviewAction(id, action, walletAddress);
+      if (agreement.escrowModel === 'ONCHAIN_LOCK' && currentMilestone) {
+        if (!signer) {
+          throw new Error('Reconnect your wallet before signing an on-chain escrow settlement.');
+        }
+
+        if (action === 'APPROVE') {
+          const txHash = await sendOnchainEscrowResolution({
+            signer,
+            agreement,
+            milestone: currentMilestone,
+            config: publicConfig || {},
+            direction: 'PAYOUT',
+          });
+          await api.submitOnchainResolution(id, {
+            milestoneId: currentMilestone.id,
+            txHash,
+            direction: 'PAYOUT',
+          });
+        } else if (action === 'REJECT') {
+          const useTimeoutRefund = !isArbitrator;
+          if (useTimeoutRefund) {
+            if (!currentMilestone.refundTimeoutBlock) {
+              throw new Error('This milestone does not have timeout metadata recorded yet.');
+            }
+
+            const currentTip = await signer.client.getTip();
+            if (currentTip < BigInt(currentMilestone.refundTimeoutBlock)) {
+              throw new Error('Refunding this on-chain escrow milestone requires the arbitrator until the timeout block is reached.');
+            }
+          }
+
+          const txHash = await sendOnchainEscrowResolution({
+            signer,
+            agreement,
+            milestone: currentMilestone,
+            config: publicConfig || {},
+            direction: 'REFUND',
+            useTimeout: useTimeoutRefund,
+          });
+          await api.submitOnchainResolution(id, {
+            milestoneId: currentMilestone.id,
+            txHash,
+            direction: 'REFUND',
+          });
+        } else {
+          throw new Error('Unsupported on-chain review action.');
+        }
+      } else {
+        const response = await api.reviewAction(id, action, walletAddress);
+        applyAgreementPayload(response);
+        return;
+      }
       await refreshAgreement();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Review action failed');
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleApproveMutualRefund() {
+    if (!walletAddress) {
+      return;
+    }
+
+    setActionLoading('mutual-refund');
+    setError(null);
+
+    try {
+      const response = await api.approveMutualRefund(id, walletAddress);
+      applyAgreementPayload(response);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to record refund approval');
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleReconcile() {
+    setActionLoading('reconcile');
+    setError(null);
+
+    try {
+      const updated = await api.reconcileAgreement(id);
+      setAgreement(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to recheck settlement state');
     } finally {
       setActionLoading(null);
     }
@@ -467,6 +617,7 @@ export default function AgreementDetailPage() {
   const paidMilestones = milestones.filter((milestone: any) => milestone.status === 'PAID').length;
   const isClient = walletAddress === agreement.clientAddress;
   const isWorker = walletAddress === agreement.workerAddress;
+  const isArbitrator = walletAddress === agreement.arbitratorAddress;
   const currentOpenDispute =
     agreement.disputes?.find((item: any) => !item.resolvedAt) || null;
   const displayedRecommendation = currentOpenDispute?.aiRecommendation
@@ -481,25 +632,51 @@ export default function AgreementDetailPage() {
     agreement.reviewerMode === 'HYBRID' && currentMilestone?.status === 'PROOF_SUBMITTED';
   const canClientReview =
     isClient &&
-    agreement.reviewerMode !== 'AUTO' &&
+    (agreement.reviewerMode !== 'AUTO' || agreement.status === 'DISPUTED') &&
     currentMilestone != null &&
     ['UNDER_REVIEW', 'DISPUTED'].includes(currentMilestone.status);
+  const fundingPending = agreement.settlementStatus === 'FUNDING_PENDING';
+  const payoutPending = agreement.settlementStatus === 'PAYOUT_PENDING';
+  const refundPending = agreement.settlementStatus === 'REFUND_PENDING';
+  const hasRecordedFundingAttempt = Boolean(agreement.ckbTxHashFund);
   const fundingNeedsReconnect = agreement.status === 'DRAFT' && isClient && !signer;
   const fundingUnsupportedSigner =
     agreement.status === 'DRAFT' && isClient && signer != null && !canSignerFundAgreement(signer);
   const canFundAgreement =
     agreement.status === 'DRAFT' &&
+    !fundingPending &&
+    !hasRecordedFundingAttempt &&
     isClient &&
     canSignerFundAgreement(signer) &&
-    Boolean(publicConfig?.treasuryAddress);
+    Boolean(agreement.escrowAddress || publicConfig?.treasuryAddress);
   const approveLoading = actionLoading === 'APPROVE';
   const rejectLoading = actionLoading === 'REJECT';
+  const mutualRefundLoading = actionLoading === 'mutual-refund';
+  const reconcileLoading = actionLoading === 'reconcile';
   const refreshingStatus = actionLoading === 'refresh';
   const disputeLoading = actionLoading === 'dispute';
   const disputeOpenedByLabel = currentOpenDispute
     ? getParticipantLabel(currentOpenDispute.openedBy, agreement)
     : null;
   const canReplyToDispute = Boolean(currentOpenDispute) && (isClient || isWorker);
+  const refundConsensus = currentOpenDispute?.refundConsensus || null;
+  const hasApprovedMutualRefund = Boolean(
+    walletAddress
+    && refundConsensus
+      && ((walletAddress === agreement.clientAddress && refundConsensus.clientApprovedAt)
+        || (walletAddress === agreement.workerAddress && refundConsensus.workerApprovedAt))
+  );
+  const canProposeMutualRefund =
+    Boolean(currentOpenDispute)
+    && isClient
+    && !refundConsensus?.proposedBy
+    && !refundConsensus?.fullyApproved;
+  const canAcceptMutualRefund =
+    Boolean(currentOpenDispute)
+    && isWorker
+    && refundConsensus?.proposedBy === agreement.clientAddress
+    && !refundConsensus?.workerApprovedAt
+    && !refundConsensus?.fullyApproved;
   const displayedDisputeReplies = [
     ...(currentOpenDispute?.evidenceEntries || []),
     ...pendingDisputeReplies,
@@ -512,6 +689,22 @@ export default function AgreementDetailPage() {
   const recommendationWaitMessage = recommendationAvailability && !recommendationAvailability.ready
     ? `The AI recommendation unlocks after the ${expectedReplyLabel.toLowerCase()} replies, or after ${recommendationAvailability.responseDeadlineAt.toLocaleString()} if no reply arrives.`
     : null;
+  const mutualRefundActionLabel = refundConsensus?.proposedBy
+    ? hasApprovedMutualRefund
+      ? 'Refund Approval Recorded'
+      : 'Accept Mutual Refund'
+    : isWorker
+      ? 'Waiting for Client Proposal'
+      : 'Propose Mutual Refund';
+  const mutualRefundStatusText = refundConsensus?.proposedBy
+    ? refundConsensus.fullyApproved
+      ? 'Both parties approved this refund.'
+      : refundConsensus.awaitingAddress
+        ? `${getParticipantLabel(refundConsensus.awaitingAddress, agreement)} approval is still needed before the refund can execute.`
+        : 'Waiting for the second approval.'
+    : isWorker
+      ? 'Only the client can start a mutual refund proposal. You can accept it after the client initiates it.'
+      : 'A refund only moves funds after both client and worker agree inside this dispute.';
   const replyPlaceholder = isClient
     ? 'Reply to the worker with any clarification, screenshots, or acceptance notes...'
     : isWorker
@@ -522,6 +715,14 @@ export default function AgreementDetailPage() {
     : isWorker
       ? 'Use this to answer the client dispute directly. Your reply appears in the shared thread.'
       : 'Replies appear in the shared dispute thread.';
+  const settlementHistory = agreement.settlements || [];
+  const escrowAddress = agreement.escrowAddress || publicConfig?.treasuryAddress || null;
+  const canReconcileSettlement =
+    (isClient || isWorker) &&
+    (agreement.settlementStatus === 'FAILED' ||
+      agreement.settlementStatus === 'FUNDING_PENDING' ||
+      agreement.settlementStatus === 'PAYOUT_PENDING' ||
+      agreement.settlementStatus === 'REFUND_PENDING');
 
   return (
     <div className="min-h-screen">
@@ -555,8 +756,9 @@ export default function AgreementDetailPage() {
                   <h1 className="text-2xl font-bold text-white mb-1">{agreement.title}</h1>
                   <p className="text-xs font-mono text-gray-500">{agreement.id}</p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center justify-end gap-2">
                   <StatusBadge status={agreement.status} />
+                  <StatusBadge status={agreement.settlementStatus || 'UNFUNDED'} />
                   <NetworkBadge network={agreement.payoutNetwork} />
                 </div>
               </div>
@@ -585,7 +787,7 @@ export default function AgreementDetailPage() {
               </div>
 
               <div className={`mt-4 pt-4 border-t border-agent-border grid gap-4 ${
-                agreement.payoutNetwork === 'FIBER' && agreement.workerFiberPubkey ? 'grid-cols-1 md:grid-cols-3' : 'grid-cols-2'
+                agreement.payoutNetwork === 'FIBER' && agreement.workerFiberPubkey ? 'grid-cols-1 md:grid-cols-4' : 'grid-cols-3'
               }`}>
                 <div>
                   <span className="text-[10px] uppercase text-gray-500 block mb-1">Client</span>
@@ -595,6 +797,12 @@ export default function AgreementDetailPage() {
                   <span className="text-[10px] uppercase text-gray-500 block mb-1">Worker</span>
                   <span className="text-xs font-mono text-gray-300">{agreement.workerAddress.slice(0, 20)}...</span>
                 </div>
+                <div>
+                  <span className="text-[10px] uppercase text-gray-500 block mb-1">Refund Rule</span>
+                  <span className="text-xs text-gray-300">
+                    Client and worker must both approve a refund during a dispute.
+                  </span>
+                </div>
                 {agreement.payoutNetwork === 'FIBER' && agreement.workerFiberPubkey && (
                   <div>
                     <span className="text-[10px] uppercase text-gray-500 block mb-1">Worker Fiber Key</span>
@@ -603,7 +811,48 @@ export default function AgreementDetailPage() {
                 )}
               </div>
 
-              {(agreement.ckbTxHashFund || agreement.ckbTxHashRelease || agreement.fiberPaymentReference) && (
+              <div className="mt-4 pt-4 border-t border-agent-border grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <span className="text-[10px] uppercase text-gray-500 block mb-1">Escrow Model</span>
+                  <span className="text-sm text-white">{agreement.escrowModel.replace(/_/g, ' ')}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase text-gray-500 block mb-1">Funding Address</span>
+                  <span className="text-xs font-mono text-gray-300 break-all">
+                    {escrowAddress || 'Awaiting configuration'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase text-gray-500 block mb-1">Agreement Digest</span>
+                  <span className="text-xs font-mono text-gray-300 break-all">
+                    {agreement.agreementDigest || 'Pending'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase text-gray-500 block mb-1">Milestone Digest</span>
+                  <span className="text-xs font-mono text-gray-300 break-all">
+                    {agreement.milestoneDigest || 'Pending'}
+                  </span>
+                </div>
+                {agreement.escrowModel === 'ONCHAIN_LOCK' && (
+                  <>
+                    <div>
+                      <span className="text-[10px] uppercase text-gray-500 block mb-1">Lock Code Hash</span>
+                      <span className="text-xs font-mono text-gray-300 break-all">
+                        {agreement.escrowLockCodeHash || 'Pending'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase text-gray-500 block mb-1">Lock Args</span>
+                      <span className="text-xs font-mono text-gray-300 break-all">
+                        {agreement.escrowLockArgs || 'Pending'}
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {(agreement.ckbTxHashFund || agreement.ckbTxHashRelease || agreement.fiberPaymentReference || agreement.lastSettlementError) && (
                 <div className="mt-4 pt-4 border-t border-agent-border grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
                     <span className="text-[10px] uppercase text-gray-500 block mb-1">Funding Tx</span>
@@ -623,6 +872,12 @@ export default function AgreementDetailPage() {
                       {agreement.fiberPaymentReference || 'Not used'}
                     </span>
                   </div>
+                  {agreement.lastSettlementError ? (
+                    <div className="md:col-span-3">
+                      <span className="text-[10px] uppercase text-gray-500 block mb-1">Last Settlement Error</span>
+                      <span className="text-xs text-rose-300">{agreement.lastSettlementError}</span>
+                    </div>
+                  ) : null}
                 </div>
               )}
             </div>
@@ -688,9 +943,119 @@ export default function AgreementDetailPage() {
               </div>
             </div>
 
+            {settlementHistory.length > 0 && (
+              <div className="bg-agent-card border border-agent-border rounded-xl p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h2 className="text-white font-semibold">Settlement History</h2>
+                    <p className="text-xs text-gray-400 mt-1">On-chain funding, payout, and refund attempts are tracked separately from workflow.</p>
+                  </div>
+                  <div className="text-xs text-gray-500">{settlementHistory.length} records</div>
+                </div>
+
+                <div className="space-y-3">
+                  {settlementHistory.map((settlement: any) => (
+                    <div key={settlement.id} className="rounded-xl border border-agent-border bg-agent-bg/60 p-4">
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <StatusBadge status={settlement.status} />
+                          <StatusBadge status={settlement.direction} />
+                          <NetworkBadge network={settlement.network === 'INTERNAL' ? agreement.payoutNetwork : settlement.network} />
+                        </div>
+                        <div className="text-xs font-mono text-gray-400">{shannonsToCKB(settlement.amount)} CKB</div>
+                      </div>
+                      <div className="grid grid-cols-1 gap-2 text-xs text-gray-400 md:grid-cols-2">
+                        <span>Created {new Date(settlement.createdAt).toLocaleString()}</span>
+                        <span>Confirmed {settlement.confirmedAt ? new Date(settlement.confirmedAt).toLocaleString() : 'Pending'}</span>
+                        <span className="break-all">Tx {settlement.txHash || 'Not used'}</span>
+                        <span className="break-all">Reference {settlement.paymentReference || 'Not used'}</span>
+                      </div>
+                      {settlement.errorMessage ? (
+                        <p className="mt-2 text-xs text-rose-300">{settlement.errorMessage}</p>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {auditLogs.length > 0 && (
+              <div className="bg-agent-card border border-agent-border rounded-xl p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h2 className="text-white font-semibold">Audit Trail</h2>
+                    <p className="text-xs text-gray-400 mt-1">Participant and operator actions recorded for this agreement.</p>
+                  </div>
+                  <div className="text-xs text-gray-500">{auditLogs.length} entries</div>
+                </div>
+
+                <div className="space-y-3">
+                  {auditLogs.map((entry: any) => (
+                    <div key={entry.id} className="rounded-xl border border-agent-border bg-agent-bg/60 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <StatusBadge status={entry.actorType} />
+                          <span className="text-xs font-semibold text-white">{entry.action.replace(/_/g, ' ')}</span>
+                        </div>
+                        <span className="text-[11px] text-gray-500">{new Date(entry.createdAt).toLocaleString()}</span>
+                      </div>
+                      <div className="mt-2 text-xs text-gray-400 break-all">
+                        Actor {entry.actorAddress || 'system'} · {entry.resourceType} · {entry.resourceId}
+                      </div>
+                      {entry.metadataJson ? (
+                        <pre className="mt-3 overflow-x-auto rounded-lg bg-slate-950/40 p-3 text-[11px] text-gray-400">
+                          {JSON.stringify(JSON.parse(entry.metadataJson), null, 2)}
+                        </pre>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {error && (
               <div className="bg-red-900/30 border border-red-800 rounded-lg px-4 py-3 text-sm text-red-300">
                 {error}
+              </div>
+            )}
+
+            {(payoutPending || refundPending) && (
+              <div className="bg-agent-card border border-cyan-800/40 rounded-xl p-6">
+                <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
+                  <ClockIcon className="w-5 h-5 text-cyan-400" />
+                  Settlement Confirmation In Progress
+                </h3>
+                <p className="text-sm text-gray-400">
+                  {payoutPending
+                    ? 'A payout transaction has been sent and the worker is waiting for on-chain confirmation before this milestone is marked paid.'
+                    : 'A refund transaction has been sent and the client is waiting for on-chain confirmation before the settlement is final.'}
+                </p>
+                <button
+                  onClick={handleReconcile}
+                  disabled={reconcileLoading}
+                  className="mt-4 rounded-lg border border-cyan-600/40 px-4 py-2 text-sm font-medium text-cyan-300 transition-colors hover:bg-cyan-900/20 disabled:opacity-60"
+                >
+                  {reconcileLoading ? 'Rechecking...' : 'Recheck Settlement'}
+                </button>
+              </div>
+            )}
+
+            {agreement.settlementStatus === 'FAILED' && canReconcileSettlement && (
+              <div className="bg-agent-card border border-rose-800/40 rounded-xl p-6">
+                <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
+                  <ExclamationTriangleIcon className="w-5 h-5 text-rose-400" />
+                  Settlement Needs Attention
+                </h3>
+                <p className="text-sm text-gray-400">
+                  The last settlement verification failed. You can request another reconciliation pass after checking the chain transaction details.
+                </p>
+                <button
+                  onClick={handleReconcile}
+                  disabled={reconcileLoading}
+                  className="mt-4 rounded-lg border border-rose-600/40 px-4 py-2 text-sm font-medium text-rose-300 transition-colors hover:bg-rose-900/20 disabled:opacity-60"
+                >
+                  {reconcileLoading ? 'Rechecking...' : 'Recheck Settlement'}
+                </button>
               </div>
             )}
 
@@ -704,11 +1069,21 @@ export default function AgreementDetailPage() {
                   Lock {shannonsToCKB(agreement.amount)} CKB once, then the agent will release milestone payouts as work is approved.
                 </p>
                 <div className="mb-4 rounded-lg border border-agent-border bg-agent-bg/60 px-3 py-2 text-xs text-gray-400">
-                  Funds will be sent to the configured treasury wallet:
+                  Funds will be sent to the agreement escrow destination:
                   <div className="mt-1 font-mono text-gray-300 break-all">
-                    {publicConfig?.treasuryAddress || 'Treasury not configured'}
+                    {escrowAddress || 'Escrow address not configured'}
                   </div>
                 </div>
+                {fundingPending && (
+                  <div className="mb-4 rounded-lg border border-sky-800 bg-sky-950/20 px-3 py-2 text-xs text-sky-200">
+                    Funding transaction submitted. The worker is waiting for on-chain confirmation before this agreement moves to the first milestone.
+                  </div>
+                )}
+                {!fundingPending && hasRecordedFundingAttempt && (
+                  <div className="mb-4 rounded-lg border border-amber-800 bg-amber-950/20 px-3 py-2 text-xs text-amber-200">
+                    A funding transaction is already recorded for this agreement. Please wait for the server to reconcile that transaction instead of sending a second transfer.
+                  </div>
+                )}
                 {fundingNeedsReconnect && (
                   <div className="mb-4 rounded-lg border border-yellow-800 bg-yellow-900/20 px-3 py-2 text-xs text-yellow-200">
                     Your wallet session is active, but the live signer is no longer attached. Click
@@ -745,7 +1120,11 @@ export default function AgreementDetailPage() {
                     ) : (
                       <>
                         <LinkIcon className="w-4 h-4" />
-                        {fundingUnsupportedSigner ? 'Funding Requires CKB Wallet' : 'Fund on CKB'}
+                        {fundingPending
+                          ? 'Funding Awaiting Confirmation'
+                          : fundingUnsupportedSigner
+                            ? 'Funding Requires CKB Wallet'
+                            : 'Fund on CKB'}
                       </>
                       )}
                   </button>
@@ -796,9 +1175,9 @@ export default function AgreementDetailPage() {
                 </h3>
                 <p className="text-sm text-gray-400 mb-4">
                   {isClient
-                    ? `The worker has submitted proof for ${currentMilestone.title}. In HYBRID mode, the agent checks the proof first and then your approve or refund buttons will appear here.`
+                    ? `The worker has submitted proof for ${currentMilestone.title}. In HYBRID mode, the agent checks the proof first and then your payout approval controls will appear here.`
                     : isWorker
-                      ? `Your proof for ${currentMilestone.title} has been submitted. The agent is reviewing it before the client can approve payout or refund.`
+                      ? `Your proof for ${currentMilestone.title} has been submitted. The agent is reviewing it before the client can approve payout or open a dispute.`
                       : `Proof has been submitted for ${currentMilestone.title}. The agent needs to review it before the client can take action.`}
                 </p>
                 <button
@@ -825,7 +1204,9 @@ export default function AgreementDetailPage() {
                     Review Current Milestone
                   </h3>
                   <p className="text-sm text-gray-400 mb-4">
-                    Decide whether to approve payout or refund {currentMilestone.title}.
+                    {agreement.escrowModel === 'ONCHAIN_LOCK'
+                      ? `Sign an on-chain payout or refund resolution for ${currentMilestone.title}. Payout can be signed by the client or arbitrator. Refund requires the arbitrator unless the refund timeout has been reached.`
+                      : `Approve payout for ${currentMilestone.title}, or open a dispute below. Refunds only happen after both client and worker agree inside the dispute thread.`}
                   </p>
                   <div className="flex gap-3 flex-wrap">
                     <button
@@ -841,27 +1222,29 @@ export default function AgreementDetailPage() {
                       ) : (
                         <>
                           <CheckCircleIcon className="w-4 h-4" />
-                          Approve Payout
+                          {agreement.escrowModel === 'ONCHAIN_LOCK' ? 'Sign Payout Tx' : 'Approve Payout'}
                         </>
                       )}
                     </button>
-                    <button
-                      onClick={() => handleReviewAction('REJECT')}
-                      disabled={!!actionLoading}
-                      className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 min-w-[150px] justify-center"
-                    >
-                      {rejectLoading ? (
-                        <>
-                          <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                          Refunding...
-                        </>
-                      ) : (
-                        <>
-                          <XCircleIcon className="w-4 h-4" />
-                          Refund & Close
-                        </>
-                      )}
-                    </button>
+                    {agreement.escrowModel === 'ONCHAIN_LOCK' ? (
+                      <button
+                        onClick={() => handleReviewAction('REJECT')}
+                        disabled={!!actionLoading}
+                        className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 min-w-[150px] justify-center"
+                      >
+                        {rejectLoading ? (
+                          <>
+                            <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                            Refunding...
+                          </>
+                        ) : (
+                          <>
+                            <XCircleIcon className="w-4 h-4" />
+                            Sign Refund Tx
+                          </>
+                        )}
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               )}
@@ -941,6 +1324,44 @@ export default function AgreementDetailPage() {
                     </p>
                   ) : null}
                 </div>
+
+                {agreement.escrowModel === 'TREASURY_BRIDGE' && (isClient || isWorker) && (
+                  <div className="mb-5 rounded-lg border border-amber-800/40 bg-amber-950/20 p-4">
+                    <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h4 className="text-sm font-medium text-white">Mutual Refund Settlement</h4>
+                        <p className="mt-1 text-xs text-gray-400">{mutualRefundStatusText}</p>
+                      </div>
+                      <button
+                        onClick={handleApproveMutualRefund}
+                        disabled={mutualRefundLoading || (!canProposeMutualRefund && !canAcceptMutualRefund)}
+                        className="rounded-lg border border-amber-600/40 px-4 py-2 text-sm font-medium text-amber-200 transition-colors hover:bg-amber-900/30 disabled:opacity-50"
+                      >
+                        {mutualRefundLoading ? 'Saving...' : mutualRefundActionLabel}
+                      </button>
+                    </div>
+
+                    {refundConsensus?.proposedBy ? (
+                      <div className="grid gap-2 text-xs text-gray-300 sm:grid-cols-3">
+                        <span>
+                          Proposed by {getParticipantLabel(refundConsensus.proposedBy, agreement)}
+                        </span>
+                        <span>
+                          Client {refundConsensus.clientApprovedAt ? 'approved' : 'pending'}
+                        </span>
+                        <span>
+                          Worker {refundConsensus.workerApprovedAt ? 'approved' : 'pending'}
+                        </span>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-gray-400">
+                        {isClient
+                          ? 'Use this only when both sides agree that the milestone should be refunded instead of paid out.'
+                          : 'Wait for the client to propose the refund. Once they do, you can accept it here.'}
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 <div className="mb-5 rounded-lg border border-agent-border bg-agent-bg/60 p-4">
                   <div className="mb-3 flex items-center justify-between gap-3">
@@ -1045,7 +1466,7 @@ export default function AgreementDetailPage() {
                       <p className="text-xs text-gray-400 italic">{displayedRecommendation.rationale}</p>
                       <div className="flex items-center gap-1.5 text-[10px] text-gray-600">
                         <ClockIcon className="w-3 h-3" />
-                        Advisory only, the final action still follows your reviewer mode.
+                        Advisory only. Payout still needs client approval, and refunds still need both client and worker to agree.
                       </div>
                     </div>
                   ) : recommendationAvailability && !recommendationAvailability.ready ? (

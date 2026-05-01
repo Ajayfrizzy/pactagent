@@ -334,8 +334,21 @@ TREASURY_CKB_ADDRESS=
 AUTH_JWT_SECRET=
 AUTH_TOKEN_TTL_SECS=604800
 AUTH_CHALLENGE_TTL_SECS=600
+ADMIN_ADDRESSES=
+AUTH_RATE_LIMIT_WINDOW_MS=900000
+AUTH_RATE_LIMIT_MAX=20
+ACTION_RATE_LIMIT_WINDOW_MS=60000
+ACTION_RATE_LIMIT_MAX=12
 
 AGENT_INTERVAL_MS=5000
+
+ONCHAIN_ESCROW_ENABLED=false
+ONCHAIN_LOCK_CODE_HASH=
+ONCHAIN_LOCK_HASH_TYPE=type
+ONCHAIN_LOCK_TX_HASH=
+ONCHAIN_LOCK_INDEX=
+ONCHAIN_LOCK_DEP_TYPE=code
+ONCHAIN_ESCROW_ARGS_SALT=
 
 FIBER_ENABLED=false
 FIBER_NODE_URL=http://127.0.0.1:8227
@@ -349,8 +362,14 @@ OPENAI_API_KEY=
 ```
 
 Notes:
+- `DATABASE_URL` is always required
+- `DIRECT_URL` is also required when your main `DATABASE_URL` points at a pooled endpoint such as Supabase's `6543` connection
+- if you are using a plain local PostgreSQL instance, you can set `DIRECT_URL` to the same value as `DATABASE_URL`
 - `TREASURY_CKB_PRIVATE_KEY` is required for payout and refund execution
 - `TREASURY_CKB_ADDRESS` is optional and can be derived from the private key
+- `ADMIN_ADDRESSES` is a comma-separated allowlist for Fiber admin actions
+- auth and agreement write endpoints now have in-memory rate limits; tune them with the `*_RATE_LIMIT_*` variables
+- set `ONCHAIN_ESCROW_ENABLED=true` together with `ONCHAIN_LOCK_CODE_HASH`, `ONCHAIN_LOCK_TX_HASH`, and `ONCHAIN_LOCK_INDEX` once you have a deployed lock script and want the app to expose the `ONCHAIN_LOCK` escrow model
 - enable `FIBER_ENABLED=true` only if you have a reachable Fiber node
 - AI can run in mock mode without external dependencies
 

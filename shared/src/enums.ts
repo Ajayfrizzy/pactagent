@@ -44,6 +44,35 @@ export enum PayoutNetwork {
   FIBER = 'FIBER',
 }
 
+export enum EscrowModel {
+  TREASURY_BRIDGE = 'TREASURY_BRIDGE',
+  ONCHAIN_LOCK = 'ONCHAIN_LOCK',
+}
+
+export enum SettlementStatus {
+  UNFUNDED = 'UNFUNDED',
+  FUNDING_PENDING = 'FUNDING_PENDING',
+  FUNDED = 'FUNDED',
+  PAYOUT_PENDING = 'PAYOUT_PENDING',
+  PAYOUT_CONFIRMED = 'PAYOUT_CONFIRMED',
+  REFUND_PENDING = 'REFUND_PENDING',
+  REFUND_CONFIRMED = 'REFUND_CONFIRMED',
+  DISPUTE_LOCKED = 'DISPUTE_LOCKED',
+  FAILED = 'FAILED',
+}
+
+export enum SettlementDirection {
+  FUNDING = 'FUNDING',
+  PAYOUT = 'PAYOUT',
+  REFUND = 'REFUND',
+}
+
+export enum SettlementRecordStatus {
+  PENDING = 'PENDING',
+  CONFIRMED = 'CONFIRMED',
+  FAILED = 'FAILED',
+}
+
 export enum LogLevel {
   INFO = 'INFO',
   WARN = 'WARN',

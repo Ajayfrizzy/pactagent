@@ -50,7 +50,11 @@ export async function getLogsForParticipant(address: string, agreementId?: strin
     where: {
       agreementId: agreementId ? agreementId : { not: null },
       agreement: {
-        OR: [{ clientAddress: address }, { workerAddress: address }],
+        OR: [
+          { clientAddress: address },
+          { workerAddress: address },
+          { arbitratorAddress: address },
+        ],
       },
     },
     orderBy: { createdAt: 'desc' },

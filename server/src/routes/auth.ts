@@ -1,9 +1,16 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { config } from '../config';
 import { requireAuth } from '../middleware/auth';
+import { createRateLimit } from '../middleware/rateLimit';
 import { createChallenge, verifyChallenge } from '../services/authService';
 
 const router = Router();
+const authRateLimit = createRateLimit({
+  namespace: 'auth',
+  windowMs: config.authRateLimitWindowMs,
+  max: config.authRateLimitMax,
+});
 
 const challengeSchema = z.object({
   address: z.string().min(1),
@@ -19,7 +26,7 @@ const verifySchema = z.object({
   }),
 });
 
-router.post('/challenge', (req, res) => {
+router.post('/challenge', authRateLimit, (req, res) => {
   try {
     const { address } = challengeSchema.parse(req.body);
     const result = createChallenge(address);
@@ -30,7 +37,7 @@ router.post('/challenge', (req, res) => {
   }
 });
 
-router.post('/verify', async (req, res) => {
+router.post('/verify', authRateLimit, async (req, res) => {
   try {
     const data = verifySchema.parse(req.body);
     const result = await verifyChallenge(data);

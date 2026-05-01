@@ -155,6 +155,7 @@ export async function createAgreement(data: {
   reviewerMode: string;
   releaseMode: string;
   payoutNetwork: string;
+  escrowModel?: string;
   milestones: Array<{
     title: string;
     description: string;
@@ -167,10 +168,36 @@ export async function createAgreement(data: {
   });
 }
 
-export async function fundAgreement(id: string, txHash: string) {
+export async function fundAgreement(
+  id: string,
+  txHash: string,
+  milestoneOutputs?: Array<{
+    milestoneId: string;
+    outputIndex: number;
+    escrowCellData: string;
+    refundTimeoutBlock: string;
+  }>
+) {
   return request<any>(`/agreements/${id}/fund`, {
     method: 'POST',
-    body: JSON.stringify({ txHash }),
+    body: JSON.stringify({ txHash, milestoneOutputs }),
+  });
+}
+
+export async function submitOnchainResolution(id: string, data: {
+  milestoneId: string;
+  txHash: string;
+  direction: 'PAYOUT' | 'REFUND';
+}) {
+  return request<any>(`/agreements/${id}/onchain-resolution`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function reconcileAgreement(id: string) {
+  return request<any>(`/agreements/${id}/reconcile`, {
+    method: 'POST',
   });
 }
 
@@ -222,6 +249,13 @@ export async function addDisputeEvidence(id: string, data: {
   });
 }
 
+export async function approveMutualRefund(id: string, actorAddress: string) {
+  return request<any>(`/agreements/${id}/dispute/refund-consent`, {
+    method: 'POST',
+    body: JSON.stringify({ actorAddress }),
+  });
+}
+
 export async function fetchLogs(agreementId?: string, limit = 100) {
   const params = new URLSearchParams();
   if (agreementId) {
@@ -239,6 +273,12 @@ export async function fetchPublicLogs(limit = 25) {
 
 export async function fetchAgreementLogs(id: string) {
   return request<any[]>(`/agreements/${id}/logs`);
+}
+
+export async function fetchAgreementAuditLogs(id: string, limit = 100) {
+  const params = new URLSearchParams();
+  params.set('limit', String(limit));
+  return request<any[]>(`/agreements/${id}/audit?${params.toString()}`);
 }
 
 export async function fetchConfig() {

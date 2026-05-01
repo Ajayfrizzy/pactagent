@@ -1,0 +1,4 @@
+[cells]
+name = "pact_escrow_lock"
+enable_type_id = true
+location = { file = "build/release/pact_escrow_lock" }

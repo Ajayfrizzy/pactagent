@@ -77,6 +77,7 @@ export default function NewAgreementPage() {
     reviewerMode: 'AUTO',
     releaseMode: 'PARTIAL',
     payoutNetwork: 'CKB',
+    escrowModel: 'TREASURY_BRIDGE',
   });
   const [milestones, setMilestones] = useState<MilestoneDraft[]>(defaultMilestones);
 
@@ -173,6 +174,7 @@ export default function NewAgreementPage() {
         reviewerMode: form.reviewerMode,
         releaseMode: form.releaseMode,
         payoutNetwork: form.payoutNetwork,
+        escrowModel: form.escrowModel,
         milestones: milestones.map((milestone) => ({
           title: milestone.title,
           description: milestone.description,
@@ -327,6 +329,19 @@ export default function NewAgreementPage() {
                 <option value="CKB">CKB (L1)</option>
                 <option value="FIBER">Fiber (L2)</option>
               </select>
+            </div>
+          </div>
+
+          <div>
+            <label className={labelClass}>Escrow Model</label>
+            <div className="rounded-lg border border-agent-border bg-agent-card px-4 py-3">
+              <div className="text-sm font-medium text-white">Treasury Bridge</div>
+              <p className="mt-1.5 text-xs text-gray-400">
+                Refunds do not happen instantly anymore. If a dispute opens, the client and worker must both approve the refund before funds move back to the client.
+              </p>
+              <p className="mt-2 text-xs text-amber-300">
+                The older on-chain lock path is temporarily hidden while the lock rules are redesigned without an arbitrator.
+              </p>
             </div>
           </div>
 

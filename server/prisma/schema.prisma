@@ -24,6 +24,7 @@ model Agreement {
   description           String
   clientAddress         String
   workerAddress         String
+  arbitratorAddress     String?
   workerFiberPubkey     String?
   amount                String    // CKB in shannons, stored as string for bigint safety
   deadlineAt            DateTime
@@ -32,6 +33,16 @@ model Agreement {
   reviewerMode          String    @default("AUTO") // AUTO | HYBRID | MANUAL
   releaseMode           String    @default("FULL") // FULL | PARTIAL
   payoutNetwork         String    @default("CKB") // CKB | FIBER
+  escrowModel           String    @default("TREASURY_BRIDGE") // TREASURY_BRIDGE | ONCHAIN_LOCK
+  escrowAddress         String?
+  escrowLockCodeHash    String?
+  escrowLockHashType    String?
+  escrowLockArgs        String?
+  agreementDigest       String?
+  milestoneDigest       String?
+  settlementStatus      String    @default("UNFUNDED") // SettlementStatus enum
+  fundingConfirmedAt    DateTime?
+  lastSettlementError   String?
   ckbTxHashCreate       String?
   ckbTxHashFund         String?
   ckbTxHashRelease      String?
@@ -44,6 +55,14 @@ model Agreement {
   proofs    Proof[]
   disputes  Dispute[]
   agentLogs AgentLog[]
+  settlements MilestoneSettlement[]
+  auditLogs AuditLog[]
+
+  @@index([clientAddress, createdAt])
+  @@index([workerAddress, createdAt])
+  @@index([status, createdAt])
+  @@index([settlementStatus, createdAt])
+  @@index([deadlineAt])
 }
 
 model Milestone {
@@ -54,14 +73,20 @@ model Milestone {
   amount      String
   sortOrder   Int
   status      String   @default("PENDING")
+  escrowFundingTxHash String?
+  escrowOutputIndex   Int?
+  escrowCellData      String?
+  refundTimeoutBlock  BigInt?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   agreement Agreement @relation(fields: [agreementId], references: [id])
   proofs    Proof[]
   disputes  Dispute[]
+  settlements MilestoneSettlement[]
 
   @@unique([agreementId, sortOrder])
+  @@index([agreementId, status])
 }
 
 model Proof {
@@ -75,6 +100,8 @@ model Proof {
 
   agreement Agreement @relation(fields: [agreementId], references: [id])
   milestone Milestone @relation(fields: [milestoneId], references: [id])
+
+  @@index([agreementId, milestoneId, submittedAt])
 }
 
 model Dispute {
@@ -94,6 +121,8 @@ model Dispute {
   agreement       Agreement       @relation(fields: [agreementId], references: [id])
   milestone       Milestone       @relation(fields: [milestoneId], references: [id])
   evidenceEntries DisputeEvidence[]
+
+  @@index([agreementId, milestoneId, resolvedAt])
 }
 
 model DisputeEvidence {
@@ -104,6 +133,8 @@ model DisputeEvidence {
   createdAt   DateTime @default(now())
 
   dispute Dispute @relation(fields: [disputeId], references: [id])
+
+  @@index([disputeId, createdAt])
 }
 
 model AgentLog {
@@ -116,4 +147,47 @@ model AgentLog {
   createdAt    DateTime @default(now())
 
   agreement Agreement? @relation(fields: [agreementId], references: [id])
+
+  @@index([agreementId, createdAt])
+  @@index([eventType, createdAt])
+}
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  agreementId  String?
+  actorAddress String?
+  actorType    String   // USER | SYSTEM
+  action       String
+  resourceType String   // AGREEMENT | DISPUTE | SETTLEMENT | FIBER
+  resourceId   String
+  metadataJson String?
+  createdAt    DateTime @default(now())
+
+  agreement Agreement? @relation(fields: [agreementId], references: [id])
+
+  @@index([agreementId, createdAt])
+  @@index([actorAddress, createdAt])
+  @@index([resourceType, resourceId, createdAt])
+}
+
+model MilestoneSettlement {
+  id               String   @id @default(uuid())
+  agreementId       String
+  milestoneId       String?
+  direction         String   // FUNDING | PAYOUT | REFUND
+  network           String   // CKB | FIBER | INTERNAL
+  status            String   @default("PENDING") // PENDING | CONFIRMED | FAILED
+  amount            String
+  txHash            String?
+  paymentReference  String?
+  errorMessage      String?
+  confirmedAt       DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  agreement Agreement @relation(fields: [agreementId], references: [id])
+  milestone Milestone? @relation(fields: [milestoneId], references: [id])
+
+  @@index([agreementId, direction, status, createdAt])
+  @@index([milestoneId, direction, createdAt])
 }

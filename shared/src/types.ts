@@ -1,10 +1,14 @@
 import {
   AgreementStatus,
+  EscrowModel,
   MilestoneStatus,
   ProofType,
   ReleaseMode,
   ReviewerMode,
   PayoutNetwork,
+  SettlementDirection,
+  SettlementRecordStatus,
+  SettlementStatus,
   LogLevel,
   AgentEventType,
   DisputeRecommendation,
@@ -18,8 +22,13 @@ export interface Milestone {
   amount: string;
   sortOrder: number;
   status: MilestoneStatus;
+  escrowFundingTxHash: string | null;
+  escrowOutputIndex: number | null;
+  escrowCellData: string | null;
+  refundTimeoutBlock: string | null;
   createdAt: string;
   updatedAt: string;
+  settlements?: MilestoneSettlement[];
 }
 
 export interface Agreement {
@@ -28,6 +37,7 @@ export interface Agreement {
   description: string;
   clientAddress: string;
   workerAddress: string;
+  arbitratorAddress: string | null;
   workerFiberPubkey: string | null;
   amount: string;
   deadlineAt: string;
@@ -36,6 +46,16 @@ export interface Agreement {
   reviewerMode: ReviewerMode;
   releaseMode: ReleaseMode;
   payoutNetwork: PayoutNetwork;
+  escrowModel: EscrowModel;
+  escrowAddress: string | null;
+  escrowLockCodeHash: string | null;
+  escrowLockHashType: string | null;
+  escrowLockArgs: string | null;
+  agreementDigest: string | null;
+  milestoneDigest: string | null;
+  settlementStatus: SettlementStatus;
+  fundingConfirmedAt: string | null;
+  lastSettlementError: string | null;
   ckbTxHashCreate: string | null;
   ckbTxHashFund: string | null;
   ckbTxHashRelease: string | null;
@@ -44,6 +64,23 @@ export interface Agreement {
   createdAt: string;
   updatedAt: string;
   milestones?: Milestone[];
+  settlements?: MilestoneSettlement[];
+}
+
+export interface MilestoneSettlement {
+  id: string;
+  agreementId: string;
+  milestoneId: string | null;
+  direction: SettlementDirection;
+  network: PayoutNetwork | 'INTERNAL';
+  status: SettlementRecordStatus;
+  amount: string;
+  txHash: string | null;
+  paymentReference: string | null;
+  errorMessage: string | null;
+  confirmedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface CreateMilestoneDTO {
@@ -64,6 +101,7 @@ export interface CreateAgreementDTO {
   reviewerMode: ReviewerMode;
   releaseMode: ReleaseMode;
   payoutNetwork: PayoutNetwork;
+  escrowModel?: EscrowModel;
   milestones: CreateMilestoneDTO[];
 }
 
@@ -100,8 +138,18 @@ export interface Dispute {
   aiRecommendation: DisputeRecommendation | null;
   aiConfidence: number | null;
   aiRationale: string | null;
+  refundConsensus?: RefundConsensus | null;
   resolvedAt: string | null;
   createdAt: string;
+}
+
+export interface RefundConsensus {
+  proposedBy: string | null;
+  proposedAt: string | null;
+  clientApprovedAt: string | null;
+  workerApprovedAt: string | null;
+  fullyApproved: boolean;
+  awaitingAddress: string | null;
 }
 
 export interface DisputeEvidence {
@@ -135,6 +183,18 @@ export interface AgentLog {
   createdAt: string;
 }
 
+export interface AuditLog {
+  id: string;
+  agreementId: string | null;
+  actorAddress: string | null;
+  actorType: 'USER' | 'SYSTEM';
+  action: string;
+  resourceType: string;
+  resourceId: string;
+  metadataJson: string | null;
+  createdAt: string;
+}
+
 export interface AIRecommendationResponse {
   summary: string;
   recommendation: DisputeRecommendation;
@@ -159,6 +219,13 @@ export interface AppConfig {
   fiberEnabled: boolean;
   aiEnabled: boolean;
   agentIntervalMs: number;
+  treasuryAddress: string | null;
+  onchainEscrowEnabled: boolean;
+  onchainEscrowReady: boolean;
+  supportedEscrowModels: Array<'TREASURY_BRIDGE' | 'ONCHAIN_LOCK'>;
+  onchainLockTxHash?: string | null;
+  onchainLockIndex?: string | null;
+  onchainLockDepType?: 'code' | 'depGroup' | null;
 }
 
 export interface WSEvent {

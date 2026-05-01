@@ -89,7 +89,7 @@ export const useStore = create<AppState>()(
           agreementUpdateTimer = setTimeout(() => {
             agreementUpdateTimer = null;
             set((state) => ({ agreementUpdateCount: state.agreementUpdateCount + 1 }));
-          }, 400);
+          }, 120);
         },
     }),
     {

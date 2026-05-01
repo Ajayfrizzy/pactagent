@@ -9,6 +9,7 @@ import logRoutes from './routes/logs';
 import { createLog } from './services/logService';
 import { checkFiberHealth } from './services/fiberService';
 import { getTreasuryAddress } from './services/ckbService';
+import { isOnchainEscrowReady } from './services/onchainEscrowService';
 import { initWebSocket } from './ws';
 import { runAgentCycle } from './worker/agentLoop';
 
@@ -52,6 +53,14 @@ app.get('/api/config', async (_req, res) => {
       aiEnabled: config.aiEnabled,
       agentIntervalMs: config.agentIntervalMs,
       treasuryAddress,
+      onchainEscrowEnabled: config.onchainEscrowEnabled,
+      onchainEscrowReady: isOnchainEscrowReady(),
+      supportedEscrowModels: isOnchainEscrowReady()
+        ? ['TREASURY_BRIDGE', 'ONCHAIN_LOCK']
+        : ['TREASURY_BRIDGE'],
+      onchainLockTxHash: config.onchainLockTxHash || null,
+      onchainLockIndex: config.onchainLockIndex || null,
+      onchainLockDepType: config.onchainLockDepType || null,
     },
   });
 });

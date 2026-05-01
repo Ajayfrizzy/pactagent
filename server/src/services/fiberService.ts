@@ -1,4 +1,3 @@
-import { prisma } from '../db';
 import { createLog } from './logService';
 import { config } from '../config';
 
@@ -207,12 +206,6 @@ export async function attemptFiberPayout(
     if (!confirmed) {
       throw new Error(`Payment ${paymentHash} was not confirmed within timeout`);
     }
-
-    // Step 3: Save the payment reference in DB
-    await prisma.agreement.update({
-      where: { id: agreementId },
-      data: { fiberPaymentReference: paymentHash },
-    });
 
     await createLog({
       agreementId,

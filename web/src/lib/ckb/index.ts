@@ -1,6 +1,7 @@
 import { ccc } from '@ckb-ccc/connector-react';
 
 const CKB_DECIMALS = BigInt(10 ** 8);
+const AVERAGE_CKB_BLOCK_MS = 8_000;
 
 /** CKB requires a minimum of 61 CKB per output cell. */
 export const MIN_CELL_CAPACITY = BigInt(61) * BigInt(10 ** 8); // 6_100_000_000 shannons
@@ -50,6 +51,251 @@ export function getCkbClient() {
   return network === 'mainnet'
     ? new ccc.ClientPublicMainnet(url ? { url } : undefined)
     : new ccc.ClientPublicTestnet(url ? { url } : undefined);
+}
+
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(canonicalize);
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, nestedValue]) => [key, canonicalize(nestedValue)])
+    );
+  }
+
+  return value;
+}
+
+async function sha256Hex(input: string) {
+  const bytes = new TextEncoder().encode(input);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', bytes);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function toLittleEndianHex(value: bigint, byteLength: number) {
+  const padded = value.toString(16).padStart(byteLength * 2, '0');
+  const pairs = padded.match(/../g) || [];
+  return pairs.reverse().join('');
+}
+
+export async function buildSingleMilestoneDigestForEscrow(milestone: {
+  title: string;
+  description: string;
+  amount: string;
+  sortOrder: number;
+}) {
+  const payload = JSON.stringify(canonicalize({
+    milestones: [
+      {
+        sortOrder: milestone.sortOrder,
+        title: milestone.title.trim(),
+        description: milestone.description.trim(),
+        amount: milestone.amount,
+      },
+    ],
+  }));
+
+  return sha256Hex(payload);
+}
+
+export function buildMilestoneEscrowCellData(params: {
+  agreementDigest: string;
+  milestoneDigest: string;
+  milestoneIndex: number;
+  refundTimeoutBlock: bigint;
+}) {
+  const magic = '5041435445534331';
+  const version = '01';
+  const reserved = '000000';
+  const milestoneIndex = toLittleEndianHex(BigInt(params.milestoneIndex), 4);
+  const refundTimeout = toLittleEndianHex(params.refundTimeoutBlock, 8);
+
+  return `0x${magic}${version}${reserved}${milestoneIndex}${refundTimeout}${params.agreementDigest.replace(/^0x/, '')}${params.milestoneDigest.replace(/^0x/, '')}`;
+}
+
+function getEscrowLockScript(agreement: {
+  escrowLockCodeHash?: string | null;
+  escrowLockHashType?: string | null;
+  escrowLockArgs?: string | null;
+}) {
+  if (!agreement.escrowLockCodeHash || !agreement.escrowLockHashType || !agreement.escrowLockArgs) {
+    throw new Error('On-chain escrow lock metadata is incomplete for this agreement.');
+  }
+
+  return {
+    codeHash: agreement.escrowLockCodeHash,
+    hashType: agreement.escrowLockHashType,
+    args: agreement.escrowLockArgs,
+  };
+}
+
+function getEscrowCellDep(config: {
+  onchainLockTxHash?: string | null;
+  onchainLockIndex?: string | null;
+  onchainLockDepType?: 'code' | 'depGroup' | null;
+}) {
+  if (!config.onchainLockTxHash || !config.onchainLockIndex || !config.onchainLockDepType) {
+    throw new Error('On-chain escrow deployment metadata is missing from server config.');
+  }
+
+  return {
+    outPoint: {
+      txHash: config.onchainLockTxHash,
+      index: config.onchainLockIndex,
+    },
+    depType: config.onchainLockDepType,
+  };
+}
+
+export async function sendOnchainEscrowFunding(params: {
+  signer: ccc.Signer;
+  agreement: {
+    agreementDigest: string;
+    deadlineAt: string;
+    milestones: Array<{
+      id: string;
+      title: string;
+      description: string;
+      amount: string;
+      sortOrder: number;
+    }>;
+    escrowLockCodeHash?: string | null;
+    escrowLockHashType?: string | null;
+    escrowLockArgs?: string | null;
+  };
+  onProgress?: (step: string) => void;
+}) {
+  const { signer, agreement, onProgress = () => {} } = params;
+  const escrowScript = getEscrowLockScript(agreement);
+  const tx = ccc.Transaction.from({});
+
+  onProgress('Checking wallet connection...');
+  await checkSignerAlive(signer);
+
+  const currentTip = await signer.client.getTip();
+  const deadlineMs = new Date(agreement.deadlineAt).getTime();
+  const blocksUntilDeadline = Math.max(1, Math.ceil((deadlineMs - Date.now()) / AVERAGE_CKB_BLOCK_MS));
+  const refundTimeoutBlock = currentTip + BigInt(blocksUntilDeadline);
+
+  const milestoneOutputs: Array<{
+    milestoneId: string;
+    outputIndex: number;
+    escrowCellData: string;
+    refundTimeoutBlock: string;
+  }> = [];
+
+  onProgress('Preparing escrow cells...');
+  for (const milestone of agreement.milestones) {
+    const milestoneDigest = await buildSingleMilestoneDigestForEscrow({
+      title: milestone.title,
+      description: milestone.description,
+      amount: milestone.amount,
+      sortOrder: milestone.sortOrder,
+    });
+    const escrowCellData = buildMilestoneEscrowCellData({
+      agreementDigest: agreement.agreementDigest,
+      milestoneDigest,
+      milestoneIndex: milestone.sortOrder,
+      refundTimeoutBlock,
+    });
+
+    const outputIndex = tx.addOutput({
+      lock: escrowScript,
+      capacity: BigInt(milestone.amount),
+    }, escrowCellData);
+
+    milestoneOutputs.push({
+      milestoneId: milestone.id,
+      outputIndex,
+      escrowCellData,
+      refundTimeoutBlock: refundTimeoutBlock.toString(),
+    });
+  }
+
+  onProgress('Calculating fees...');
+  await tx.completeFeeBy(signer);
+
+  onProgress('Waiting for wallet approval...');
+  const txHash = await signer.sendTransaction(tx);
+
+  return {
+    txHash: String(txHash),
+    milestoneOutputs,
+  };
+}
+
+export async function sendOnchainEscrowResolution(params: {
+  signer: ccc.Signer;
+  agreement: {
+    workerAddress: string;
+    clientAddress: string;
+    escrowLockCodeHash?: string | null;
+    escrowLockHashType?: string | null;
+    escrowLockArgs?: string | null;
+  };
+  milestone: {
+    amount: string;
+    escrowFundingTxHash?: string | null;
+    escrowOutputIndex?: number | null;
+    escrowCellData?: string | null;
+    refundTimeoutBlock?: string | null;
+  };
+  config: {
+    onchainLockTxHash?: string | null;
+    onchainLockIndex?: string | null;
+    onchainLockDepType?: 'code' | 'depGroup' | null;
+  };
+  direction: 'PAYOUT' | 'REFUND';
+  useTimeout?: boolean;
+  onProgress?: (step: string) => void;
+}) {
+  const { signer, agreement, milestone, config, direction, useTimeout = false, onProgress = () => {} } = params;
+  if (milestone.escrowOutputIndex == null || !milestone.escrowFundingTxHash) {
+    throw new Error('Escrow cell metadata is missing for this milestone.');
+  }
+
+  onProgress('Loading escrow cell...');
+  const escrowCell = await signer.client.getCell({
+    txHash: milestone.escrowFundingTxHash,
+    index: milestone.escrowOutputIndex,
+  });
+
+  if (!escrowCell) {
+    throw new Error('Could not find the escrow cell on-chain for this milestone.');
+  }
+
+  const tx = ccc.Transaction.from({});
+  tx.addCellDeps(getEscrowCellDep(config));
+
+  tx.addInput({
+    previousOutput: escrowCell.outPoint,
+    since: direction === 'REFUND' && useTimeout
+      ? BigInt(milestone.refundTimeoutBlock || '0')
+      : BigInt(0),
+    cellOutput: escrowCell.cellOutput,
+    outputData: escrowCell.outputData,
+  });
+
+  const recipientAddress = direction === 'PAYOUT'
+    ? agreement.workerAddress
+    : agreement.clientAddress;
+  const recipient = await ccc.Address.fromString(recipientAddress, signer.client);
+
+  tx.addOutput({
+    lock: recipient.script,
+    capacity: BigInt(milestone.amount),
+  });
+
+  onProgress('Adding fee-paying signer input...');
+  await tx.completeFeeBy(signer);
+
+  onProgress('Waiting for wallet approval...');
+  const txHash = await signer.sendTransaction(tx);
+  return String(txHash);
 }
 
 async function withPinnedSignerAddress<T>(

@@ -271,7 +271,10 @@ export default function DashboardPage() {
                             </h3>
                             <p className="mt-1 text-xs text-gray-500">{ag.id.slice(0, 8)}...</p>
                           </div>
-                          <StatusBadge status={ag.status} />
+                          <div className="flex flex-col items-end gap-2">
+                            <StatusBadge status={ag.status} />
+                            <StatusBadge status={ag.settlementStatus || 'UNFUNDED'} />
+                          </div>
                         </div>
                         <p className="mb-4 line-clamp-2 text-sm text-gray-400">{ag.description}</p>
                         <div className="grid grid-cols-2 gap-3 text-xs text-gray-500 md:grid-cols-5">
@@ -308,5 +311,4 @@ export default function DashboardPage() {
     </div>
   );
 }
-
 

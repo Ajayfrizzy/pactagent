@@ -1,0 +1,13 @@
+[workspace]
+members = ["pact-escrow-lock"]
+resolver = "2"
+
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1
+overflow-checks = true
+strip = true
+
+[profile.dev]
+panic = "abort"

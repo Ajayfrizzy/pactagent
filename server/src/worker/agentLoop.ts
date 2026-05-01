@@ -4,7 +4,9 @@ import {
   activateNextMilestone,
   approveCurrentMilestone,
   completeApprovedMilestone,
-  recordSettlementReference,
+  confirmFundingIfReady,
+  confirmPendingSettlementIfReady,
+  recordMilestoneSettlementAttempt,
   refundCurrentMilestone,
   transitionMilestoneStatus,
   transitionStatus,
@@ -33,10 +35,15 @@ function getOpenDispute(currentMilestone: any) {
   return currentMilestone?.disputes.find((dispute: any) => !dispute.resolvedAt) ?? null;
 }
 
+function isPendingSettlementStatus(status: string) {
+  return ['FUNDING_PENDING', 'PAYOUT_PENDING', 'REFUND_PENDING'].includes(status);
+}
+
 function buildProcessKey(agreement: any, now: Date) {
   const parts = [
     agreement.id,
     agreement.status,
+    agreement.settlementStatus,
     agreement.updatedAt.toISOString(),
   ];
 
@@ -63,6 +70,11 @@ function buildProcessKey(agreement: any, now: Date) {
     }
   }
 
+  const latestSettlement = agreement.settlements?.[0];
+  if (latestSettlement) {
+    parts.push(`settlement:${latestSettlement.id}:${latestSettlement.status}`);
+  }
+
   return parts.join(':');
 }
 
@@ -76,9 +88,23 @@ export async function runAgentCycle(): Promise<void> {
   try {
     const agreements = await prisma.agreement.findMany({
       where: {
-        status: {
-          in: ['PROOF_SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'FUNDED', 'DRAFT', 'DISPUTED'],
-        },
+        OR: [
+          {
+            status: {
+              in: ['PROOF_SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'FUNDED', 'DRAFT', 'DISPUTED'],
+            },
+          },
+          {
+            settlementStatus: {
+              in: ['FUNDING_PENDING', 'PAYOUT_PENDING', 'REFUND_PENDING'],
+            },
+          },
+          {
+            status: 'DRAFT',
+            settlementStatus: 'FAILED',
+            ckbTxHashFund: { not: null },
+          },
+        ],
       },
       include: {
         milestones: {
@@ -91,6 +117,9 @@ export async function runAgentCycle(): Promise<void> {
                 evidenceEntries: { orderBy: { createdAt: 'asc' } },
               },
             },
+            settlements: {
+              orderBy: { createdAt: 'desc' },
+            },
           },
         },
         proofs: { orderBy: { submittedAt: 'desc' } },
@@ -100,18 +129,25 @@ export async function runAgentCycle(): Promise<void> {
             evidenceEntries: { orderBy: { createdAt: 'asc' } },
           },
         },
+        settlements: {
+          orderBy: { createdAt: 'desc' },
+        },
       },
     });
 
     for (const agreement of agreements) {
       const processKey = buildProcessKey(agreement, new Date());
-      if (processedSet.has(processKey)) {
+      const shouldAlwaysRecheck = isPendingSettlementStatus(agreement.settlementStatus);
+
+      if (!shouldAlwaysRecheck && processedSet.has(processKey)) {
         continue;
       }
 
       try {
         await processAgreement(agreement);
-        processedSet.add(processKey);
+        if (!shouldAlwaysRecheck) {
+          processedSet.add(processKey);
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Unknown error';
         await createLog({
@@ -119,7 +155,11 @@ export async function runAgentCycle(): Promise<void> {
           level: 'ERROR',
           eventType: 'ERROR',
           message: `Agent error processing agreement: ${msg}`,
-          metadata: { error: msg, status: agreement.status },
+          metadata: {
+            error: msg,
+            status: agreement.status,
+            settlementStatus: agreement.settlementStatus,
+          },
         });
       }
     }
@@ -139,8 +179,27 @@ async function processAgreement(agreement: any): Promise<void> {
   const deadline = new Date(agreement.deadlineAt);
   const currentMilestone = getCurrentMilestone(agreement);
 
+  if (
+    agreement.status === 'DRAFT' &&
+    agreement.ckbTxHashFund &&
+    ['FUNDING_PENDING', 'FAILED'].includes(agreement.settlementStatus)
+  ) {
+    await confirmFundingIfReady(agreement.id);
+  }
+
+  if (agreement.settlementStatus === 'PAYOUT_PENDING' || agreement.settlementStatus === 'REFUND_PENDING') {
+    const confirmed = await confirmPendingSettlementIfReady(agreement.id);
+    if (confirmed) {
+      return;
+    }
+  }
+
   switch (agreement.status) {
     case 'DRAFT': {
+      if (agreement.settlementStatus === 'FUNDING_PENDING') {
+        break;
+      }
+
       if (now > deadline) {
         await createLog({
           agreementId: agreement.id,
@@ -306,32 +365,8 @@ async function processAgreement(agreement: any): Promise<void> {
         break;
       }
 
-      const existingSettlementReference =
-        agreement.fiberPaymentReference || agreement.ckbTxHashRelease;
-
-      if (!existingSettlementReference) {
-        const claimResult = await prisma.agreement.updateMany({
-          where: {
-            id: agreement.id,
-            status: 'APPROVED',
-            updatedAt: agreement.updatedAt,
-            ckbTxHashRelease: null,
-            fiberPaymentReference: null,
-          },
-          data: { updatedAt: new Date() },
-        });
-
-        if (claimResult.count === 0) {
-          await createLog({
-            agreementId: agreement.id,
-            level: 'INFO',
-            eventType: 'RELEASE_PREPARED',
-            message: `Skipping duplicate payout attempt for milestone ${currentMilestone.sortOrder}: ${currentMilestone.title}`,
-            metadata: {
-              milestoneId: currentMilestone.id,
-              reason: 'SETTLEMENT_ALREADY_CLAIMED',
-            },
-          });
+      if (agreement.escrowModel !== 'TREASURY_BRIDGE') {
+        if (agreement.settlementStatus === 'PAYOUT_PENDING') {
           break;
         }
 
@@ -339,106 +374,162 @@ async function processAgreement(agreement: any): Promise<void> {
           agreementId: agreement.id,
           level: 'INFO',
           eventType: 'RELEASE_PREPARED',
-          message: `Preparing payout for milestone ${currentMilestone.sortOrder}: ${currentMilestone.title}`,
+          message: 'Awaiting manual on-chain settlement transaction for the approved escrow milestone',
           metadata: {
             milestoneId: currentMilestone.id,
-            milestoneAmount: currentMilestone.amount,
-            payoutNetwork: agreement.payoutNetwork,
+            escrowModel: agreement.escrowModel,
+          },
+        });
+        break;
+      }
+
+      const pendingPayout = agreement.settlements.find(
+        (settlement: any) =>
+          settlement.direction === 'PAYOUT' &&
+          settlement.milestoneId === currentMilestone.id &&
+          settlement.status === 'PENDING'
+      );
+      if (pendingPayout) {
+        await confirmPendingSettlementIfReady(agreement.id);
+        break;
+      }
+
+      const existingConfirmedPayout = agreement.settlements.find(
+        (settlement: any) =>
+          settlement.direction === 'PAYOUT' &&
+          settlement.milestoneId === currentMilestone.id &&
+          settlement.status === 'CONFIRMED'
+      );
+      if (existingConfirmedPayout) {
+        await completeApprovedMilestone(agreement.id);
+        break;
+      }
+
+      const claimResult = await prisma.agreement.updateMany({
+        where: {
+          id: agreement.id,
+          status: 'APPROVED',
+          updatedAt: agreement.updatedAt,
+          settlementStatus: {
+            not: 'PAYOUT_PENDING',
+          },
+        },
+        data: { updatedAt: new Date() },
+      });
+
+      if (claimResult.count === 0) {
+        await createLog({
+          agreementId: agreement.id,
+          level: 'INFO',
+          eventType: 'RELEASE_PREPARED',
+          message: `Skipping duplicate payout attempt for milestone ${currentMilestone.sortOrder}: ${currentMilestone.title}`,
+          metadata: {
+            milestoneId: currentMilestone.id,
+            reason: 'SETTLEMENT_ALREADY_CLAIMED',
+          },
+        });
+        break;
+      }
+
+      await createLog({
+        agreementId: agreement.id,
+        level: 'INFO',
+        eventType: 'RELEASE_PREPARED',
+        message: `Preparing payout for milestone ${currentMilestone.sortOrder}: ${currentMilestone.title}`,
+        metadata: {
+          milestoneId: currentMilestone.id,
+          milestoneAmount: currentMilestone.amount,
+          payoutNetwork: agreement.payoutNetwork,
+        },
+      });
+
+      if (agreement.payoutNetwork === 'FIBER' || agreement.releaseMode === 'PARTIAL') {
+        const fiberResult = await attemptFiberPayout(
+          agreement.id,
+          agreement.workerFiberPubkey || agreement.workerAddress,
+          currentMilestone.amount
+        );
+
+        await createLog({
+          agreementId: agreement.id,
+          level: fiberResult.route === 'FIBER' ? 'SUCCESS' : 'INFO',
+          eventType: 'RELEASE_SENT',
+          message:
+            fiberResult.route === 'FIBER'
+              ? `Milestone payment released via Fiber: ${currentMilestone.title}`
+              : `Milestone payment released on CKB fallback: ${currentMilestone.title}`,
+          metadata: {
+            milestoneId: currentMilestone.id,
+            milestoneTitle: currentMilestone.title,
+            ...fiberResult,
           },
         });
 
-        if (agreement.payoutNetwork === 'FIBER' || agreement.releaseMode === 'PARTIAL') {
-          const fiberResult = await attemptFiberPayout(
-            agreement.id,
-            agreement.workerFiberPubkey || agreement.workerAddress,
-            currentMilestone.amount
-          );
+        if (fiberResult.route === 'FIBER' && fiberResult.paymentReference) {
+          await recordMilestoneSettlementAttempt({
+            agreementId: agreement.id,
+            milestoneId: currentMilestone.id,
+            direction: 'PAYOUT',
+            network: 'FIBER',
+            amount: currentMilestone.amount,
+            paymentReference: fiberResult.paymentReference,
+            status: 'CONFIRMED',
+            confirmedAt: new Date(),
+          });
 
+          const updatedAgreement = await completeApprovedMilestone(agreement.id);
           await createLog({
             agreementId: agreement.id,
-            level: fiberResult.route === 'FIBER' ? 'SUCCESS' : 'INFO',
-            eventType: 'RELEASE_SENT',
-            message:
-              fiberResult.route === 'FIBER'
-                ? `Milestone payment released via Fiber: ${currentMilestone.title}`
-                : `Milestone payment released on CKB fallback: ${currentMilestone.title}`,
+            level: 'SUCCESS',
+            eventType: 'SETTLEMENT_CONFIRMED',
+            message: `Milestone settled on Fiber: ${currentMilestone.title}`,
             metadata: {
               milestoneId: currentMilestone.id,
               milestoneTitle: currentMilestone.title,
-              ...fiberResult,
+              finalAgreementStatus: updatedAgreement?.status,
             },
           });
-
-          if (fiberResult.route === 'FIBER') {
-            await recordSettlementReference(agreement.id, {
-              fiberPaymentReference: fiberResult.paymentReference,
-              ckbTxHashRelease: null,
-            });
-          } else {
-            const payoutTxHash = await sendTreasuryTransfer(
-              agreement.workerAddress,
-              currentMilestone.amount
-            );
-            await recordSettlementReference(agreement.id, {
-              ckbTxHashRelease: payoutTxHash,
-              fiberPaymentReference: null,
-            });
-          }
         } else {
           const payoutTxHash = await sendTreasuryTransfer(
             agreement.workerAddress,
             currentMilestone.amount
           );
-          await recordSettlementReference(agreement.id, {
-            ckbTxHashRelease: payoutTxHash,
-            fiberPaymentReference: null,
-          });
-
-          await createLog({
+          await recordMilestoneSettlementAttempt({
             agreementId: agreement.id,
-            level: 'INFO',
-            eventType: 'RELEASE_SENT',
-            message: `Milestone payment prepared on CKB: ${currentMilestone.title}`,
-            metadata: {
-              milestoneId: currentMilestone.id,
-              milestoneTitle: currentMilestone.title,
-              amount: currentMilestone.amount,
-              route: 'CKB',
-            },
+            milestoneId: currentMilestone.id,
+            direction: 'PAYOUT',
+            network: 'CKB',
+            amount: currentMilestone.amount,
+            txHash: payoutTxHash,
           });
         }
       } else {
+        const payoutTxHash = await sendTreasuryTransfer(
+          agreement.workerAddress,
+          currentMilestone.amount
+        );
+        await recordMilestoneSettlementAttempt({
+          agreementId: agreement.id,
+          milestoneId: currentMilestone.id,
+          direction: 'PAYOUT',
+          network: 'CKB',
+          amount: currentMilestone.amount,
+          txHash: payoutTxHash,
+        });
+
         await createLog({
           agreementId: agreement.id,
           level: 'INFO',
-          eventType: 'RELEASE_PREPARED',
-          message: `Existing settlement reference found for ${currentMilestone.title}; resuming milestone completion`,
+          eventType: 'RELEASE_SENT',
+          message: `Milestone payment prepared on CKB: ${currentMilestone.title}`,
           metadata: {
             milestoneId: currentMilestone.id,
             milestoneTitle: currentMilestone.title,
-            ckbTxHashRelease: agreement.ckbTxHashRelease,
-            fiberPaymentReference: agreement.fiberPaymentReference,
+            amount: currentMilestone.amount,
+            route: 'CKB',
           },
         });
       }
-
-      const updatedAgreement = await completeApprovedMilestone(agreement.id);
-      const hasRemainingMilestones = updatedAgreement?.status === 'FUNDED';
-
-      await createLog({
-        agreementId: agreement.id,
-        level: 'SUCCESS',
-        eventType: 'SETTLEMENT_CONFIRMED',
-        message: hasRemainingMilestones
-          ? `Milestone settled and next milestone unlocked: ${currentMilestone.title}`
-          : `Final milestone settled: ${currentMilestone.title}`,
-        metadata: {
-          milestoneId: currentMilestone.id,
-          milestoneTitle: currentMilestone.title,
-          amount: currentMilestone.amount,
-          finalAgreementStatus: updatedAgreement?.status,
-        },
-      });
       break;
     }
 
@@ -507,13 +598,16 @@ async function processAgreement(agreement: any): Promise<void> {
             metadata: { milestoneId: currentMilestone.id },
           });
         } else if (recommendation.recommendation === 'REFUND_CLIENT') {
-          await refundCurrentMilestone(agreement.id);
           await createLog({
             agreementId: agreement.id,
             level: 'INFO',
-            eventType: 'REFUND_SENT',
-            message: `Dispute resolved in favor of refund for ${currentMilestone.title}`,
-            metadata: { milestoneId: currentMilestone.id },
+            eventType: 'AI_RECOMMENDATION_READY',
+            message: `Refund recommendation recorded for ${currentMilestone.title}; mutual client and worker approval is still required`,
+            metadata: {
+              milestoneId: currentMilestone.id,
+              recommendation: recommendation.recommendation,
+              confidence: recommendation.confidence,
+            },
           });
         }
       }
