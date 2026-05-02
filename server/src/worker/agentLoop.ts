@@ -36,7 +36,7 @@ function getOpenDispute(currentMilestone: any) {
 }
 
 function isPendingSettlementStatus(status: string) {
-  return ['FUNDING_PENDING', 'PAYOUT_PENDING', 'REFUND_PENDING'].includes(status);
+  return ['FUNDING_PENDING', 'PAYOUT_PENDING', 'REFUND_PENDING', 'SPLIT_PENDING'].includes(status);
 }
 
 function buildProcessKey(agreement: any, now: Date) {
@@ -96,7 +96,7 @@ export async function runAgentCycle(): Promise<void> {
           },
           {
             settlementStatus: {
-              in: ['FUNDING_PENDING', 'PAYOUT_PENDING', 'REFUND_PENDING'],
+              in: ['FUNDING_PENDING', 'PAYOUT_PENDING', 'REFUND_PENDING', 'SPLIT_PENDING'],
             },
           },
           {
@@ -187,7 +187,7 @@ async function processAgreement(agreement: any): Promise<void> {
     await confirmFundingIfReady(agreement.id);
   }
 
-  if (agreement.settlementStatus === 'PAYOUT_PENDING' || agreement.settlementStatus === 'REFUND_PENDING') {
+  if (['PAYOUT_PENDING', 'REFUND_PENDING', 'SPLIT_PENDING'].includes(agreement.settlementStatus)) {
     const confirmed = await confirmPendingSettlementIfReady(agreement.id);
     if (confirmed) {
       return;

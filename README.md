@@ -603,6 +603,7 @@ PactAgent is viable both as an end-user product and as infrastructure.
 As a product, it can serve freelancers, agencies, service providers, protocol contributors, and remote teams that need milestone-based crypto payment coordination.
 
 As infrastructure, it already resembles a programmable agreement engine:
+
 - authenticated wallet participants
 - structured agreement lifecycle
 - deterministic agent automation
@@ -611,6 +612,7 @@ As infrastructure, it already resembles a programmable agreement engine:
 - realtime observability
 
 That makes it a good fit for:
+
 - job and freelancer marketplaces
 - DAO contributor payouts
 - grants and milestone funding platforms

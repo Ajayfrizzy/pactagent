@@ -1,12 +1,12 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ccc } from '@ckb-ccc/connector-react';
 import { NavbarMenu } from '@/components/NavbarMenu';
 import { useStore } from '@/lib/store';
 import { useWebSocket } from '@/hooks/useWebSocket';
-import { createAgreement } from '@/lib/api';
+import { createAgreement, fetchConfig } from '@/lib/api';
 import { ckbToShannons, MIN_CELL_CAPACITY, shannonsToCKB } from '@/lib/ckb';
 import { AgentIcon, ArrowLeftIcon, DocumentTextIcon, PlusIcon, XCircleIcon } from '@/components/Icons';
 
@@ -66,6 +66,7 @@ export default function NewAgreementPage() {
   const authToken = useStore((s) => s.authToken);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [publicConfig, setPublicConfig] = useState<any>(null);
   const [form, setForm] = useState({
     title: '',
     description: '',
@@ -77,9 +78,31 @@ export default function NewAgreementPage() {
     reviewerMode: 'AUTO',
     releaseMode: 'PARTIAL',
     payoutNetwork: 'CKB',
-    escrowModel: 'TREASURY_BRIDGE',
   });
   const [milestones, setMilestones] = useState<MilestoneDraft[]>(defaultMilestones);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadConfig() {
+      try {
+        const configData = await fetchConfig();
+        if (!cancelled) {
+          setPublicConfig(configData);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.error('Failed to load config for agreement creation:', err);
+        }
+      }
+    }
+
+    void loadConfig();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function updateField(field: string, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -174,7 +197,10 @@ export default function NewAgreementPage() {
         reviewerMode: form.reviewerMode,
         releaseMode: form.releaseMode,
         payoutNetwork: form.payoutNetwork,
-        escrowModel: form.escrowModel,
+        escrowModel:
+          publicConfig?.onchainEscrowReady && form.payoutNetwork === 'CKB'
+            ? 'ONCHAIN_LOCK'
+            : 'TREASURY_BRIDGE',
         milestones: milestones.map((milestone) => ({
           title: milestone.title,
           description: milestone.description,
@@ -329,19 +355,6 @@ export default function NewAgreementPage() {
                 <option value="CKB">CKB (L1)</option>
                 <option value="FIBER">Fiber (L2)</option>
               </select>
-            </div>
-          </div>
-
-          <div>
-            <label className={labelClass}>Escrow Model</label>
-            <div className="rounded-lg border border-agent-border bg-agent-card px-4 py-3">
-              <div className="text-sm font-medium text-white">Treasury Bridge</div>
-              <p className="mt-1.5 text-xs text-gray-400">
-                Refunds do not happen instantly anymore. If a dispute opens, the client and worker must both approve the refund before funds move back to the client.
-              </p>
-              <p className="mt-2 text-xs text-amber-300">
-                The older on-chain lock path is temporarily hidden while the lock rules are redesigned without an arbitrator.
-              </p>
             </div>
           </div>
 

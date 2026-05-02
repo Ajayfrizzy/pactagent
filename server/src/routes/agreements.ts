@@ -13,6 +13,7 @@ import {
 } from '../services/disputeService';
 import { isValidFiberPublicKey } from '../services/fiberService';
 import { getLogs } from '../services/logService';
+import type { ArtifactKind, DisputeResolutionChoice } from '../services/richPayloadService';
 import { runAgentCycle } from '../worker/agentLoop';
 
 const router = Router();
@@ -70,25 +71,65 @@ const fundSchema = z.object({
 const submitProofSchema = z.object({
   milestoneId: z.string().min(1),
   proofType: z.enum(['URL', 'TEXT', 'FILE_HASH']),
-  content: z.string().min(1),
+  content: z.string().default(''),
   contentHash: z.string().optional(),
-});
+  summary: z.string().optional(),
+  artifacts: z.array(z.object({
+    id: z.string().optional(),
+    kind: z.enum(['TEXT', 'URL', 'FILE', 'IMAGE']),
+    label: z.string().optional(),
+    mimeType: z.string().optional(),
+    content: z.string().min(1),
+    sizeBytes: z.number().int().nonnegative().optional(),
+  })).optional(),
+}).refine(
+  (data) => Boolean(data.content.trim() || data.summary?.trim() || data.artifacts?.length),
+  'Proof requires text, summary, or at least one artifact.'
+);
 
 const openDisputeSchema = z.object({
   milestoneId: z.string().min(1),
   openedBy: z.string().min(1),
   reason: z.string().min(1),
   evidenceNotes: z.string().optional(),
+  desiredResolution: z.enum(['PAYOUT', 'REFUND', 'SPLIT']).optional(),
+  splitWorkerAmount: z.string().optional(),
+  artifacts: z.array(z.object({
+    id: z.string().optional(),
+    kind: z.enum(['TEXT', 'URL', 'FILE', 'IMAGE']),
+    label: z.string().optional(),
+    mimeType: z.string().optional(),
+    content: z.string().min(1),
+    sizeBytes: z.number().int().nonnegative().optional(),
+  })).optional(),
 });
 
 const addDisputeEvidenceSchema = z.object({
   disputeId: z.string().min(1),
   submittedBy: z.string().min(1),
-  content: z.string().min(1),
-});
+  content: z.string().default(''),
+  desiredResolution: z.enum(['PAYOUT', 'REFUND', 'SPLIT']).optional(),
+  splitWorkerAmount: z.string().optional(),
+  artifacts: z.array(z.object({
+    id: z.string().optional(),
+    kind: z.enum(['TEXT', 'URL', 'FILE', 'IMAGE']),
+    label: z.string().optional(),
+    mimeType: z.string().optional(),
+    content: z.string().min(1),
+    sizeBytes: z.number().int().nonnegative().optional(),
+  })).optional(),
+}).refine(
+  (data) => Boolean(data.content.trim() || data.artifacts?.length),
+  'Dispute evidence requires text or at least one artifact.'
+);
 
 const mutualRefundConsentSchema = z.object({
   actorAddress: z.string().min(1),
+});
+
+const splitSettlementSchema = z.object({
+  actorAddress: z.string().min(1),
+  workerAmount: z.string().min(1),
 });
 
 const reviewActionSchema = z.object({
@@ -157,13 +198,6 @@ router.post('/', actionRateLimit, async (req: Request, res: Response) => {
 
     if (data.clientAddress !== authAddress) {
       return res.status(403).json({ success: false, error: 'Authenticated wallet must match the client address' });
-    }
-
-    if (data.escrowModel === 'ONCHAIN_LOCK') {
-      return res.status(400).json({
-        success: false,
-        error: 'On-chain lock escrow is temporarily unavailable while mutual settlement replaces the arbitrator flow.',
-      });
     }
 
     if (data.payoutNetwork === 'FIBER' && !data.workerFiberPubkey) {
@@ -274,18 +308,18 @@ router.post('/:id/onchain-resolution', actionRateLimit, async (req: Request, res
     const { milestoneId, txHash, direction } = onchainResolutionSchema.parse(req.body);
     const agreement = result.agreement;
     const isClient = agreement.clientAddress === authAddress;
-    const isArbitrator = agreement.arbitratorAddress === authAddress;
+    const isWorker = agreement.workerAddress === authAddress;
 
     if (agreement.escrowModel !== 'ONCHAIN_LOCK') {
       return res.status(400).json({ success: false, error: 'This agreement does not use the on-chain lock settlement path' });
     }
 
-    if (direction === 'PAYOUT' && !isClient && !isArbitrator) {
-      return res.status(403).json({ success: false, error: 'Only the client or appointed arbitrator can submit an on-chain payout resolution' });
+    if (direction === 'PAYOUT' && !isClient) {
+      return res.status(403).json({ success: false, error: 'Only the client can submit an on-chain payout resolution' });
     }
 
-    if (direction === 'REFUND' && !isArbitrator && agreement.status !== 'DRAFT' && agreement.status !== 'FUNDED' && agreement.status !== 'PROOF_SUBMITTED' && agreement.status !== 'UNDER_REVIEW' && agreement.status !== 'DISPUTED') {
-      return res.status(403).json({ success: false, error: 'Only the arbitrator can submit an on-chain refund resolution unless the refund is handled by timeout.' });
+    if (direction === 'REFUND' && !isWorker && !isClient) {
+      return res.status(403).json({ success: false, error: 'Only the worker or client timeout path can submit an on-chain refund resolution.' });
     }
 
     const updated = await agreementService.recordOnchainResolutionIntent({
@@ -327,7 +361,18 @@ router.post('/:id/submit-proof', actionRateLimit, async (req: Request, res: Resp
       data.milestoneId,
       data.proofType,
       data.content,
-      data.contentHash
+      data.contentHash,
+      {
+        summary: data.summary,
+        artifacts: data.artifacts as Array<{
+          id?: string;
+          kind: ArtifactKind;
+          label?: string;
+          mimeType?: string;
+          content: string;
+          sizeBytes?: number;
+        }> | undefined,
+      }
     );
     await createAuditLog({
       agreementId: req.params.id,
@@ -366,7 +411,19 @@ router.post('/:id/open-dispute', actionRateLimit, async (req: Request, res: Resp
       data.milestoneId,
       data.openedBy,
       data.reason,
-      data.evidenceNotes
+      data.evidenceNotes,
+      {
+        desiredResolution: data.desiredResolution as DisputeResolutionChoice | undefined,
+        splitWorkerAmount: data.splitWorkerAmount,
+        artifacts: data.artifacts as Array<{
+          id?: string;
+          kind: ArtifactKind;
+          label?: string;
+          mimeType?: string;
+          content: string;
+          sizeBytes?: number;
+        }> | undefined,
+      }
     );
     await createAuditLog({
       agreementId: req.params.id,
@@ -378,6 +435,7 @@ router.post('/:id/open-dispute', actionRateLimit, async (req: Request, res: Resp
         milestoneId: data.milestoneId,
       },
     });
+    triggerAgentCycleSoon('dispute opened');
     res.json({ success: true, data: response });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Validation error';
@@ -402,7 +460,19 @@ router.post('/:id/dispute/evidence', actionRateLimit, async (req: Request, res: 
       req.params.id,
       data.disputeId,
       data.submittedBy,
-      data.content
+      data.content,
+      {
+        desiredResolution: data.desiredResolution as DisputeResolutionChoice | undefined,
+        splitWorkerAmount: data.splitWorkerAmount,
+        artifacts: data.artifacts as Array<{
+          id?: string;
+          kind: ArtifactKind;
+          label?: string;
+          mimeType?: string;
+          content: string;
+          sizeBytes?: number;
+        }> | undefined,
+      }
     );
     await createAuditLog({
       agreementId: req.params.id,
@@ -415,6 +485,32 @@ router.post('/:id/dispute/evidence', actionRateLimit, async (req: Request, res: 
       },
     });
     triggerAgentCycleSoon('dispute evidence');
+    res.json({ success: true, data: response });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Validation error';
+    res.status(400).json({ success: false, error: msg });
+  }
+});
+
+router.post('/:id/dispute/split-offer', actionRateLimit, async (req: Request, res: Response) => {
+  try {
+    const result = await getAgreementParticipantRecord(req);
+    if ('error' in result) {
+      return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
+    }
+
+    const authAddress = getAuthAddress(req);
+    const data = splitSettlementSchema.parse(req.body);
+    if (data.actorAddress !== authAddress) {
+      return res.status(403).json({ success: false, error: 'Authenticated wallet must match the split settlement actor' });
+    }
+
+    const response = await agreementService.recordSplitSettlementConsent(
+      req.params.id,
+      data.actorAddress,
+      data.workerAmount
+    );
+    triggerAgentCycleSoon('split settlement consent');
     res.json({ success: true, data: response });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Validation error';
@@ -436,6 +532,7 @@ router.post('/:id/dispute/refund-consent', actionRateLimit, async (req: Request,
     }
 
     const response = await agreementService.recordMutualRefundConsent(req.params.id, data.actorAddress);
+    triggerAgentCycleSoon('refund consent');
     res.json({ success: true, data: response });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Validation error';
@@ -508,6 +605,29 @@ router.post('/:id/reconcile', actionRateLimit, async (req: Request, res: Respons
     res.json({ success: true, data: updated });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unable to reconcile agreement settlement';
+    res.status(400).json({ success: false, error: msg });
+  }
+});
+
+router.post('/:id/settlement/retry', actionRateLimit, async (req: Request, res: Response) => {
+  try {
+    const result = await getAgreementParticipantRecord(req);
+    if ('error' in result) {
+      return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
+    }
+
+    const authAddress = getAuthAddress(req);
+    const updated = await agreementService.retryFailedSettlement(req.params.id);
+    await createAuditLog({
+      agreementId: req.params.id,
+      actorAddress: authAddress,
+      action: 'SETTLEMENT_RETRY_REQUESTED',
+      resourceType: 'SETTLEMENT',
+      resourceId: req.params.id,
+    });
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unable to retry agreement settlement';
     res.status(400).json({ success: false, error: msg });
   }
 });

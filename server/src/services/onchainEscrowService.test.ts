@@ -11,8 +11,6 @@ const clientAddress =
   'ckt1qzda0cr08m85hc8jlnfp3zer7xulejywt49kt2rr0vthywaa50xwsq04g0372a9z33k20qx4wwvq85d9fllwuecamflgu';
 const workerAddress =
   'ckt1qzda0cr08m85hc8jlnfp3zer7xulejywt49kt2rr0vthywaa50xwsq04g0372a9z33k20qx4wwvq85d9fllwuecamflgu';
-const arbitratorAddress =
-  'ckt1qzda0cr08m85hc8jlnfp3zer7xulejywt49kt2rr0vthywaa50xwsq04g0372a9z33k20qx4wwvq85d9fllwuecamflgu';
 
 test('isOnchainEscrowReady reflects required config presence', () => {
   const originalEnabled = config.onchainEscrowEnabled;
@@ -49,7 +47,6 @@ test('buildOnchainEscrowDescriptor derives deterministic lock args and address',
     agreementDigest: '0x' + '33'.repeat(32),
     clientAddress,
     workerAddress,
-    arbitratorAddress,
   });
 
   assert.match(descriptor.escrowAddress, /^ckt1/i);

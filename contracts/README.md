@@ -5,8 +5,6 @@ This workspace contains the first on-chain contract for PactAgent:
 - `pact_escrow_lock`: one escrow cell per milestone with:
   - cooperative payout
   - cooperative refund
-  - arbitrator payout
-  - arbitrator refund
   - timeout refund
 
 ## Build

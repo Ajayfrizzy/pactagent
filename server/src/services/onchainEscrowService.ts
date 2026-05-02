@@ -27,26 +27,33 @@ function concatenateHex(parts: string[]) {
   return `0x${parts.map((part) => part.replace(/^0x/, '')).join('')}`;
 }
 
+function normalizeDigestSalt(value: string) {
+  const normalized = value.replace(/^0x/, '').toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(normalized)) {
+    throw new Error('Agreement digest must be a 32-byte hex value for on-chain escrow.');
+  }
+  return `0x${normalized}`;
+}
+
 export async function buildOnchainEscrowDescriptor(input: {
   agreementId: string;
   agreementDigest: string;
   clientAddress: string;
   workerAddress: string;
-  arbitratorAddress: string;
 }) {
   requireConfig(config.onchainLockCodeHash, 'ONCHAIN_LOCK_CODE_HASH');
 
   const client = getClient();
-  const [clientLockHash, workerLockHash, arbitratorLockHash] = await Promise.all([
+  const [clientLockHash, workerLockHash] = await Promise.all([
     lockHashFromAddress(input.clientAddress),
     lockHashFromAddress(input.workerAddress),
-    lockHashFromAddress(input.arbitratorAddress),
   ]);
+  const agreementSalt = normalizeDigestSalt(input.agreementDigest);
 
   const args = concatenateHex([
     clientLockHash,
     workerLockHash,
-    arbitratorLockHash,
+    agreementSalt,
   ]);
 
   const script = {
@@ -63,7 +70,7 @@ export async function buildOnchainEscrowDescriptor(input: {
     lockArgs: args,
     clientLockHash,
     workerLockHash,
-    arbitratorLockHash,
+    agreementSalt,
   };
 }
 

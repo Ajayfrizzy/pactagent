@@ -10,6 +10,7 @@ import { StatusBadge, NetworkBadge } from '@/components/StatusBadge';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useStore } from '@/lib/store';
 import {
+  ckbToShannons,
   sendCapacityTransfer,
   sendOnchainEscrowFunding,
   sendOnchainEscrowResolution,
@@ -18,6 +19,14 @@ import {
   MIN_CELL_CAPACITY,
 } from '@/lib/ckb';
 import * as api from '@/lib/api';
+import {
+  type DraftArtifact,
+  isDownloadableArtifact,
+  isImageArtifact,
+  parseDisputeEvidenceBundle,
+  parseProofBundle,
+  readFilesAsArtifacts,
+} from '@/lib/richPayloads';
 import {
   AgentIcon,
   ArrowLeftIcon,
@@ -81,6 +90,72 @@ function getRecommendationAvailability(dispute: any, agreement: any) {
   };
 }
 
+function ArtifactPreviewList({
+  artifacts,
+  onRemove,
+}: {
+  artifacts: DraftArtifact[];
+  onRemove?: (id: string) => void;
+}) {
+  if (!artifacts.length) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-2">
+      {artifacts.map((artifact) => (
+        <div key={artifact.id} className="rounded-lg border border-agent-border bg-agent-bg/60 p-3">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="truncate text-xs font-medium text-white">{artifact.label}</div>
+              <div className="text-[10px] uppercase tracking-wide text-gray-500">{artifact.kind}</div>
+            </div>
+            {onRemove ? (
+              <button
+                type="button"
+                onClick={() => onRemove(artifact.id)}
+                className="text-xs text-red-300 hover:text-red-200"
+              >
+                Remove
+              </button>
+            ) : null}
+          </div>
+
+          {isImageArtifact(artifact) ? (
+            <img src={artifact.content} alt={artifact.label} className="max-h-48 rounded-lg border border-agent-border object-contain" />
+          ) : artifact.kind === 'URL' ? (
+            <a
+              href={artifact.content}
+              target="_blank"
+              rel="noreferrer"
+              className="break-all text-sm text-agent-accent hover:underline"
+            >
+              {artifact.content}
+            </a>
+          ) : artifact.kind === 'TEXT' ? (
+            <p className="whitespace-pre-wrap text-sm text-gray-300">{artifact.content}</p>
+          ) : (
+            <div className="space-y-2">
+              <div className="text-xs text-gray-400">
+                {artifact.mimeType || 'Attached file'}{artifact.sizeBytes ? ` · ${artifact.sizeBytes} bytes` : ''}
+              </div>
+              {isDownloadableArtifact(artifact) ? (
+                <a
+                  href={artifact.content}
+                  download={artifact.label}
+                  className="inline-flex items-center gap-2 rounded-lg border border-agent-border px-3 py-2 text-xs text-gray-200 hover:bg-agent-card"
+                >
+                  Download Attachment
+                </a>
+              ) : null}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 type PendingDisputeReply = {
   id: string;
   submittedBy: string;
@@ -125,10 +200,19 @@ export default function AgreementDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [publicConfig, setPublicConfig] = useState<any>(null);
   const [fundingStatus, setFundingStatus] = useState<string | null>(null);
+  const [proofSummary, setProofSummary] = useState('');
   const [proofContent, setProofContent] = useState('');
+  const [proofUrlDraft, setProofUrlDraft] = useState('');
+  const [proofArtifacts, setProofArtifacts] = useState<DraftArtifact[]>([]);
   const [disputeReason, setDisputeReason] = useState('');
   const [evidenceNotes, setEvidenceNotes] = useState('');
+  const [disputeResolution, setDisputeResolution] = useState<'PAYOUT' | 'REFUND' | 'SPLIT'>('REFUND');
+  const [splitWorkerAmountCkb, setSplitWorkerAmountCkb] = useState('');
+  const [disputeUrlDraft, setDisputeUrlDraft] = useState('');
+  const [disputeArtifacts, setDisputeArtifacts] = useState<DraftArtifact[]>([]);
   const [additionalEvidence, setAdditionalEvidence] = useState('');
+  const [replyUrlDraft, setReplyUrlDraft] = useState('');
+  const [replyArtifacts, setReplyArtifacts] = useState<DraftArtifact[]>([]);
   const [pendingDisputeReplies, setPendingDisputeReplies] = useState<PendingDisputeReply[]>([]);
 
   useEffect(() => {
@@ -266,6 +350,48 @@ export default function AgreementDetailPage() {
     }
   }
 
+  function appendUrlArtifact(
+    value: string,
+    setter: (next: DraftArtifact[] | ((prev: DraftArtifact[]) => DraftArtifact[])) => void,
+    clear: () => void,
+    labelPrefix: string,
+  ) {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    setter((prev) => [
+      ...prev,
+      {
+        id: `${Date.now()}-${prev.length}`,
+        kind: 'URL',
+        label: `${labelPrefix} Link ${prev.length + 1}`,
+        content: trimmed,
+      },
+    ]);
+    clear();
+  }
+
+  async function appendFileArtifacts(
+    files: FileList | null,
+    setter: (next: DraftArtifact[] | ((prev: DraftArtifact[]) => DraftArtifact[])) => void,
+  ) {
+    if (!files?.length) {
+      return;
+    }
+
+    const artifacts = await readFilesAsArtifacts(files);
+    setter((prev) => [...prev, ...artifacts]);
+  }
+
+  function removeArtifact(
+    id: string,
+    setter: (next: DraftArtifact[] | ((prev: DraftArtifact[]) => DraftArtifact[])) => void,
+  ) {
+    setter((prev) => prev.filter((artifact) => artifact.id !== id));
+  }
+
   async function handleFund() {
     if (!signer) {
       setError('Reconnect a CKB wallet before funding this agreement');
@@ -378,7 +504,7 @@ export default function AgreementDetailPage() {
   }
 
   async function handleSubmitProof(milestoneId: string) {
-    if (!proofContent.trim()) {
+    if (!proofContent.trim() && !proofSummary.trim() && proofArtifacts.length === 0) {
       return;
     }
 
@@ -390,8 +516,13 @@ export default function AgreementDetailPage() {
         milestoneId,
         proofType: agreement.proofType,
         content: proofContent,
+        summary: proofSummary,
+        artifacts: proofArtifacts,
       });
+      setProofSummary('');
       setProofContent('');
+      setProofUrlDraft('');
+      setProofArtifacts([]);
       applyAgreementPayload(response);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Proof submission failed');
@@ -405,6 +536,11 @@ export default function AgreementDetailPage() {
       return;
     }
 
+    if (disputeResolution === 'SPLIT' && !splitWorkerAmountCkb.trim()) {
+      setError('Enter the worker amount for the split settlement request.');
+      return;
+    }
+
     setActionLoading('dispute');
     setError(null);
 
@@ -414,9 +550,18 @@ export default function AgreementDetailPage() {
         openedBy: walletAddress,
         reason: disputeReason,
         evidenceNotes: evidenceNotes || undefined,
+        desiredResolution: disputeResolution,
+        splitWorkerAmount: disputeResolution === 'SPLIT' && splitWorkerAmountCkb.trim()
+          ? ckbToShannons(splitWorkerAmountCkb).toString()
+          : undefined,
+        artifacts: disputeArtifacts,
       });
       setDisputeReason('');
       setEvidenceNotes('');
+      setDisputeResolution('REFUND');
+      setSplitWorkerAmountCkb('');
+      setDisputeUrlDraft('');
+      setDisputeArtifacts([]);
       applyAgreementPayload(response);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to open dispute');
@@ -445,7 +590,7 @@ export default function AgreementDetailPage() {
     }
 
     const openDispute = agreement.disputes?.find((item: any) => !item.resolvedAt);
-    if (!openDispute || !additionalEvidence.trim()) {
+    if (!openDispute || (!additionalEvidence.trim() && replyArtifacts.length === 0)) {
       return;
     }
 
@@ -454,7 +599,7 @@ export default function AgreementDetailPage() {
     const optimisticReply: PendingDisputeReply = {
       id: `pending-${Date.now()}`,
       submittedBy: walletAddress,
-      content,
+      content: content || 'Attachment bundle added',
       createdAt: new Date().toISOString(),
       optimistic: true,
     };
@@ -466,8 +611,11 @@ export default function AgreementDetailPage() {
         disputeId: openDispute.id,
         submittedBy: walletAddress,
         content,
+        artifacts: replyArtifacts,
       });
       setPendingDisputeReplies((prev) => prev.filter((entry) => entry.id !== optimisticReply.id));
+      setReplyUrlDraft('');
+      setReplyArtifacts([]);
       applyAgreementPayload(response);
     } catch (err) {
       setPendingDisputeReplies((prev) => prev.filter((entry) => entry.id !== optimisticReply.id));
@@ -504,7 +652,7 @@ export default function AgreementDetailPage() {
             direction: 'PAYOUT',
           });
         } else if (action === 'REJECT') {
-          const useTimeoutRefund = !isArbitrator;
+          const useTimeoutRefund = !isWorker;
           if (useTimeoutRefund) {
             if (!currentMilestone.refundTimeoutBlock) {
               throw new Error('This milestone does not have timeout metadata recorded yet.');
@@ -512,7 +660,7 @@ export default function AgreementDetailPage() {
 
             const currentTip = await signer.client.getTip();
             if (currentTip < BigInt(currentMilestone.refundTimeoutBlock)) {
-              throw new Error('Refunding this on-chain escrow milestone requires the arbitrator until the timeout block is reached.');
+              throw new Error('This on-chain refund path stays locked until the timeout block is reached.');
             }
           }
 
@@ -563,6 +711,37 @@ export default function AgreementDetailPage() {
     }
   }
 
+  async function handleSplitSettlement() {
+    if (!walletAddress) {
+      return;
+    }
+
+    const workerAmount = currentOpenDispute?.splitConsensus?.workerAmount
+      || (splitWorkerAmountCkb.trim() ? ckbToShannons(splitWorkerAmountCkb).toString() : '');
+    if (!workerAmount) {
+      setError('Enter the worker amount for the split settlement.');
+      return;
+    }
+
+    setActionLoading('split');
+    setError(null);
+
+    try {
+      const response = await api.proposeOrAcceptSplitSettlement(id, {
+        actorAddress: walletAddress,
+        workerAmount,
+      });
+      if (isClient) {
+        setSplitWorkerAmountCkb('');
+      }
+      applyAgreementPayload(response);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to record split settlement');
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
   async function handleReconcile() {
     setActionLoading('reconcile');
     setError(null);
@@ -572,6 +751,20 @@ export default function AgreementDetailPage() {
       setAgreement(updated);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to recheck settlement state');
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleRetrySettlement() {
+    setActionLoading('retry-settlement');
+    setError(null);
+
+    try {
+      const updated = await api.retryAgreementSettlement(id);
+      setAgreement(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to retry settlement');
     } finally {
       setActionLoading(null);
     }
@@ -617,7 +810,6 @@ export default function AgreementDetailPage() {
   const paidMilestones = milestones.filter((milestone: any) => milestone.status === 'PAID').length;
   const isClient = walletAddress === agreement.clientAddress;
   const isWorker = walletAddress === agreement.workerAddress;
-  const isArbitrator = walletAddress === agreement.arbitratorAddress;
   const currentOpenDispute =
     agreement.disputes?.find((item: any) => !item.resolvedAt) || null;
   const displayedRecommendation = currentOpenDispute?.aiRecommendation
@@ -635,8 +827,14 @@ export default function AgreementDetailPage() {
     (agreement.reviewerMode !== 'AUTO' || agreement.status === 'DISPUTED') &&
     currentMilestone != null &&
     ['UNDER_REVIEW', 'DISPUTED'].includes(currentMilestone.status);
+  const canOnchainRefundReview =
+    agreement.escrowModel === 'ONCHAIN_LOCK' &&
+    currentMilestone != null &&
+    isWorker &&
+    ['PROOF_SUBMITTED', 'UNDER_REVIEW', 'DISPUTED'].includes(currentMilestone.status);
   const fundingPending = agreement.settlementStatus === 'FUNDING_PENDING';
   const payoutPending = agreement.settlementStatus === 'PAYOUT_PENDING';
+  const splitPending = agreement.settlementStatus === 'SPLIT_PENDING';
   const refundPending = agreement.settlementStatus === 'REFUND_PENDING';
   const hasRecordedFundingAttempt = Boolean(agreement.ckbTxHashFund);
   const fundingNeedsReconnect = agreement.status === 'DRAFT' && isClient && !signer;
@@ -652,7 +850,9 @@ export default function AgreementDetailPage() {
   const approveLoading = actionLoading === 'APPROVE';
   const rejectLoading = actionLoading === 'REJECT';
   const mutualRefundLoading = actionLoading === 'mutual-refund';
+  const splitLoading = actionLoading === 'split';
   const reconcileLoading = actionLoading === 'reconcile';
+  const retrySettlementLoading = actionLoading === 'retry-settlement';
   const refreshingStatus = actionLoading === 'refresh';
   const disputeLoading = actionLoading === 'dispute';
   const disputeOpenedByLabel = currentOpenDispute
@@ -660,6 +860,8 @@ export default function AgreementDetailPage() {
     : null;
   const canReplyToDispute = Boolean(currentOpenDispute) && (isClient || isWorker);
   const refundConsensus = currentOpenDispute?.refundConsensus || null;
+  const splitConsensus = currentOpenDispute?.splitConsensus || null;
+  const disputeWorkspaceState = currentOpenDispute?.workspaceState || null;
   const hasApprovedMutualRefund = Boolean(
     walletAddress
     && refundConsensus
@@ -677,8 +879,25 @@ export default function AgreementDetailPage() {
     && refundConsensus?.proposedBy === agreement.clientAddress
     && !refundConsensus?.workerApprovedAt
     && !refundConsensus?.fullyApproved;
+  const canProposeSplitSettlement =
+    Boolean(currentOpenDispute)
+    && isClient
+    && !splitConsensus?.proposedBy
+    && !splitConsensus?.fullyApproved;
+  const canAcceptSplitSettlement =
+    Boolean(currentOpenDispute)
+    && isWorker
+    && splitConsensus?.proposedBy === agreement.clientAddress
+    && !splitConsensus?.workerApprovedAt
+    && !splitConsensus?.fullyApproved;
+  const openerEvidenceEntry = currentOpenDispute
+    ? (currentOpenDispute.evidenceEntries || []).find((entry: any) => entry.submittedBy === currentOpenDispute.openedBy)
+    : null;
+  const openerEvidenceBundle = openerEvidenceEntry
+    ? parseDisputeEvidenceBundle(openerEvidenceEntry.content)
+    : null;
   const displayedDisputeReplies = [
-    ...(currentOpenDispute?.evidenceEntries || []),
+    ...((currentOpenDispute?.evidenceEntries || []).filter((entry: any) => entry.id !== openerEvidenceEntry?.id)),
     ...pendingDisputeReplies,
   ];
   const disputeReplyCount = displayedDisputeReplies.length;
@@ -715,6 +934,22 @@ export default function AgreementDetailPage() {
     : isWorker
       ? 'Use this to answer the client dispute directly. Your reply appears in the shared thread.'
       : 'Replies appear in the shared dispute thread.';
+  const splitSettlementStatusText = splitConsensus?.proposedBy
+    ? splitConsensus.fullyApproved
+      ? 'Both parties approved this split settlement.'
+      : splitConsensus.awaitingAddress
+        ? `${getParticipantLabel(splitConsensus.awaitingAddress, agreement)} approval is still needed before the split settlement can execute.`
+        : 'Waiting for the second approval.'
+    : 'Use split settlement when both sides agree to pay part of the milestone to the worker and refund the rest to the client.';
+  const splitSettlementActionLabel = splitConsensus?.proposedBy
+    ? splitConsensus.fullyApproved
+      ? 'Split Confirmed'
+      : isWorker
+        ? 'Accept Split Settlement'
+        : 'Split Proposal Sent'
+    : isWorker
+      ? 'Waiting for Client Proposal'
+      : 'Propose Split Settlement';
   const settlementHistory = agreement.settlements || [];
   const escrowAddress = agreement.escrowAddress || publicConfig?.treasuryAddress || null;
   const canReconcileSettlement =
@@ -722,6 +957,7 @@ export default function AgreementDetailPage() {
     (agreement.settlementStatus === 'FAILED' ||
       agreement.settlementStatus === 'FUNDING_PENDING' ||
       agreement.settlementStatus === 'PAYOUT_PENDING' ||
+      agreement.settlementStatus === 'SPLIT_PENDING' ||
       agreement.settlementStatus === 'REFUND_PENDING');
 
   return (
@@ -813,10 +1049,6 @@ export default function AgreementDetailPage() {
 
               <div className="mt-4 pt-4 border-t border-agent-border grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <span className="text-[10px] uppercase text-gray-500 block mb-1">Escrow Model</span>
-                  <span className="text-sm text-white">{agreement.escrowModel.replace(/_/g, ' ')}</span>
-                </div>
-                <div>
                   <span className="text-[10px] uppercase text-gray-500 block mb-1">Funding Address</span>
                   <span className="text-xs font-mono text-gray-300 break-all">
                     {escrowAddress || 'Awaiting configuration'}
@@ -896,6 +1128,7 @@ export default function AgreementDetailPage() {
                   const isCurrent = currentMilestone?.id === milestone.id;
                   const latestProof = milestone.proofs?.[0];
                   const openDispute = milestone.disputes?.find((dispute: any) => !dispute.resolvedAt);
+                  const latestSettlement = milestone.settlements?.[0];
 
                   return (
                     <div
@@ -929,7 +1162,13 @@ export default function AgreementDetailPage() {
                       <div className="flex flex-wrap gap-4 text-xs text-gray-500">
                         <span>Proofs: {milestone.proofs?.length || 0}</span>
                         <span>Disputes: {milestone.disputes?.length || 0}</span>
+                        <span>Settlement attempts: {milestone.settlements?.length || 0}</span>
                         {latestProof && <span>Latest proof: {new Date(latestProof.submittedAt).toLocaleString()}</span>}
+                        {latestSettlement && (
+                          <span>
+                            Latest settlement: {latestSettlement.direction} {latestSettlement.status}
+                          </span>
+                        )}
                       </div>
 
                       {openDispute && (
@@ -965,6 +1204,11 @@ export default function AgreementDetailPage() {
                         <div className="text-xs font-mono text-gray-400">{shannonsToCKB(settlement.amount)} CKB</div>
                       </div>
                       <div className="grid grid-cols-1 gap-2 text-xs text-gray-400 md:grid-cols-2">
+                        <span>
+                          Milestone {settlement.milestoneId
+                            ? milestones.find((milestone: any) => milestone.id === settlement.milestoneId)?.sortOrder || 'Agreement'
+                            : 'Agreement'}
+                        </span>
                         <span>Created {new Date(settlement.createdAt).toLocaleString()}</span>
                         <span>Confirmed {settlement.confirmedAt ? new Date(settlement.confirmedAt).toLocaleString() : 'Pending'}</span>
                         <span className="break-all">Tx {settlement.txHash || 'Not used'}</span>
@@ -1019,14 +1263,16 @@ export default function AgreementDetailPage() {
               </div>
             )}
 
-            {(payoutPending || refundPending) && (
+            {(payoutPending || refundPending || splitPending) && (
               <div className="bg-agent-card border border-cyan-800/40 rounded-xl p-6">
                 <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
                   <ClockIcon className="w-5 h-5 text-cyan-400" />
                   Settlement Confirmation In Progress
                 </h3>
                 <p className="text-sm text-gray-400">
-                  {payoutPending
+                  {splitPending
+                    ? 'A split settlement has been sent. The worker payout and client refund are both waiting for on-chain confirmation before the milestone moves forward.'
+                    : payoutPending
                     ? 'A payout transaction has been sent and the worker is waiting for on-chain confirmation before this milestone is marked paid.'
                     : 'A refund transaction has been sent and the client is waiting for on-chain confirmation before the settlement is final.'}
                 </p>
@@ -1055,6 +1301,13 @@ export default function AgreementDetailPage() {
                   className="mt-4 rounded-lg border border-rose-600/40 px-4 py-2 text-sm font-medium text-rose-300 transition-colors hover:bg-rose-900/20 disabled:opacity-60"
                 >
                   {reconcileLoading ? 'Rechecking...' : 'Recheck Settlement'}
+                </button>
+                <button
+                  onClick={handleRetrySettlement}
+                  disabled={retrySettlementLoading}
+                  className="mt-3 rounded-lg border border-agent-border px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-agent-bg disabled:opacity-60"
+                >
+                  {retrySettlementLoading ? 'Retrying...' : 'Retry Settlement'}
                 </button>
               </div>
             )}
@@ -1139,18 +1392,53 @@ export default function AgreementDetailPage() {
                   Submit Proof for {currentMilestone.title}
                 </h3>
                 <p className="text-sm text-gray-400 mb-4">
-                  Submit proof for the active milestone before the agent reviews it.
+                  Submit a proof bundle with notes, links, files, or images for the active milestone before the agent reviews it.
                 </p>
                 <textarea
+                  className="w-full bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-agent-accent mb-3 h-20 resize-none"
+                  placeholder="Short proof summary..."
+                  value={proofSummary}
+                  onChange={(e) => setProofSummary(e.target.value)}
+                />
+                <textarea
                   className="w-full bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-agent-accent mb-3 h-24 resize-none"
-                  placeholder={agreement.proofType === 'URL' ? 'https://...' : 'Enter proof content...'}
+                  placeholder="Detailed notes, delivery explanation, or acceptance context..."
                   value={proofContent}
                   onChange={(e) => setProofContent(e.target.value)}
                 />
+                <div className="mb-3 flex gap-2">
+                  <input
+                    type="url"
+                    className="flex-1 bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-agent-accent"
+                    placeholder="https://link-to-proof..."
+                    value={proofUrlDraft}
+                    onChange={(e) => setProofUrlDraft(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => appendUrlArtifact(proofUrlDraft, setProofArtifacts, () => setProofUrlDraft(''), 'Proof')}
+                    className="rounded-lg border border-agent-border px-4 py-2 text-sm text-white hover:bg-agent-bg"
+                  >
+                    Add Link
+                  </button>
+                </div>
+                <input
+                  type="file"
+                  multiple
+                  className="mb-3 block w-full text-sm text-gray-300 file:mr-4 file:rounded-lg file:border-0 file:bg-agent-accent file:px-4 file:py-2 file:text-white"
+                  onChange={async (e) => {
+                    await appendFileArtifacts(e.target.files, setProofArtifacts);
+                    e.target.value = '';
+                  }}
+                />
+                <ArtifactPreviewList
+                  artifacts={proofArtifacts}
+                  onRemove={(artifactId) => removeArtifact(artifactId, setProofArtifacts)}
+                />
                 <button
                   onClick={() => handleSubmitProof(currentMilestone.id)}
-                  disabled={actionLoading === 'proof' || !proofContent.trim()}
-                  className="bg-yellow-600 hover:bg-yellow-700 disabled:opacity-50 text-white px-6 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                  disabled={actionLoading === 'proof' || (!proofContent.trim() && !proofSummary.trim() && proofArtifacts.length === 0)}
+                  className="mt-4 bg-yellow-600 hover:bg-yellow-700 disabled:opacity-50 text-white px-6 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
                 >
                   {actionLoading === 'proof' ? (
                     <>
@@ -1205,7 +1493,7 @@ export default function AgreementDetailPage() {
                   </h3>
                   <p className="text-sm text-gray-400 mb-4">
                     {agreement.escrowModel === 'ONCHAIN_LOCK'
-                      ? `Sign an on-chain payout or refund resolution for ${currentMilestone.title}. Payout can be signed by the client or arbitrator. Refund requires the arbitrator unless the refund timeout has been reached.`
+                      ? `Sign the on-chain payout resolution for ${currentMilestone.title}.`
                       : `Approve payout for ${currentMilestone.title}, or open a dispute below. Refunds only happen after both client and worker agree inside the dispute thread.`}
                   </p>
                   <div className="flex gap-3 flex-wrap">
@@ -1226,28 +1514,38 @@ export default function AgreementDetailPage() {
                         </>
                       )}
                     </button>
-                    {agreement.escrowModel === 'ONCHAIN_LOCK' ? (
-                      <button
-                        onClick={() => handleReviewAction('REJECT')}
-                        disabled={!!actionLoading}
-                        className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 min-w-[150px] justify-center"
-                      >
-                        {rejectLoading ? (
-                          <>
-                            <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                            Refunding...
-                          </>
-                        ) : (
-                          <>
-                            <XCircleIcon className="w-4 h-4" />
-                            Sign Refund Tx
-                          </>
-                        )}
-                      </button>
-                    ) : null}
                   </div>
                 </div>
               )}
+
+            {canOnchainRefundReview && currentMilestone && (
+              <div className="bg-agent-card border border-red-800/40 rounded-xl p-6">
+                <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
+                  <XCircleIcon className="w-5 h-5 text-red-400" />
+                  Refund Current Milestone
+                </h3>
+                <p className="text-sm text-gray-400 mb-4">
+                  Sign the on-chain refund resolution for {currentMilestone.title}. This sends the milestone amount back to the client from the escrow cell.
+                </p>
+                <button
+                  onClick={() => handleReviewAction('REJECT')}
+                  disabled={!!actionLoading}
+                  className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 min-w-[170px] justify-center"
+                >
+                  {rejectLoading ? (
+                    <>
+                      <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                      Refunding...
+                    </>
+                  ) : (
+                    <>
+                      <XCircleIcon className="w-4 h-4" />
+                      Sign Refund Tx
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
 
             {['FUNDED', 'PROOF_SUBMITTED', 'UNDER_REVIEW'].includes(agreement.status) && currentMilestone && (
               <div className="bg-agent-card border border-red-800/30 rounded-xl p-6">
@@ -1267,10 +1565,61 @@ export default function AgreementDetailPage() {
                   value={evidenceNotes}
                   onChange={(e) => setEvidenceNotes(e.target.value)}
                 />
+                <div className="mb-3 grid gap-3 md:grid-cols-2">
+                  <select
+                    className="bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-red-500"
+                    value={disputeResolution}
+                    onChange={(e) => setDisputeResolution(e.target.value as 'PAYOUT' | 'REFUND' | 'SPLIT')}
+                  >
+                    <option value="REFUND">Request Refund</option>
+                    <option value="PAYOUT">Request Payout</option>
+                    <option value="SPLIT">Request Split Settlement</option>
+                  </select>
+                  {disputeResolution === 'SPLIT' ? (
+                    <input
+                      type="number"
+                      className="bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-red-500"
+                      placeholder="Worker amount in CKB"
+                      value={splitWorkerAmountCkb}
+                      onChange={(e) => setSplitWorkerAmountCkb(e.target.value)}
+                      min="0"
+                      step="any"
+                    />
+                  ) : null}
+                </div>
+                <div className="mb-3 flex gap-2">
+                  <input
+                    type="url"
+                    className="flex-1 bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-red-500"
+                    placeholder="Add supporting link..."
+                    value={disputeUrlDraft}
+                    onChange={(e) => setDisputeUrlDraft(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => appendUrlArtifact(disputeUrlDraft, setDisputeArtifacts, () => setDisputeUrlDraft(''), 'Dispute')}
+                    className="rounded-lg border border-agent-border px-4 py-2 text-sm text-white hover:bg-agent-bg"
+                  >
+                    Add Link
+                  </button>
+                </div>
+                <input
+                  type="file"
+                  multiple
+                  className="mb-3 block w-full text-sm text-gray-300 file:mr-4 file:rounded-lg file:border-0 file:bg-red-600 file:px-4 file:py-2 file:text-white"
+                  onChange={async (e) => {
+                    await appendFileArtifacts(e.target.files, setDisputeArtifacts);
+                    e.target.value = '';
+                  }}
+                />
+                <ArtifactPreviewList
+                  artifacts={disputeArtifacts}
+                  onRemove={(artifactId) => removeArtifact(artifactId, setDisputeArtifacts)}
+                />
                 <button
                   onClick={() => handleOpenDispute(currentMilestone.id)}
                   disabled={disputeLoading || !disputeReason.trim()}
-                  className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-6 py-2.5 rounded-lg text-sm font-medium flex items-center gap-1.5"
+                  className="mt-4 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-6 py-2.5 rounded-lg text-sm font-medium flex items-center gap-1.5"
                 >
                   {disputeLoading ? (
                     <>
@@ -1298,6 +1647,14 @@ export default function AgreementDetailPage() {
                     <p className="text-sm text-gray-400">
                       Both participants can reply here. {wsConnected ? 'New replies appear automatically while this page is open.' : 'Reconnect to live updates to see new replies automatically.'}
                     </p>
+                    {disputeWorkspaceState ? (
+                      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-400">
+                        <StatusBadge status={disputeWorkspaceState.stage} />
+                        {disputeWorkspaceState.responseDeadlineAt ? (
+                          <span>Response deadline {new Date(disputeWorkspaceState.responseDeadlineAt).toLocaleString()}</span>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                   <span
                     className={`rounded-full border px-3 py-1 text-[11px] font-medium ${
@@ -1323,43 +1680,102 @@ export default function AgreementDetailPage() {
                       {currentOpenDispute.evidenceNotes}
                     </p>
                   ) : null}
+                  {openerEvidenceBundle?.desiredResolution ? (
+                    <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-300">
+                      <span className="rounded-full bg-red-950/40 px-2 py-1 text-red-200">
+                        Requested {openerEvidenceBundle.desiredResolution.replace(/_/g, ' ')}
+                      </span>
+                      {openerEvidenceBundle.desiredResolution === 'SPLIT' && openerEvidenceBundle.splitWorkerAmount ? (
+                        <span>Worker amount {shannonsToCKB(openerEvidenceBundle.splitWorkerAmount)} CKB</span>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {openerEvidenceBundle?.artifacts?.length ? (
+                    <div className="mt-3">
+                      <ArtifactPreviewList artifacts={openerEvidenceBundle.artifacts} />
+                    </div>
+                  ) : null}
                 </div>
 
                 {agreement.escrowModel === 'TREASURY_BRIDGE' && (isClient || isWorker) && (
-                  <div className="mb-5 rounded-lg border border-amber-800/40 bg-amber-950/20 p-4">
-                    <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <h4 className="text-sm font-medium text-white">Mutual Refund Settlement</h4>
-                        <p className="mt-1 text-xs text-gray-400">{mutualRefundStatusText}</p>
+                  <div className="mb-5 grid gap-4 lg:grid-cols-2">
+                    <div className="rounded-lg border border-amber-800/40 bg-amber-950/20 p-4">
+                      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <h4 className="text-sm font-medium text-white">Mutual Refund Settlement</h4>
+                          <p className="mt-1 text-xs text-gray-400">{mutualRefundStatusText}</p>
+                        </div>
+                        <button
+                          onClick={handleApproveMutualRefund}
+                          disabled={mutualRefundLoading || (!canProposeMutualRefund && !canAcceptMutualRefund)}
+                          className="rounded-lg border border-amber-600/40 px-4 py-2 text-sm font-medium text-amber-200 transition-colors hover:bg-amber-900/30 disabled:opacity-50"
+                        >
+                          {mutualRefundLoading ? 'Saving...' : mutualRefundActionLabel}
+                        </button>
                       </div>
-                      <button
-                        onClick={handleApproveMutualRefund}
-                        disabled={mutualRefundLoading || (!canProposeMutualRefund && !canAcceptMutualRefund)}
-                        className="rounded-lg border border-amber-600/40 px-4 py-2 text-sm font-medium text-amber-200 transition-colors hover:bg-amber-900/30 disabled:opacity-50"
-                      >
-                        {mutualRefundLoading ? 'Saving...' : mutualRefundActionLabel}
-                      </button>
+
+                      {refundConsensus?.proposedBy ? (
+                        <div className="grid gap-2 text-xs text-gray-300 sm:grid-cols-3">
+                          <span>
+                            Proposed by {getParticipantLabel(refundConsensus.proposedBy, agreement)}
+                          </span>
+                          <span>
+                            Client {refundConsensus.clientApprovedAt ? 'approved' : 'pending'}
+                          </span>
+                          <span>
+                            Worker {refundConsensus.workerApprovedAt ? 'approved' : 'pending'}
+                          </span>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-gray-400">
+                          {isClient
+                            ? 'Use this only when both sides agree that the milestone should be refunded instead of paid out.'
+                            : 'Wait for the client to propose the refund. Once they do, you can accept it here.'}
+                        </p>
+                      )}
                     </div>
 
-                    {refundConsensus?.proposedBy ? (
-                      <div className="grid gap-2 text-xs text-gray-300 sm:grid-cols-3">
-                        <span>
-                          Proposed by {getParticipantLabel(refundConsensus.proposedBy, agreement)}
-                        </span>
-                        <span>
-                          Client {refundConsensus.clientApprovedAt ? 'approved' : 'pending'}
-                        </span>
-                        <span>
-                          Worker {refundConsensus.workerApprovedAt ? 'approved' : 'pending'}
-                        </span>
+                    <div className="rounded-lg border border-cyan-800/40 bg-cyan-950/20 p-4">
+                      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <h4 className="text-sm font-medium text-white">Split Settlement</h4>
+                          <p className="mt-1 text-xs text-gray-400">{splitSettlementStatusText}</p>
+                        </div>
+                        <button
+                          onClick={handleSplitSettlement}
+                          disabled={splitLoading || (!canProposeSplitSettlement && !canAcceptSplitSettlement)}
+                          className="rounded-lg border border-cyan-600/40 px-4 py-2 text-sm font-medium text-cyan-200 transition-colors hover:bg-cyan-900/30 disabled:opacity-50"
+                        >
+                          {splitLoading ? 'Saving...' : splitSettlementActionLabel}
+                        </button>
                       </div>
-                    ) : (
-                      <p className="text-xs text-gray-400">
-                        {isClient
-                          ? 'Use this only when both sides agree that the milestone should be refunded instead of paid out.'
-                          : 'Wait for the client to propose the refund. Once they do, you can accept it here.'}
-                      </p>
-                    )}
+
+                      {canProposeSplitSettlement ? (
+                        <input
+                          type="number"
+                          className="mb-3 w-full bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500"
+                          placeholder="Worker amount in CKB"
+                          value={splitWorkerAmountCkb}
+                          onChange={(e) => setSplitWorkerAmountCkb(e.target.value)}
+                          min="0"
+                          step="any"
+                        />
+                      ) : null}
+
+                      {splitConsensus?.proposedBy ? (
+                        <div className="grid gap-2 text-xs text-gray-300 sm:grid-cols-3">
+                          <span>Worker gets {splitConsensus.workerAmount ? `${shannonsToCKB(splitConsensus.workerAmount)} CKB` : 'Pending'}</span>
+                          <span>Client gets {splitConsensus.clientRefundAmount ? `${shannonsToCKB(splitConsensus.clientRefundAmount)} CKB` : 'Pending'}</span>
+                          <span>{splitConsensus.awaitingAddress ? `Waiting on ${getParticipantLabel(splitConsensus.awaitingAddress, agreement)}` : 'Ready'}</span>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-gray-400">
+                          {isClient
+                            ? 'Propose a partial payout amount for the worker. The remainder is refunded to the client after the worker accepts.'
+                            : 'Wait for the client to propose a split amount. You can accept it here afterwards.'}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 )}
 
@@ -1379,6 +1795,7 @@ export default function AgreementDetailPage() {
                       {displayedDisputeReplies.map((entry: any) => {
                         const entryLabel = getParticipantLabel(entry.submittedBy, agreement);
                         const isPendingReply = Boolean(entry.optimistic);
+                        const parsedEntry = parseDisputeEvidenceBundle(entry.content);
 
                         return (
                           <div
@@ -1404,7 +1821,24 @@ export default function AgreementDetailPage() {
                                 <span className="text-emerald-300">Sending...</span>
                               ) : null}
                             </div>
-                            <p className="text-sm text-gray-300 whitespace-pre-wrap">{entry.content}</p>
+                            <p className="text-sm text-gray-300 whitespace-pre-wrap">
+                              {parsedEntry.message || entry.content}
+                            </p>
+                            {parsedEntry.desiredResolution ? (
+                              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-400">
+                                <span className="rounded-full bg-slate-900/60 px-2 py-1">
+                                  {parsedEntry.desiredResolution}
+                                </span>
+                                {parsedEntry.desiredResolution === 'SPLIT' && parsedEntry.splitWorkerAmount ? (
+                                  <span>Worker amount {shannonsToCKB(parsedEntry.splitWorkerAmount)} CKB</span>
+                                ) : null}
+                              </div>
+                            ) : null}
+                            {parsedEntry.artifacts.length ? (
+                              <div className="mt-3">
+                                <ArtifactPreviewList artifacts={parsedEntry.artifacts} />
+                              </div>
+                            ) : null}
                           </div>
                         );
                       })}
@@ -1426,10 +1860,39 @@ export default function AgreementDetailPage() {
                         value={additionalEvidence}
                         onChange={(e) => setAdditionalEvidence(e.target.value)}
                       />
+                      <div className="mb-3 flex gap-2">
+                        <input
+                          type="url"
+                          className="flex-1 bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
+                          placeholder="Add supporting link..."
+                          value={replyUrlDraft}
+                          onChange={(e) => setReplyUrlDraft(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => appendUrlArtifact(replyUrlDraft, setReplyArtifacts, () => setReplyUrlDraft(''), 'Reply')}
+                          className="rounded-lg border border-agent-border px-4 py-2 text-sm text-white hover:bg-agent-bg"
+                        >
+                          Add Link
+                        </button>
+                      </div>
+                      <input
+                        type="file"
+                        multiple
+                        className="mb-3 block w-full text-sm text-gray-300 file:mr-4 file:rounded-lg file:border-0 file:bg-purple-600 file:px-4 file:py-2 file:text-white"
+                        onChange={async (e) => {
+                          await appendFileArtifacts(e.target.files, setReplyArtifacts);
+                          e.target.value = '';
+                        }}
+                      />
+                      <ArtifactPreviewList
+                        artifacts={replyArtifacts}
+                        onRemove={(artifactId) => removeArtifact(artifactId, setReplyArtifacts)}
+                      />
                       <p className="mb-3 text-xs text-gray-500">{replyHelpText}</p>
                       <button
                         onClick={handleSubmitDisputeEvidence}
-                        disabled={!additionalEvidence.trim()}
+                        disabled={!additionalEvidence.trim() && replyArtifacts.length === 0}
                         className="rounded-lg border border-purple-600/40 px-4 py-2 text-sm font-medium text-purple-300 transition-colors hover:bg-purple-900/20 disabled:opacity-50"
                       >
                         Send Reply
@@ -1521,17 +1984,33 @@ export default function AgreementDetailPage() {
                 </h3>
                 <div className="space-y-3">
                   {milestones.flatMap((milestone: any) =>
-                    (milestone.proofs || []).map((proof: any) => (
-                      <div key={proof.id} className="bg-agent-bg rounded-lg p-3">
-                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          <span className="text-xs text-gray-500">Milestone {milestone.sortOrder}</span>
-                          <span className="text-xs text-gray-300">{milestone.title}</span>
-                          <span className="text-[10px] text-gray-600">{new Date(proof.submittedAt).toLocaleString()}</span>
+                    (milestone.proofs || []).map((proof: any) => {
+                      const parsedProof = parseProofBundle(proof.content);
+                      return (
+                        <div key={proof.id} className="bg-agent-bg rounded-lg p-3">
+                          <div className="flex items-center gap-2 mb-1 flex-wrap">
+                            <span className="text-xs text-gray-500">Milestone {milestone.sortOrder}</span>
+                            <span className="text-xs text-gray-300">{milestone.title}</span>
+                            <span className="rounded-full bg-slate-900/60 px-2 py-0.5 text-[10px] text-slate-300">
+                              Revision {parsedProof.revision}
+                            </span>
+                            <span className="text-[10px] text-gray-600">{new Date(proof.submittedAt).toLocaleString()}</span>
+                          </div>
+                          {parsedProof.summary ? (
+                            <p className="text-sm font-medium text-white">{parsedProof.summary}</p>
+                          ) : null}
+                          {parsedProof.primaryText ? (
+                            <p className="mt-2 text-sm text-gray-300 whitespace-pre-wrap break-all">{parsedProof.primaryText}</p>
+                          ) : null}
+                          {parsedProof.artifacts.length ? (
+                            <div className="mt-3">
+                              <ArtifactPreviewList artifacts={parsedProof.artifacts} />
+                            </div>
+                          ) : null}
+                          <p className="text-[10px] font-mono text-gray-600 mt-2">Hash: {proof.contentHash.slice(0, 20)}...</p>
                         </div>
-                        <p className="text-sm text-gray-300 break-all">{proof.content}</p>
-                        <p className="text-[10px] font-mono text-gray-600 mt-1">Hash: {proof.contentHash.slice(0, 20)}...</p>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </div>

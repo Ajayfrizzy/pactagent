@@ -206,6 +206,15 @@ export async function submitProof(id: string, data: {
   proofType: string;
   content: string;
   contentHash?: string;
+  summary?: string;
+  artifacts?: Array<{
+    id?: string;
+    kind: 'TEXT' | 'URL' | 'FILE' | 'IMAGE';
+    label?: string;
+    mimeType?: string;
+    content: string;
+    sizeBytes?: number;
+  }>;
 }) {
   return request<any>(`/agreements/${id}/submit-proof`, {
     method: 'POST',
@@ -218,6 +227,16 @@ export async function openDispute(id: string, data: {
   openedBy: string;
   reason: string;
   evidenceNotes?: string;
+  desiredResolution?: 'PAYOUT' | 'REFUND' | 'SPLIT';
+  splitWorkerAmount?: string;
+  artifacts?: Array<{
+    id?: string;
+    kind: 'TEXT' | 'URL' | 'FILE' | 'IMAGE';
+    label?: string;
+    mimeType?: string;
+    content: string;
+    sizeBytes?: number;
+  }>;
 }) {
   return request<any>(`/agreements/${id}/open-dispute`, {
     method: 'POST',
@@ -242,6 +261,16 @@ export async function addDisputeEvidence(id: string, data: {
   disputeId: string;
   submittedBy: string;
   content: string;
+  desiredResolution?: 'PAYOUT' | 'REFUND' | 'SPLIT';
+  splitWorkerAmount?: string;
+  artifacts?: Array<{
+    id?: string;
+    kind: 'TEXT' | 'URL' | 'FILE' | 'IMAGE';
+    label?: string;
+    mimeType?: string;
+    content: string;
+    sizeBytes?: number;
+  }>;
 }) {
   return request<any>(`/agreements/${id}/dispute/evidence`, {
     method: 'POST',
@@ -253,6 +282,22 @@ export async function approveMutualRefund(id: string, actorAddress: string) {
   return request<any>(`/agreements/${id}/dispute/refund-consent`, {
     method: 'POST',
     body: JSON.stringify({ actorAddress }),
+  });
+}
+
+export async function proposeOrAcceptSplitSettlement(id: string, data: {
+  actorAddress: string;
+  workerAmount: string;
+}) {
+  return request<any>(`/agreements/${id}/dispute/split-offer`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function retryAgreementSettlement(id: string) {
+  return request<any>(`/agreements/${id}/settlement/retry`, {
+    method: 'POST',
   });
 }
 

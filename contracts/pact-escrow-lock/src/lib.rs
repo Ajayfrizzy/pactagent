@@ -25,7 +25,7 @@ pub enum Error {
 pub struct PartyHashes {
     pub client: [u8; HASH_LEN],
     pub worker: [u8; HASH_LEN],
-    pub arbitrator: [u8; HASH_LEN],
+    pub agreement_salt: [u8; HASH_LEN],
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -54,8 +54,7 @@ pub struct TxState<'a> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ResolutionPath {
     ClientPayout,
-    ArbitratorPayout,
-    ArbitratorRefund,
+    WorkerRefund,
     TimeoutRefund,
 }
 
@@ -69,7 +68,7 @@ pub fn parse_party_hashes(args: &[u8]) -> Result<PartyHashes, Error> {
         worker: args[HASH_LEN..HASH_LEN * 2]
             .try_into()
             .map_err(|_| Error::InvalidArgsLength)?,
-        arbitrator: args[HASH_LEN * 2..HASH_LEN * 3]
+        agreement_salt: args[HASH_LEN * 2..HASH_LEN * 3]
             .try_into()
             .map_err(|_| Error::InvalidArgsLength)?,
     })
@@ -119,7 +118,7 @@ pub fn evaluate_spend(
     tx: &TxState<'_>,
 ) -> Result<ResolutionPath, Error> {
     let client_auth = has_signer(tx.signer_lock_hashes, &parties.client);
-    let arbitrator_auth = has_signer(tx.signer_lock_hashes, &parties.arbitrator);
+    let worker_auth = has_signer(tx.signer_lock_hashes, &parties.worker);
     let worker_output = has_exact_output(tx.outputs, &parties.worker, tx.input_capacity)?;
     let client_output = has_exact_output(tx.outputs, &parties.client, tx.input_capacity)?;
 
@@ -127,19 +126,15 @@ pub fn evaluate_spend(
         return Ok(ResolutionPath::ClientPayout);
     }
 
-    if worker_output && arbitrator_auth {
-        return Ok(ResolutionPath::ArbitratorPayout);
-    }
-
-    if client_output && arbitrator_auth {
-        return Ok(ResolutionPath::ArbitratorRefund);
+    if client_output && worker_auth {
+        return Ok(ResolutionPath::WorkerRefund);
     }
 
     if client_output && timeout_refund_reached(tx.input_since, terms.refund_timeout_since) {
         return Ok(ResolutionPath::TimeoutRefund);
     }
 
-    if !client_auth && !arbitrator_auth {
+    if !client_auth && !worker_auth {
         return Err(Error::MissingRequiredSigner);
     }
 
@@ -193,7 +188,7 @@ mod tests {
         PartyHashes {
             client: hash(1),
             worker: hash(2),
-            arbitrator: hash(3),
+            agreement_salt: hash(3),
         }
     }
 
@@ -207,7 +202,7 @@ mod tests {
         let parsed = parse_party_hashes(&args).unwrap();
         assert_eq!(parsed.client, hash(1));
         assert_eq!(parsed.worker, hash(2));
-        assert_eq!(parsed.arbitrator, hash(3));
+        assert_eq!(parsed.agreement_salt, hash(3));
     }
 
     #[test]
@@ -238,13 +233,13 @@ mod tests {
     }
 
     #[test]
-    fn allows_arbitrator_refund() {
+    fn allows_worker_refund() {
         let parties = sample_parties();
         let outputs = [OutputCell {
             lock_hash: parties.client,
             capacity: 100,
         }];
-        let signers = [parties.arbitrator];
+        let signers = [parties.worker];
         let tx = TxState {
             input_capacity: 100,
             input_since: 0,
@@ -253,7 +248,7 @@ mod tests {
         };
 
         let resolution = evaluate_spend(&parties, &sample_terms(), &tx).unwrap();
-        assert_eq!(resolution, ResolutionPath::ArbitratorRefund);
+        assert_eq!(resolution, ResolutionPath::WorkerRefund);
     }
 
     #[test]

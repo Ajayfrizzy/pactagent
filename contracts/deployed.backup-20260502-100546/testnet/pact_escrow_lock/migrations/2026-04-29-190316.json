@@ -1,0 +1,13 @@
+{
+  "cell_recipes": [
+    {
+      "name": "pact_escrow_lock",
+      "tx_hash": "0x799c7f545d4e2b1468b4d9fdd47b3ed07bb9ba380b15745323a612764e1df215",
+      "index": 0,
+      "occupied_capacity": 1769600000000,
+      "data_hash": "0x282205f742bd5d8e7309a57b06582e36457a402285f235d85dd340dce8108c0d",
+      "type_id": "0x1494eb3288389fa9ee17d9a6ca88d054a2969f068ac95d7b227bfa2aac60802f"
+    }
+  ],
+  "dep_group_recipes": []
+}

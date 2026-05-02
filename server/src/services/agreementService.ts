@@ -17,7 +17,16 @@ import { createAuditLog } from './auditLogService';
 import { createLog } from './logService';
 import {
   buildOnchainEscrowDescriptor,
+  isOnchainEscrowReady,
 } from './onchainEscrowService';
+import {
+  type ArtifactInput,
+  type DisputeResolutionChoice,
+  computeContentHash,
+  parseDisputeEvidenceBundle,
+  serializeDisputeEvidenceBundle,
+  serializeProofBundle,
+} from './richPayloadService';
 
 const AGREEMENT_VALID_TRANSITIONS: Record<string, string[]> = {
   DRAFT: ['FUNDED', 'EXPIRED'],
@@ -86,14 +95,27 @@ type SettlementDirection = 'FUNDING' | 'PAYOUT' | 'REFUND';
 type SettlementNetwork = 'CKB' | 'FIBER' | 'INTERNAL';
 type SettlementRecordStatus = 'PENDING' | 'CONFIRMED' | 'FAILED';
 const REFUND_SETTLEMENT_ACTIONS = ['REFUND_PROPOSED', 'REFUND_APPROVED'] as const;
+const SPLIT_SETTLEMENT_ACTIONS = ['SPLIT_PROPOSED', 'SPLIT_APPROVED'] as const;
 
 type RefundSettlementAction = (typeof REFUND_SETTLEMENT_ACTIONS)[number];
+type SplitSettlementAction = (typeof SPLIT_SETTLEMENT_ACTIONS)[number];
 
 type RefundConsensusState = {
   proposedBy: string | null;
   proposedAt: string | null;
   clientApprovedAt: string | null;
   workerApprovedAt: string | null;
+  fullyApproved: boolean;
+  awaitingAddress: string | null;
+};
+
+type SplitConsensusState = {
+  proposedBy: string | null;
+  proposedAt: string | null;
+  clientApprovedAt: string | null;
+  workerApprovedAt: string | null;
+  workerAmount: string | null;
+  clientRefundAmount: string | null;
   fullyApproved: boolean;
   awaitingAddress: string | null;
 };
@@ -205,6 +227,10 @@ function payoutNetworkFromSettlement(network: SettlementNetwork) {
   return network === 'FIBER' ? 'FIBER' : 'CKB';
 }
 
+function normalizeHex(value: string | null | undefined) {
+  return (value || '').toLowerCase();
+}
+
 function emptyRefundConsensusState(): RefundConsensusState {
   return {
     proposedBy: null,
@@ -214,6 +240,31 @@ function emptyRefundConsensusState(): RefundConsensusState {
     fullyApproved: false,
     awaitingAddress: null,
   };
+}
+
+function emptySplitConsensusState(): SplitConsensusState {
+  return {
+    proposedBy: null,
+    proposedAt: null,
+    clientApprovedAt: null,
+    workerApprovedAt: null,
+    workerAmount: null,
+    clientRefundAmount: null,
+    fullyApproved: false,
+    awaitingAddress: null,
+  };
+}
+
+function safeParseMetadata(value?: string | null) {
+  if (!value) {
+    return {} as Record<string, unknown>;
+  }
+
+  try {
+    return JSON.parse(value) as Record<string, unknown>;
+  } catch {
+    return {} as Record<string, unknown>;
+  }
 }
 
 export function buildRefundConsensusState(params: {
@@ -266,6 +317,75 @@ export function buildRefundConsensusState(params: {
   return state;
 }
 
+export function buildSplitConsensusState(params: {
+  events: Array<{
+    action: SplitSettlementAction;
+    actorAddress: string | null;
+    createdAt: Date | string;
+    metadataJson?: string | null;
+  }>;
+  clientAddress: string;
+  workerAddress: string;
+  milestoneAmount: string;
+}): SplitConsensusState {
+  const state = emptySplitConsensusState();
+
+  for (const event of params.events) {
+    if (!event.actorAddress) {
+      continue;
+    }
+
+    const createdAtIso = new Date(event.createdAt).toISOString();
+    const isClient = event.actorAddress === params.clientAddress;
+    const isWorker = event.actorAddress === params.workerAddress;
+    if (!isClient && !isWorker) {
+      continue;
+    }
+
+    const metadata = safeParseMetadata(event.metadataJson);
+    const workerAmount = typeof metadata.workerAmount === 'string' ? metadata.workerAmount : null;
+    const clientRefundAmount = typeof metadata.clientRefundAmount === 'string' ? metadata.clientRefundAmount : null;
+
+    if (event.action === 'SPLIT_PROPOSED' && !state.proposedBy) {
+      state.proposedBy = event.actorAddress;
+      state.proposedAt = createdAtIso;
+      state.workerAmount = workerAmount;
+      state.clientRefundAmount = clientRefundAmount;
+    }
+
+    if (isClient && !state.clientApprovedAt) {
+      state.clientApprovedAt = createdAtIso;
+    }
+
+    if (isWorker && !state.workerApprovedAt) {
+      state.workerApprovedAt = createdAtIso;
+    }
+
+    if (!state.workerAmount && workerAmount) {
+      state.workerAmount = workerAmount;
+    }
+
+    if (!state.clientRefundAmount && clientRefundAmount) {
+      state.clientRefundAmount = clientRefundAmount;
+    }
+  }
+
+  state.fullyApproved = Boolean(state.clientApprovedAt && state.workerApprovedAt);
+  state.awaitingAddress = state.proposedBy
+    ? !state.clientApprovedAt
+      ? params.clientAddress
+      : !state.workerApprovedAt
+        ? params.workerAddress
+        : null
+    : null;
+
+  if (!state.clientRefundAmount && state.workerAmount) {
+    state.clientRefundAmount = (BigInt(params.milestoneAmount) - BigInt(state.workerAmount)).toString();
+  }
+
+  return state;
+}
+
 async function buildRefundConsensusForDispute(
   agreementId: string,
   disputeId: string,
@@ -298,11 +418,49 @@ async function buildRefundConsensusForDispute(
   });
 }
 
+async function buildSplitConsensusForDispute(
+  agreementId: string,
+  disputeId: string,
+  clientAddress: string,
+  workerAddress: string,
+  milestoneAmount: string
+) {
+  const events = await prisma.auditLog.findMany({
+    where: {
+      agreementId,
+      resourceType: 'DISPUTE',
+      resourceId: disputeId,
+      action: { in: [...SPLIT_SETTLEMENT_ACTIONS] },
+    },
+    orderBy: { createdAt: 'asc' },
+    select: {
+      action: true,
+      actorAddress: true,
+      createdAt: true,
+      metadataJson: true,
+    },
+  });
+
+  return buildSplitConsensusState({
+    events: events as Array<{
+      action: SplitSettlementAction;
+      actorAddress: string | null;
+      createdAt: Date;
+      metadataJson?: string | null;
+    }>,
+    clientAddress,
+    workerAddress,
+    milestoneAmount,
+  });
+}
+
 async function decorateAgreementWithRefundConsensus<
   T extends {
     id: string;
+    amount: string;
     clientAddress: string;
     workerAddress: string;
+    disputeWindowSecs: number;
     disputes?: Array<any>;
     milestones?: Array<any>;
   }
@@ -317,7 +475,7 @@ async function decorateAgreementWithRefundConsensus<
       agreementId: agreement.id,
       resourceType: 'DISPUTE',
       resourceId: { in: disputeIds },
-      action: { in: [...REFUND_SETTLEMENT_ACTIONS] },
+      action: { in: [...REFUND_SETTLEMENT_ACTIONS, ...SPLIT_SETTLEMENT_ACTIONS] },
     },
     orderBy: { createdAt: 'asc' },
     select: {
@@ -325,13 +483,15 @@ async function decorateAgreementWithRefundConsensus<
       action: true,
       actorAddress: true,
       createdAt: true,
+      metadataJson: true,
     },
   });
 
   const eventsByDisputeId = new Map<string, Array<{
-    action: RefundSettlementAction;
+    action: RefundSettlementAction | SplitSettlementAction;
     actorAddress: string | null;
     createdAt: Date;
+    metadataJson?: string | null;
   }>>();
 
   for (const disputeId of disputeIds) {
@@ -345,41 +505,168 @@ async function decorateAgreementWithRefundConsensus<
     }
 
     existing.push({
-      action: event.action as RefundSettlementAction,
+      action: event.action as RefundSettlementAction | SplitSettlementAction,
       actorAddress: event.actorAddress,
       createdAt: event.createdAt,
+      metadataJson: event.metadataJson,
     });
   }
 
   const refundConsensusByDisputeId = new Map<string, RefundConsensusState>();
+  const splitConsensusByDisputeId = new Map<string, SplitConsensusState>();
   for (const disputeId of disputeIds) {
+    const milestone = agreement.milestones?.find((item: any) =>
+      item.disputes?.some((dispute: any) => dispute.id === disputeId)
+    );
     refundConsensusByDisputeId.set(
       disputeId,
       buildRefundConsensusState({
-        events: eventsByDisputeId.get(disputeId) || [],
+        events: (eventsByDisputeId.get(disputeId) || []).filter((event) =>
+          REFUND_SETTLEMENT_ACTIONS.includes(event.action as RefundSettlementAction)
+        ) as Array<{
+          action: RefundSettlementAction;
+          actorAddress: string | null;
+          createdAt: Date;
+        }>,
         clientAddress: agreement.clientAddress,
         workerAddress: agreement.workerAddress,
       })
     );
+    splitConsensusByDisputeId.set(
+      disputeId,
+      buildSplitConsensusState({
+        events: (eventsByDisputeId.get(disputeId) || []).filter((event) =>
+          SPLIT_SETTLEMENT_ACTIONS.includes(event.action as SplitSettlementAction)
+        ) as Array<{
+          action: SplitSettlementAction;
+          actorAddress: string | null;
+          createdAt: Date;
+          metadataJson?: string | null;
+        }>,
+        clientAddress: agreement.clientAddress,
+        workerAddress: agreement.workerAddress,
+        milestoneAmount: milestone?.amount || agreement.amount,
+      })
+    );
   }
 
-  const disputes = agreement.disputes.map((dispute) => ({
-    ...dispute,
-    refundConsensus: dispute.resolvedAt ? null : refundConsensusByDisputeId.get(dispute.id) || emptyRefundConsensusState(),
-  }));
+  const disputes = agreement.disputes.map((dispute) => {
+    const refundConsensus = dispute.resolvedAt ? null : refundConsensusByDisputeId.get(dispute.id) || emptyRefundConsensusState();
+    const splitConsensus = dispute.resolvedAt ? null : splitConsensusByDisputeId.get(dispute.id) || emptySplitConsensusState();
+    return {
+      ...dispute,
+      refundConsensus,
+      splitConsensus,
+      workspaceState: deriveDisputeWorkspaceState({
+        dispute: {
+          ...dispute,
+          refundConsensus,
+          splitConsensus,
+        },
+        agreement,
+      }),
+    };
+  });
 
   const milestones = agreement.milestones?.map((milestone) => ({
     ...milestone,
-    disputes: milestone.disputes?.map((dispute: any) => ({
-      ...dispute,
-      refundConsensus: dispute.resolvedAt ? null : refundConsensusByDisputeId.get(dispute.id) || emptyRefundConsensusState(),
-    })),
+    disputes: milestone.disputes?.map((dispute: any) => {
+      const refundConsensus = dispute.resolvedAt ? null : refundConsensusByDisputeId.get(dispute.id) || emptyRefundConsensusState();
+      const splitConsensus = dispute.resolvedAt ? null : splitConsensusByDisputeId.get(dispute.id) || emptySplitConsensusState();
+      return {
+        ...dispute,
+        refundConsensus,
+        splitConsensus,
+        workspaceState: deriveDisputeWorkspaceState({
+          dispute: {
+            ...dispute,
+            refundConsensus,
+            splitConsensus,
+          },
+          agreement,
+        }),
+      };
+    }),
   }));
 
   return {
     ...agreement,
     disputes,
     milestones,
+  };
+}
+
+function deriveDisputeWorkspaceState(params: {
+  dispute: {
+    openedBy: string;
+    createdAt: string | Date;
+    resolvedAt?: string | Date | null;
+    evidenceEntries?: Array<{ submittedBy: string }>;
+    refundConsensus?: RefundConsensusState | null;
+    splitConsensus?: SplitConsensusState | null;
+    aiRecommendation?: string | null;
+  };
+  agreement: {
+    clientAddress: string;
+    workerAddress: string;
+    disputeWindowSecs: number;
+  };
+}) {
+  if (params.dispute.resolvedAt) {
+    return {
+      stage: 'RESOLVED',
+      responseDeadlineAt: null,
+      counterpartyAddress: null,
+      awaitingAddress: null,
+    };
+  }
+
+  const openedAt = new Date(params.dispute.createdAt);
+  const responseDeadlineAt = new Date(openedAt.getTime() + (params.agreement.disputeWindowSecs * 1000));
+  const counterpartyAddress =
+    params.dispute.openedBy === params.agreement.clientAddress
+      ? params.agreement.workerAddress
+      : params.dispute.openedBy === params.agreement.workerAddress
+        ? params.agreement.clientAddress
+        : null;
+  const hasCounterpartyReply = counterpartyAddress
+    ? (params.dispute.evidenceEntries || []).some((entry) => entry.submittedBy === counterpartyAddress)
+    : false;
+  const refundConsensus = params.dispute.refundConsensus;
+  const splitConsensus = params.dispute.splitConsensus;
+
+  if (splitConsensus?.proposedBy && !splitConsensus.fullyApproved) {
+    return {
+      stage: 'NEGOTIATING_SPLIT',
+      responseDeadlineAt: responseDeadlineAt.toISOString(),
+      counterpartyAddress,
+      awaitingAddress: splitConsensus.awaitingAddress,
+    };
+  }
+
+  if (refundConsensus?.proposedBy && !refundConsensus.fullyApproved) {
+    return {
+      stage: 'NEGOTIATING_REFUND',
+      responseDeadlineAt: responseDeadlineAt.toISOString(),
+      counterpartyAddress,
+      awaitingAddress: refundConsensus.awaitingAddress,
+    };
+  }
+
+  if (params.dispute.aiRecommendation || hasCounterpartyReply || Date.now() >= responseDeadlineAt.getTime()) {
+    return {
+      stage: 'READY_FOR_REVIEW',
+      responseDeadlineAt: responseDeadlineAt.toISOString(),
+      counterpartyAddress,
+      awaitingAddress: null,
+    };
+  }
+
+  return {
+    stage: 'AWAITING_RESPONSE',
+    responseDeadlineAt: responseDeadlineAt.toISOString(),
+    counterpartyAddress,
+    awaitingAddress: counterpartyAddress,
   };
 }
 
@@ -491,6 +778,45 @@ function getLatestSettlementRecord(
 
     return true;
   }) ?? null;
+}
+
+type OnchainMatchingOutput = {
+  index: number;
+  capacity: bigint;
+  outputData: string | null;
+};
+
+export function matchOnchainFundingOutputsToMilestones(
+  milestones: Array<{
+    id: string;
+    escrowCellData?: string | null;
+  }>,
+  matchingOutputs: OnchainMatchingOutput[],
+) {
+  const remainingOutputs = [...matchingOutputs];
+  const assignments = milestones.map((milestone) => {
+    const milestoneData = normalizeHex(milestone.escrowCellData);
+    if (!milestoneData) {
+      return null;
+    }
+
+    const outputIndex = remainingOutputs.findIndex(
+      (output) => normalizeHex(output.outputData) === milestoneData,
+    );
+
+    if (outputIndex === -1) {
+      return null;
+    }
+
+    const [matchedOutput] = remainingOutputs.splice(outputIndex, 1);
+    return {
+      milestoneId: milestone.id,
+      outputIndex: matchedOutput.index,
+      outputData: matchedOutput.outputData,
+    };
+  });
+
+  return assignments;
 }
 
 async function resolveOpenMilestoneDisputes(milestoneId: string) {
@@ -688,8 +1014,8 @@ export async function createAgreement(data: {
   });
   const escrowModel = data.escrowModel || 'TREASURY_BRIDGE';
 
-  if (escrowModel === 'ONCHAIN_LOCK') {
-    throw new Error('On-chain lock escrow is temporarily unavailable while mutual settlement replaces the arbitrator flow.');
+  if (escrowModel === 'ONCHAIN_LOCK' && !isOnchainEscrowReady()) {
+    throw new Error('On-chain lock escrow is not configured in this environment yet.');
   }
 
   const onchainDescriptor =
@@ -699,7 +1025,6 @@ export async function createAgreement(data: {
           agreementDigest,
           clientAddress: data.clientAddress,
           workerAddress: data.workerAddress,
-          arbitratorAddress: data.clientAddress,
         })
       : null;
   const escrowAddress =
@@ -954,17 +1279,28 @@ export async function confirmFundingIfReady(agreementId: string) {
     status: 'PENDING',
   });
 
+  const matchedMilestoneOutputs =
+    agreement.escrowModel === 'ONCHAIN_LOCK' && 'matchingOutputs' in verification
+      ? matchOnchainFundingOutputsToMilestones(
+          agreement.milestones.map((milestone: any) => ({
+            id: milestone.id,
+            escrowCellData: milestone.escrowCellData,
+          })),
+          verification.matchingOutputs as Array<{
+            index: number;
+            capacity: bigint;
+            outputData: string | null;
+          }>,
+        )
+      : [];
+
   const fundingValid =
     agreement.escrowModel === 'ONCHAIN_LOCK'
       ? verification.status === 'committed' &&
         'totalMatchedCapacity' in verification &&
         verification.totalMatchedCapacity >= BigInt(agreement.amount) &&
-        agreement.milestones.every((milestone: any) =>
-          milestone.escrowOutputIndex != null &&
-          verification.matchingOutputs.some(
-            (output: { index: number }) => output.index === milestone.escrowOutputIndex
-          )
-        )
+        matchedMilestoneOutputs.length === agreement.milestones.length &&
+        matchedMilestoneOutputs.every(Boolean)
       : verification.status === 'committed' &&
         'foundMatchingOutput' in verification &&
         verification.foundMatchingOutput;
@@ -978,6 +1314,20 @@ export async function confirmFundingIfReady(agreementId: string) {
         confirmedAt,
         errorMessage: null,
       });
+    }
+
+    if (agreement.escrowModel === 'ONCHAIN_LOCK') {
+      await prisma.$transaction(
+        matchedMilestoneOutputs.map((matchedOutput) =>
+          prisma.milestone.update({
+            where: { id: matchedOutput!.milestoneId },
+            data: {
+              escrowFundingTxHash: agreement.ckbTxHashFund,
+              escrowOutputIndex: matchedOutput!.outputIndex,
+            },
+          })
+        ),
+      );
     }
 
     await setAgreementSettlementState(agreementId, {
@@ -999,6 +1349,7 @@ export async function confirmFundingIfReady(agreementId: string) {
         blockHash: verification.blockHash,
         activeMilestoneId: activeMilestone?.id ?? null,
         activeMilestoneTitle: activeMilestone?.title ?? null,
+        matchedOutputIndexes: matchedMilestoneOutputs.map((output) => output?.outputIndex ?? null),
       },
     });
 
@@ -1027,6 +1378,19 @@ export async function confirmFundingIfReady(agreementId: string) {
       txHash: agreement.ckbTxHashFund,
       blockHash: verification.blockHash,
       rpcStatus: verification.status,
+      matchedOutputs:
+        'matchingOutputs' in verification
+          ? verification.matchingOutputs.map((output: { index: number; capacity: bigint; outputData: string | null }) => ({
+              index: output.index,
+              capacity: output.capacity.toString(),
+              outputData: output.outputData,
+            }))
+          : null,
+      expectedMilestoneData: agreement.milestones.map((milestone: any) => ({
+        milestoneId: milestone.id,
+        escrowOutputIndex: milestone.escrowOutputIndex,
+        escrowCellData: milestone.escrowCellData,
+      })),
     },
   });
 
@@ -1038,7 +1402,11 @@ export async function submitProof(
   milestoneId: string,
   proofType: string,
   content: string,
-  contentHash?: string
+  contentHash?: string,
+  options?: {
+    summary?: string;
+    artifacts?: ArtifactInput[];
+  }
 ) {
   const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
   const milestone = agreement.milestones.find((item: any) => item.id === milestoneId);
@@ -1051,7 +1419,14 @@ export async function submitProof(
     throw new Error('Proof can only be submitted for the active milestone');
   }
 
-  const hash = contentHash || createHash('sha256').update(content).digest('hex');
+  const revision = (milestone.proofs?.length || 0) + 1;
+  const serializedContent = serializeProofBundle({
+    summary: options?.summary,
+    primaryText: content,
+    artifacts: options?.artifacts,
+    revision,
+  });
+  const hash = contentHash || computeContentHash(serializedContent);
 
   const proof = await prisma.proof.create({
     data: {
@@ -1059,7 +1434,7 @@ export async function submitProof(
       agreementId,
       milestoneId,
       proofType,
-      content,
+      content: serializedContent,
       contentHash: hash,
     },
   });
@@ -1078,6 +1453,8 @@ export async function submitProof(
       proofId: proof.id,
       proofType,
       contentHash: hash,
+      artifactCount: options?.artifacts?.length || 0,
+      revision,
     },
   });
 
@@ -1148,7 +1525,12 @@ export async function openDispute(
   milestoneId: string,
   openedBy: string,
   reason: string,
-  evidenceNotes?: string
+  evidenceNotes?: string,
+  options?: {
+    desiredResolution?: DisputeResolutionChoice;
+    splitWorkerAmount?: string;
+    artifacts?: ArtifactInput[];
+  }
 ) {
   const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
   const milestone = agreement.milestones.find((item: any) => item.id === milestoneId);
@@ -1172,6 +1554,22 @@ export async function openDispute(
     },
   });
 
+  if (options?.artifacts?.length || options?.desiredResolution || evidenceNotes?.trim()) {
+    await prisma.disputeEvidence.create({
+      data: {
+        id: uuid(),
+        disputeId: dispute.id,
+        submittedBy: openedBy,
+        content: serializeDisputeEvidenceBundle({
+          message: evidenceNotes || '',
+          desiredResolution: options?.desiredResolution || null,
+          splitWorkerAmount: options?.splitWorkerAmount || null,
+          artifacts: options?.artifacts,
+        }),
+      },
+    });
+  }
+
   await transitionMilestoneStatus(milestoneId, 'DISPUTED');
   await transitionStatus(agreementId, 'DISPUTED');
   await setAgreementSettlementState(agreementId, {
@@ -1190,6 +1588,7 @@ export async function openDispute(
       milestoneTitle: milestone.title,
       openedBy,
       reason,
+      desiredResolution: options?.desiredResolution || null,
     },
   });
 
@@ -1303,7 +1702,12 @@ export async function addDisputeEvidence(
   agreementId: string,
   disputeId: string,
   submittedBy: string,
-  content: string
+  content: string,
+  options?: {
+    desiredResolution?: DisputeResolutionChoice;
+    splitWorkerAmount?: string;
+    artifacts?: ArtifactInput[];
+  }
 ) {
   const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
   const dispute = agreement.disputes.find((item: any) => item.id === disputeId);
@@ -1321,7 +1725,12 @@ export async function addDisputeEvidence(
       id: uuid(),
       disputeId,
       submittedBy,
-      content,
+      content: serializeDisputeEvidenceBundle({
+        message: content,
+        desiredResolution: options?.desiredResolution || null,
+        splitWorkerAmount: options?.splitWorkerAmount || null,
+        artifacts: options?.artifacts,
+      }),
     },
   });
 
@@ -1344,6 +1753,7 @@ export async function addDisputeEvidence(
       disputeId,
       evidenceId: evidence.id,
       submittedBy,
+      desiredResolution: options?.desiredResolution || null,
     },
   });
 
@@ -1414,6 +1824,181 @@ export async function recordMilestoneSettlementAttempt(params: {
   return settlement;
 }
 
+export async function recordSplitSettlementConsent(
+  agreementId: string,
+  actorAddress: string,
+  workerAmount: string
+) {
+  const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
+  const milestone = getCurrentMilestoneFromAgreement(agreement);
+
+  if (!milestone || milestone.status !== 'DISPUTED') {
+    throw new Error('Open a dispute on the current milestone before proposing a split settlement.');
+  }
+
+  if (agreement.escrowModel !== 'TREASURY_BRIDGE') {
+    throw new Error('Split settlement is currently available only for Treasury Bridge agreements.');
+  }
+
+  if (actorAddress !== agreement.clientAddress && actorAddress !== agreement.workerAddress) {
+    throw new Error('Only the client or worker can approve a split settlement.');
+  }
+
+  const workerAmountValue = BigInt(workerAmount);
+  const milestoneAmountValue = BigInt(milestone.amount);
+  if (workerAmountValue <= BigInt(0) || workerAmountValue >= milestoneAmountValue) {
+    throw new Error('Split settlement worker amount must be greater than zero and less than the milestone amount.');
+  }
+
+  const dispute = milestone.disputes.find((item: any) => !item.resolvedAt);
+  if (!dispute) {
+    throw new Error('No open dispute found for the current milestone.');
+  }
+
+  const splitConsensus = await buildSplitConsensusForDispute(
+    agreementId,
+    dispute.id,
+    agreement.clientAddress,
+    agreement.workerAddress,
+    milestone.amount
+  );
+
+  if (!splitConsensus.proposedBy && actorAddress !== agreement.clientAddress) {
+    throw new Error('Only the client can propose a split settlement.');
+  }
+
+  if (splitConsensus.proposedBy && actorAddress === agreement.clientAddress) {
+    throw new Error('Split proposal already sent. It is now waiting for the worker to accept it.');
+  }
+
+  if (splitConsensus.workerAmount && splitConsensus.workerAmount !== workerAmount) {
+    throw new Error('Worker must accept the exact split amount proposed by the client.');
+  }
+
+  const actorAlreadyApproved =
+    (actorAddress === agreement.clientAddress && splitConsensus.clientApprovedAt)
+    || (actorAddress === agreement.workerAddress && splitConsensus.workerApprovedAt);
+
+  if (!actorAlreadyApproved) {
+    const clientRefundAmount = (milestoneAmountValue - workerAmountValue).toString();
+    await createAuditLog({
+      agreementId,
+      actorAddress,
+      action: splitConsensus.proposedBy ? 'SPLIT_APPROVED' : 'SPLIT_PROPOSED',
+      resourceType: 'DISPUTE',
+      resourceId: dispute.id,
+      metadata: {
+        milestoneId: milestone.id,
+        settlement: 'SPLIT',
+        workerAmount,
+        clientRefundAmount,
+      },
+    });
+  }
+
+  const updatedConsensus = await buildSplitConsensusForDispute(
+    agreementId,
+    dispute.id,
+    agreement.clientAddress,
+    agreement.workerAddress,
+    milestone.amount
+  );
+
+  if (updatedConsensus.fullyApproved && updatedConsensus.workerAmount) {
+    return settleCurrentMilestoneSplit(agreementId, updatedConsensus.workerAmount);
+  }
+
+  await createLog({
+    agreementId,
+    level: 'INFO',
+    eventType: 'DISPUTE_OPENED',
+    message: `Split settlement proposed for milestone ${milestone.sortOrder}: ${milestone.title}`,
+    metadata: {
+      disputeId: dispute.id,
+      milestoneId: milestone.id,
+      workerAmount: updatedConsensus.workerAmount,
+      clientRefundAmount: updatedConsensus.clientRefundAmount,
+      awaitingAddress: updatedConsensus.awaitingAddress,
+    },
+  });
+
+  await broadcastAgreementUpdateById(agreementId);
+  return getAgreementById(agreementId);
+}
+
+export async function settleCurrentMilestoneSplit(
+  agreementId: string,
+  workerAmount: string
+) {
+  const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
+  const milestone = getCurrentMilestoneFromAgreement(agreement);
+
+  if (!milestone) {
+    throw new Error('No active milestone available to split-settle');
+  }
+
+  if (!['DISPUTED', 'UNDER_REVIEW', 'PROOF_SUBMITTED'].includes(milestone.status)) {
+    throw new Error('Current milestone cannot be split-settled');
+  }
+
+  const workerAmountValue = BigInt(workerAmount);
+  const milestoneAmountValue = BigInt(milestone.amount);
+  if (workerAmountValue <= BigInt(0) || workerAmountValue >= milestoneAmountValue) {
+    throw new Error('Split settlement worker amount must be greater than zero and less than the milestone amount.');
+  }
+
+  const clientRefundAmount = (milestoneAmountValue - workerAmountValue).toString();
+
+  await resolveOpenMilestoneDisputes(milestone.id);
+  await transitionMilestoneStatus(milestone.id, 'APPROVED');
+  await transitionStatus(agreementId, 'APPROVED');
+
+  const payoutTxHash = await sendTreasuryTransfer(agreement.workerAddress, workerAmountValue.toString());
+  const refundTxHash = await sendTreasuryTransfer(agreement.clientAddress, clientRefundAmount);
+
+  await createSettlementRecord({
+    agreementId,
+    milestoneId: milestone.id,
+    direction: 'PAYOUT',
+    network: 'CKB',
+    amount: workerAmountValue.toString(),
+    txHash: payoutTxHash,
+    status: 'PENDING',
+  });
+
+  await createSettlementRecord({
+    agreementId,
+    milestoneId: milestone.id,
+    direction: 'REFUND',
+    network: 'CKB',
+    amount: clientRefundAmount,
+    txHash: refundTxHash,
+    status: 'PENDING',
+  });
+
+  await setAgreementSettlementState(agreementId, {
+    settlementStatus: 'SPLIT_PENDING',
+    ckbTxHashRelease: refundTxHash ?? payoutTxHash,
+    lastSettlementError: null,
+  });
+
+  await createLog({
+    agreementId,
+    level: 'INFO',
+    eventType: 'RELEASE_SENT',
+    message: `Split settlement prepared for milestone ${milestone.sortOrder}: ${milestone.title}`,
+    metadata: {
+      milestoneId: milestone.id,
+      workerAmount: workerAmountValue.toString(),
+      clientRefundAmount,
+      payoutTxHash,
+      refundTxHash,
+    },
+  });
+
+  return getAgreementById(agreementId);
+}
+
 export async function refundCurrentMilestone(agreementId: string) {
   const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
   const milestone = getCurrentMilestoneFromAgreement(agreement);
@@ -1465,6 +2050,101 @@ export async function refundCurrentMilestone(agreementId: string) {
 
 export async function confirmPendingSettlementIfReady(agreementId: string) {
   const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
+  if (agreement.settlementStatus === 'SPLIT_PENDING') {
+    const splitMilestone =
+      agreement.milestones.find((milestone: any) =>
+        agreement.settlements.some((settlement: any) =>
+          settlement.milestoneId === milestone.id && settlement.status === 'PENDING'
+        )
+      ) || agreement.milestones.find((milestone: any) => milestone.status === 'APPROVED');
+
+    if (!splitMilestone) {
+      return getAgreementById(agreementId);
+    }
+
+    const pendingSplitSettlements = agreement.settlements.filter((settlement: any) =>
+      settlement.milestoneId === splitMilestone.id && settlement.status === 'PENDING'
+    );
+
+    let stillPending = false;
+    for (const pendingSettlement of pendingSplitSettlements) {
+      if (pendingSettlement.network !== 'CKB' || !pendingSettlement.txHash) {
+        stillPending = true;
+        continue;
+      }
+
+      const destinationAddress =
+        pendingSettlement.direction === 'REFUND'
+          ? agreement.clientAddress
+          : agreement.workerAddress;
+
+      const verification = await verifyFundingTransaction({
+        txHash: pendingSettlement.txHash,
+        toAddress: destinationAddress,
+        expectedAmount: pendingSettlement.amount,
+      });
+
+      if (!verification.foundTransaction || verification.status === 'pending' || verification.status === 'proposed') {
+        stillPending = true;
+        continue;
+      }
+
+      if (verification.status === 'committed' && verification.foundMatchingOutput) {
+        await markSettlementRecordStatus(pendingSettlement.id, {
+          status: 'CONFIRMED',
+          confirmedAt: new Date(),
+          errorMessage: null,
+        });
+        continue;
+      }
+
+      await markSettlementRecordStatus(pendingSettlement.id, {
+        status: 'FAILED',
+        confirmedAt: null,
+        errorMessage: 'Split settlement verification failed on-chain.',
+      });
+
+      await setAgreementSettlementState(agreementId, {
+        settlementStatus: 'FAILED',
+        lastSettlementError: 'Split settlement verification failed. At least one expected output was not found on-chain.',
+      });
+
+      await createLog({
+        agreementId,
+        level: 'ERROR',
+        eventType: 'ERROR',
+        message: 'Split settlement verification failed because one expected output was not found on-chain',
+        metadata: {
+          settlementId: pendingSettlement.id,
+          txHash: pendingSettlement.txHash,
+          blockHash: verification.blockHash,
+          rpcStatus: verification.status,
+          direction: pendingSettlement.direction,
+        },
+      });
+
+      return getAgreementById(agreementId);
+    }
+
+    if (stillPending) {
+      return null;
+    }
+
+    const updatedAgreement = await completeApprovedMilestone(agreementId, {
+      finalSettlementStatus: 'SPLIT_CONFIRMED',
+    });
+    await createLog({
+      agreementId,
+      level: 'SUCCESS',
+      eventType: 'SETTLEMENT_CONFIRMED',
+      message: 'Split settlement confirmed on-chain',
+      metadata: {
+        milestoneId: splitMilestone.id,
+      },
+    });
+    return updatedAgreement;
+  }
+
   const pendingSettlement = agreement.settlements.find((settlement: any) => settlement.status === 'PENDING');
 
   if (!pendingSettlement) {
@@ -1581,14 +2261,75 @@ export async function reconcileAgreementSettlement(agreementId: string) {
     return confirmFundingIfReady(agreementId);
   }
 
-  if (['PAYOUT_PENDING', 'REFUND_PENDING'].includes(agreement.settlementStatus)) {
+  if (['PAYOUT_PENDING', 'REFUND_PENDING', 'SPLIT_PENDING'].includes(agreement.settlementStatus)) {
     return confirmPendingSettlementIfReady(agreementId);
   }
 
   return getAgreementById(agreementId);
 }
 
-export async function completeApprovedMilestone(agreementId: string) {
+export async function retryFailedSettlement(agreementId: string) {
+  const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
+
+  if (agreement.escrowModel !== 'TREASURY_BRIDGE') {
+    throw new Error('Retry handling is currently available only for Treasury Bridge agreements.');
+  }
+
+  if (agreement.settlementStatus !== 'FAILED') {
+    throw new Error('Only failed settlements can be retried.');
+  }
+
+  const failedSettlements = agreement.settlements.filter((settlement: any) => settlement.status === 'FAILED');
+  if (!failedSettlements.length) {
+    throw new Error('No failed settlement attempts were found for this agreement.');
+  }
+
+  const latestFailure = failedSettlements[0];
+  const relatedFailures = failedSettlements.filter((settlement: any) =>
+    settlement.milestoneId === latestFailure.milestoneId &&
+    ['PAYOUT', 'REFUND'].includes(settlement.direction)
+  );
+
+  for (const settlement of relatedFailures) {
+    const destinationAddress =
+      settlement.direction === 'REFUND'
+        ? agreement.clientAddress
+        : agreement.workerAddress;
+    const retryTxHash = await sendTreasuryTransfer(destinationAddress, settlement.amount);
+    await createSettlementRecord({
+      agreementId,
+      milestoneId: settlement.milestoneId,
+      direction: settlement.direction,
+      network: 'CKB',
+      amount: settlement.amount,
+      txHash: retryTxHash,
+      status: 'PENDING',
+    });
+  }
+
+  await setAgreementSettlementState(agreementId, {
+    settlementStatus: relatedFailures.length > 1 ? 'SPLIT_PENDING' : pendingSettlementStatus(relatedFailures[0].direction as SettlementDirection),
+    lastSettlementError: null,
+  });
+
+  await createLog({
+    agreementId,
+    level: 'INFO',
+    eventType: 'RELEASE_PREPARED',
+    message: 'Retrying failed settlement attempts for the current milestone',
+    metadata: {
+      milestoneId: latestFailure.milestoneId,
+      directions: relatedFailures.map((settlement: any) => settlement.direction),
+    },
+  });
+
+  return getAgreementById(agreementId);
+}
+
+export async function completeApprovedMilestone(
+  agreementId: string,
+  options?: { finalSettlementStatus?: string }
+) {
   const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
   const milestone = agreement.milestones.find((item: any) => item.status === 'APPROVED');
 
@@ -1628,7 +2369,7 @@ export async function completeApprovedMilestone(agreementId: string) {
   } else {
     await transitionStatus(agreementId, 'PAID');
     await setAgreementSettlementState(agreementId, {
-      settlementStatus: 'PAYOUT_CONFIRMED',
+      settlementStatus: options?.finalSettlementStatus || 'PAYOUT_CONFIRMED',
       lastSettlementError: null,
     });
   }

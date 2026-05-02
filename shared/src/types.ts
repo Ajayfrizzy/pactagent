@@ -119,6 +119,24 @@ export interface Proof {
   submittedAt: string;
 }
 
+export interface RichArtifact {
+  id: string;
+  kind: 'TEXT' | 'URL' | 'FILE' | 'IMAGE';
+  label: string;
+  mimeType: string | null;
+  content: string;
+  sizeBytes: number | null;
+}
+
+export interface ParsedProofBundle {
+  summary: string;
+  primaryText: string;
+  revision: number;
+  createdAt: string | null;
+  artifacts: RichArtifact[];
+  legacyText: boolean;
+}
+
 export interface SubmitProofDTO {
   milestoneId: string;
   proofType: ProofType;
@@ -139,6 +157,8 @@ export interface Dispute {
   aiConfidence: number | null;
   aiRationale: string | null;
   refundConsensus?: RefundConsensus | null;
+  splitConsensus?: SplitConsensus | null;
+  workspaceState?: DisputeWorkspaceState | null;
   resolvedAt: string | null;
   createdAt: string;
 }
@@ -152,12 +172,39 @@ export interface RefundConsensus {
   awaitingAddress: string | null;
 }
 
+export interface SplitConsensus {
+  proposedBy: string | null;
+  proposedAt: string | null;
+  clientApprovedAt: string | null;
+  workerApprovedAt: string | null;
+  workerAmount: string | null;
+  clientRefundAmount: string | null;
+  fullyApproved: boolean;
+  awaitingAddress: string | null;
+}
+
+export interface DisputeWorkspaceState {
+  stage: 'AWAITING_RESPONSE' | 'READY_FOR_REVIEW' | 'NEGOTIATING_REFUND' | 'NEGOTIATING_SPLIT' | 'RESOLVED';
+  responseDeadlineAt: string | null;
+  counterpartyAddress: string | null;
+  awaitingAddress: string | null;
+}
+
 export interface DisputeEvidence {
   id: string;
   disputeId: string;
   submittedBy: string;
   content: string;
   createdAt: string;
+}
+
+export interface ParsedDisputeEvidenceBundle {
+  message: string;
+  desiredResolution: 'PAYOUT' | 'REFUND' | 'SPLIT' | null;
+  splitWorkerAmount: string | null;
+  createdAt: string | null;
+  artifacts: RichArtifact[];
+  legacyText: boolean;
 }
 
 export interface OpenDisputeDTO {
