@@ -19,24 +19,25 @@ jobs:
           script: |
             set -e
 
-            # Fix Git safe directory issue
-            git config --global --add safe.directory /root/pactagent
+            git config --global --add safe.directory /home/pactagent
 
-            # Go to project directory
-            cd /root/pactagent
+            cd /home/pactagent/pactagent
 
-            # Pull latest code
             git fetch origin
             git reset --hard origin/main
 
-            # ---- SERVER ----
             cd server
             npm install
             npx prisma generate
             npm run build
             pm2 restart pactagent-server || pm2 start dist/index.js --name pactagent-server
 
-            # ---- WEB ----
+            cd ../web
+            npm install
+            npm run build
+            pm2 restart pactagent-web || pm2 start npm --name pactagent-web -- start
+
+            pm2 save
             cd ../web
             npm install
             npm run build
