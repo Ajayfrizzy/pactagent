@@ -21,7 +21,7 @@ jobs:
 
             git config --global --add safe.directory /home/pactagent
 
-            cd /home/pactagent/pactagent
+            cd /home/pactagent
 
             git fetch origin
             git reset --hard origin/main
