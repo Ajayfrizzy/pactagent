@@ -38,10 +38,3 @@ jobs:
             pm2 restart pactagent-web || pm2 start npm --name pactagent-web -- start
 
             pm2 save
-            cd ../web
-            npm install
-            npm run build
-            pm2 restart pactagent-web || pm2 start npm --name pactagent-web -- start
-
-            # Save PM2 process list
-            pm2 save
