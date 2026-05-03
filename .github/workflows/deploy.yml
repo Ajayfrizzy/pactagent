@@ -13,28 +13,39 @@ jobs:
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          debug: true
+
           script: |
             set -e
+
+            echo "Connected to server"
 
             git config --global --add safe.directory /home/pactagent
 
             cd /home/pactagent
 
+            echo "Pulling latest code..."
             git fetch origin
             git reset --hard origin/main
 
+            echo "Building backend..."
             cd server
             npm install
             npx prisma generate
             npm run build
             pm2 restart pactagent-server || pm2 start dist/index.js --name pactagent-server
 
+            echo "Building frontend..."
             cd ../web
             npm install
             npm run build
             pm2 restart pactagent-web || pm2 start npm --name pactagent-web -- start
 
+            echo "Saving PM2 process list..."
             pm2 save
+
+            echo "Deployment completed successfully"
