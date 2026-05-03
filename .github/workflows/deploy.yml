@@ -18,20 +18,29 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
             set -e
-            cd ~/apps/pactagent
 
+            # Fix Git safe directory issue
+            git config --global --add safe.directory /root/pactagent
+
+            # Go to project directory
+            cd /root/pactagent
+
+            # Pull latest code
             git fetch origin
             git reset --hard origin/main
 
-            cd ~/apps/pactagent/server
+            # ---- SERVER ----
+            cd server
             npm install
             npx prisma generate
             npm run build
-            pm2 restart pactagent-server
+            pm2 restart pactagent-server || pm2 start dist/index.js --name pactagent-server
 
-            cd ~/apps/pactagent/web
+            # ---- WEB ----
+            cd ../web
             npm install
             npm run build
-            pm2 restart pactagent-web
+            pm2 restart pactagent-web || pm2 start npm --name pactagent-web -- start
 
+            # Save PM2 process list
             pm2 save
