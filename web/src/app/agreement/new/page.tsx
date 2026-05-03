@@ -64,6 +64,7 @@ export default function NewAgreementPage() {
   const signer = ccc.useSigner();
   const walletAddress = useStore((s) => s.walletAddress);
   const authToken = useStore((s) => s.authToken);
+  const isAdmin = useStore((s) => s.isAdmin);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [publicConfig, setPublicConfig] = useState<any>(null);
@@ -234,7 +235,16 @@ export default function NewAgreementPage() {
             <span className="text-gray-600">/</span>
             <span className="truncate text-sm text-gray-400">New Agreement</span>
           </div>
-          <NavbarMenu />
+          <NavbarMenu>
+            <Link href="/dashboard" className="text-sm text-gray-400 transition-colors hover:text-white">
+              Dashboard
+            </Link>
+            {isAdmin ? (
+              <Link href="/admin" className="text-sm text-agent-accent transition-colors hover:text-blue-300">
+                Admin
+              </Link>
+            ) : null}
+          </NavbarMenu>
         </div>
       </nav>
 

@@ -1,6 +1,6 @@
 import dotenv from 'dotenv';
 
-dotenv.config();
+dotenv.config({ override: true });
 
 function parseNumber(value: string | undefined, fallback: number) {
   const parsed = parseInt(value || '', 10);

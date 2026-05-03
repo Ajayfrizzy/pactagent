@@ -28,6 +28,7 @@ export interface Milestone {
   refundTimeoutBlock: string | null;
   createdAt: string;
   updatedAt: string;
+  revisionCount?: number;
   settlements?: MilestoneSettlement[];
 }
 
@@ -63,8 +64,13 @@ export interface Agreement {
   status: AgreementStatus;
   createdAt: string;
   updatedAt: string;
+  workflowStage?: string;
+  nextParticipantAction?: string | null;
   milestones?: Milestone[];
   settlements?: MilestoneSettlement[];
+  comments?: AgreementComment[];
+  amendments?: AgreementAmendment[];
+  jobs?: AgentJob[];
 }
 
 export interface MilestoneSettlement {
@@ -240,6 +246,54 @@ export interface AuditLog {
   resourceId: string;
   metadataJson: string | null;
   createdAt: string;
+}
+
+export interface AgreementComment {
+  id: string;
+  agreementId: string;
+  authorAddress: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgreementAmendment {
+  id: string;
+  agreementId: string;
+  proposedBy: string;
+  status: string;
+  reason: string | null;
+  title: string | null;
+  description: string | null;
+  deadlineAt: string | null;
+  disputeWindowSecs: number | null;
+  releaseMode: string | null;
+  payoutNetwork: string | null;
+  workerFiberPubkey: string | null;
+  milestonesJson: string | null;
+  responseNote: string | null;
+  respondedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentJob {
+  id: string;
+  agreementId: string | null;
+  kind: string;
+  status: string;
+  dedupeKey: string | null;
+  payloadJson: string | null;
+  attempts: number;
+  maxAttempts: number;
+  availableAt: string;
+  lockedAt: string | null;
+  lockedBy: string | null;
+  lastError: string | null;
+  completedAt: string | null;
+  deadLetteredAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface AIRecommendationResponse {

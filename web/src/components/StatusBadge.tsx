@@ -3,6 +3,7 @@ import { BoltIcon, LinkIcon } from './Icons';
 
 const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
   DRAFT: { bg: 'bg-gray-700/50', text: 'text-gray-300', dot: 'bg-gray-400' },
+  CANCELLED: { bg: 'bg-zinc-800/60', text: 'text-zinc-300', dot: 'bg-zinc-400' },
   PENDING: { bg: 'bg-slate-800/60', text: 'text-slate-300', dot: 'bg-slate-400' },
   CONFIRMED: { bg: 'bg-emerald-900/50', text: 'text-emerald-300', dot: 'bg-emerald-400' },
   ACTIVE: { bg: 'bg-blue-900/50', text: 'text-blue-300', dot: 'bg-blue-400' },
@@ -22,6 +23,15 @@ const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> =
   NEGOTIATING_REFUND: { bg: 'bg-amber-950/50', text: 'text-amber-300', dot: 'bg-amber-400' },
   NEGOTIATING_SPLIT: { bg: 'bg-cyan-950/50', text: 'text-cyan-300', dot: 'bg-cyan-400' },
   RESOLVED: { bg: 'bg-emerald-950/50', text: 'text-emerald-300', dot: 'bg-emerald-400' },
+  FUNDING_IN_PROGRESS: { bg: 'bg-sky-900/50', text: 'text-sky-300', dot: 'bg-sky-400' },
+  PAYOUT_IN_PROGRESS: { bg: 'bg-cyan-900/50', text: 'text-cyan-300', dot: 'bg-cyan-400' },
+  REFUND_IN_PROGRESS: { bg: 'bg-indigo-900/50', text: 'text-indigo-300', dot: 'bg-indigo-400' },
+  SPLIT_IN_PROGRESS: { bg: 'bg-teal-900/50', text: 'text-teal-300', dot: 'bg-teal-400' },
+  ACTIVE_MILESTONE: { bg: 'bg-blue-900/50', text: 'text-blue-300', dot: 'bg-blue-400' },
+  PROOF_REVIEW: { bg: 'bg-yellow-900/50', text: 'text-yellow-300', dot: 'bg-yellow-400' },
+  APPROVED_FOR_SETTLEMENT: { bg: 'bg-emerald-900/50', text: 'text-emerald-300', dot: 'bg-emerald-400' },
+  COMPLETED: { bg: 'bg-green-900/50', text: 'text-green-300', dot: 'bg-green-400' },
+  SETTLEMENT_ATTENTION: { bg: 'bg-rose-900/50', text: 'text-rose-300', dot: 'bg-rose-400' },
   DISPUTE_LOCKED: { bg: 'bg-fuchsia-900/50', text: 'text-fuchsia-300', dot: 'bg-fuchsia-400' },
   REFUND_PENDING: { bg: 'bg-indigo-900/50', text: 'text-indigo-300', dot: 'bg-indigo-400' },
   REFUND_CONFIRMED: { bg: 'bg-purple-900/50', text: 'text-purple-300', dot: 'bg-purple-400' },

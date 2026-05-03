@@ -1,7 +1,8 @@
 import { AgreementStatus } from './enums';
 
 const VALID_TRANSITIONS: Record<AgreementStatus, AgreementStatus[]> = {
-  [AgreementStatus.DRAFT]: [AgreementStatus.FUNDED, AgreementStatus.EXPIRED],
+  [AgreementStatus.DRAFT]: [AgreementStatus.FUNDED, AgreementStatus.EXPIRED, AgreementStatus.CANCELLED],
+  [AgreementStatus.CANCELLED]: [],
   [AgreementStatus.FUNDED]: [
     AgreementStatus.PROOF_SUBMITTED,
     AgreementStatus.DISPUTED,

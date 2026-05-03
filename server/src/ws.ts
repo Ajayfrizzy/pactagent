@@ -1,7 +1,7 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import type { IncomingMessage, Server } from 'http';
 import { prisma } from './db';
-import { verifyAuthToken } from './services/authService';
+import { normalizeWalletAddress, verifyAuthToken } from './services/authService';
 
 type WsEvent =
   | { type: 'LOG'; payload: any }
@@ -75,13 +75,13 @@ function toPublicEvent(event: WsEvent): WsEvent {
 }
 
 async function isAgreementVisibleToAddress(agreementId: string, address: string) {
+  const normalizedAddress = normalizeWalletAddress(address);
   const agreement = await prisma.agreement.findFirst({
     where: {
       id: agreementId,
       OR: [
-        { clientAddress: address },
-        { workerAddress: address },
-        { arbitratorAddress: address },
+        { clientAddress: normalizedAddress },
+        { workerAddress: normalizedAddress },
       ],
     },
     select: { id: true },

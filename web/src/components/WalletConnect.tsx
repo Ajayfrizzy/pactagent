@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ccc } from '@ckb-ccc/connector-react';
-import { fetchAuthChallenge, verifyWalletAuth } from '@/lib/api';
+import { fetchAuthChallenge, fetchCurrentSession, verifyWalletAuth } from '@/lib/api';
 import { useStore } from '@/lib/store';
 import { LinkIcon } from './Icons';
 
@@ -32,6 +32,7 @@ export function WalletConnect() {
   const signer = ccc.useSigner();
   const {
     walletAddress,
+    isAdmin,
     authStatus,
     authError,
     authToken,
@@ -40,6 +41,7 @@ export function WalletConnect() {
     clearWalletSession,
   } = useStore((state) => ({
     walletAddress: state.walletAddress,
+    isAdmin: state.isAdmin,
     authStatus: state.authStatus,
     authError: state.authError,
     authToken: state.authToken,
@@ -137,12 +139,13 @@ export function WalletConnect() {
         signature,
       });
 
-      authenticatedAddressRef.current = address;
-      setWalletSession({
-        walletAddress: session.address,
-        authToken: session.token,
-        authExpiresAt: session.expiresAt,
-      });
+        authenticatedAddressRef.current = address;
+        setWalletSession({
+          walletAddress: session.address,
+          authToken: session.token,
+          authExpiresAt: session.expiresAt,
+          isAdmin: session.isAdmin,
+        });
     } catch (error) {
       clearWalletSession();
       setAuthStatus('error', formatAuthError(error));
@@ -158,6 +161,37 @@ export function WalletConnect() {
       setAuthStatus('authenticated');
     }
   }, [authStatus, hasAuthenticatedSession, setAuthStatus]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function hydrateExistingSession() {
+      if (!authToken || !walletAddress) {
+        return;
+      }
+
+      try {
+        const session = await fetchCurrentSession();
+        if (cancelled) {
+          return;
+        }
+
+        setWalletSession({
+          walletAddress: session.address,
+          authToken,
+          authExpiresAt: new Date(session.expiresAt * 1000).toISOString(),
+          isAdmin: session.isAdmin,
+        });
+      } catch {
+        // Silent fallback: existing session handling already covers invalid tokens elsewhere.
+      }
+    }
+
+    void hydrateExistingSession();
+    return () => {
+      cancelled = true;
+    };
+  }, [authToken, walletAddress, setWalletSession]);
 
   useEffect(() => {
     if (!hasAuthenticatedSession || signer) {

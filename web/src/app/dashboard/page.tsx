@@ -26,6 +26,7 @@ export default function DashboardPage() {
   useWebSocket();
   const walletAddress = useStore((s) => s.walletAddress);
   const authToken = useStore((s) => s.authToken);
+  const isAdmin = useStore((s) => s.isAdmin);
   const updateCount = useStore((s) => s.agreementUpdateCount);
   const [agreements, setAgreements] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -123,7 +124,16 @@ export default function DashboardPage() {
             <AgentIcon className="h-5 w-5 shrink-0 text-agent-accent" />
             <span className="truncate text-lg font-bold text-white">PactAgent</span>
           </Link>
-          <NavbarMenu />
+          <NavbarMenu>
+            <Link href="/" className="text-sm text-gray-400 transition-colors hover:text-white">
+              Home
+            </Link>
+            {isAdmin ? (
+              <Link href="/admin" className="text-sm text-agent-accent transition-colors hover:text-blue-300">
+                Admin
+              </Link>
+            ) : null}
+          </NavbarMenu>
         </div>
       </nav>
 
@@ -311,4 +321,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-

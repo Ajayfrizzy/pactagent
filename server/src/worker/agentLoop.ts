@@ -8,6 +8,7 @@ import {
   confirmPendingSettlementIfReady,
   recordMilestoneSettlementAttempt,
   refundCurrentMilestone,
+  reconcileAgreementSettlement,
   transitionMilestoneStatus,
   transitionStatus,
 } from '../services/agreementService';
@@ -18,9 +19,17 @@ import {
   saveRecommendation,
 } from '../services/disputeService';
 import { attemptFiberPayout } from '../services/fiberService';
+import {
+  claimAvailableJobs,
+  completeJob,
+  enqueueAgreementJob,
+  failJob,
+  parseJobPayload,
+  releaseStaleLocks,
+} from '../services/jobQueueService';
 
-const processedSet = new Set<string>();
 let cycleInProgress = false;
+const workerId = `embedded-worker:${process.pid}`;
 
 function getCurrentMilestone(agreement: any) {
   const activeStatuses = ['ACTIVE', 'PROOF_SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'DISPUTED'];
@@ -86,91 +95,227 @@ export async function runAgentCycle(): Promise<void> {
   cycleInProgress = true;
 
   try {
-    const agreements = await prisma.agreement.findMany({
-      where: {
-        OR: [
-          {
-            status: {
-              in: ['PROOF_SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'FUNDED', 'DRAFT', 'DISPUTED'],
-            },
-          },
-          {
-            settlementStatus: {
-              in: ['FUNDING_PENDING', 'PAYOUT_PENDING', 'REFUND_PENDING', 'SPLIT_PENDING'],
-            },
-          },
-          {
-            status: 'DRAFT',
-            settlementStatus: 'FAILED',
-            ckbTxHashFund: { not: null },
-          },
-        ],
-      },
-      include: {
-        milestones: {
-          orderBy: { sortOrder: 'asc' },
-          include: {
-            proofs: { orderBy: { submittedAt: 'desc' } },
-            disputes: {
-              orderBy: { createdAt: 'desc' },
-              include: {
-                evidenceEntries: { orderBy: { createdAt: 'asc' } },
-              },
-            },
-            settlements: {
-              orderBy: { createdAt: 'desc' },
-            },
-          },
-        },
-        proofs: { orderBy: { submittedAt: 'desc' } },
-        disputes: {
-          orderBy: { createdAt: 'desc' },
-          include: {
-            evidenceEntries: { orderBy: { createdAt: 'asc' } },
-          },
-        },
-        settlements: {
-          orderBy: { createdAt: 'desc' },
-        },
-      },
-    });
+    await releaseStaleLocks();
+    await scheduleSystemJobs();
+    const claimedJobs = await claimAvailableJobs(workerId, 12);
 
-    for (const agreement of agreements) {
-      const processKey = buildProcessKey(agreement, new Date());
-      const shouldAlwaysRecheck = isPendingSettlementStatus(agreement.settlementStatus);
-
-      if (!shouldAlwaysRecheck && processedSet.has(processKey)) {
-        continue;
-      }
-
+    for (const job of claimedJobs) {
       try {
-        await processAgreement(agreement);
-        if (!shouldAlwaysRecheck) {
-          processedSet.add(processKey);
-        }
+        await processJob(job);
+        await completeJob(job.id);
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Unknown error';
-        await createLog({
-          agreementId: agreement.id,
-          level: 'ERROR',
-          eventType: 'ERROR',
-          message: `Agent error processing agreement: ${msg}`,
-          metadata: {
-            error: msg,
-            status: agreement.status,
-            settlementStatus: agreement.settlementStatus,
-          },
-        });
+        await failJob(job, msg);
+        if (job.agreementId) {
+          await createLog({
+            agreementId: job.agreementId,
+            level: 'ERROR',
+            eventType: 'ERROR',
+            message: `Agent job ${job.kind} failed: ${msg}`,
+            metadata: {
+              jobId: job.id,
+              attempts: job.attempts,
+            },
+          });
+        }
       }
-    }
-
-    if (processedSet.size > 10000) {
-      processedSet.clear();
     }
   } catch (err) {
     console.error('[AGENT] Cycle error:', err);
   } finally {
     cycleInProgress = false;
+  }
+}
+
+async function scheduleSystemJobs() {
+  const agreements = await prisma.agreement.findMany({
+    where: {
+      OR: [
+        {
+          status: {
+            in: ['PROOF_SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'FUNDED', 'DRAFT', 'DISPUTED'],
+          },
+        },
+        {
+          settlementStatus: {
+            in: ['FUNDING_PENDING', 'PAYOUT_PENDING', 'REFUND_PENDING', 'SPLIT_PENDING', 'FAILED'],
+          },
+        },
+      ],
+    },
+    include: {
+      milestones: {
+        orderBy: { sortOrder: 'asc' },
+        include: {
+          disputes: {
+            orderBy: { createdAt: 'desc' },
+            include: {
+              evidenceEntries: { orderBy: { createdAt: 'asc' } },
+            },
+          },
+        },
+      },
+      disputes: {
+        orderBy: { createdAt: 'desc' },
+        include: {
+          evidenceEntries: { orderBy: { createdAt: 'asc' } },
+        },
+      },
+      settlements: {
+        orderBy: { createdAt: 'desc' },
+      },
+    },
+  });
+
+  const now = new Date();
+
+  for (const agreement of agreements) {
+    await enqueueAgreementJob({
+      agreementId: agreement.id,
+      kind: 'AGREEMENT_CONTINUE',
+      dedupeSuffix: `${agreement.status}:${agreement.updatedAt.toISOString()}`,
+    });
+
+    if (agreement.ckbTxHashFund && ['FUNDING_PENDING', 'FAILED'].includes(agreement.settlementStatus)) {
+      await enqueueAgreementJob({
+        agreementId: agreement.id,
+        kind: 'VERIFY_FUNDING',
+        dedupeSuffix: agreement.ckbTxHashFund,
+      });
+    }
+
+    if (['PAYOUT_PENDING', 'REFUND_PENDING', 'SPLIT_PENDING', 'FAILED'].includes(agreement.settlementStatus)) {
+      const latestSettlement = agreement.settlements[0];
+      await enqueueAgreementJob({
+        agreementId: agreement.id,
+        kind: 'RECONCILE_SETTLEMENT',
+        dedupeSuffix: latestSettlement?.id || agreement.settlementStatus,
+      });
+    }
+
+    const deadline = new Date(agreement.deadlineAt);
+    const hoursUntilDeadline = (deadline.getTime() - now.getTime()) / (60 * 60 * 1000);
+    if (hoursUntilDeadline <= 24 && hoursUntilDeadline > 0) {
+      await enqueueAgreementJob({
+        agreementId: agreement.id,
+        kind: 'REMINDER_DEADLINE',
+        dedupeSuffix: `${deadline.toISOString().slice(0, 13)}`,
+      });
+    }
+
+    const currentMilestone = getCurrentMilestone(agreement);
+    const openDispute = getOpenDispute(currentMilestone);
+    if (openDispute) {
+      const readiness = evaluateRecommendationReadiness({
+        dispute: openDispute,
+        agreement,
+        now,
+      });
+
+      if (!readiness.ready) {
+        const hoursUntilReplyDeadline =
+          (readiness.responseDeadlineAt.getTime() - now.getTime()) / (60 * 60 * 1000);
+        if (hoursUntilReplyDeadline <= 6) {
+          await enqueueAgreementJob({
+            agreementId: agreement.id,
+            kind: 'REMINDER_DISPUTE_RESPONSE',
+            payload: {
+              agreementId: agreement.id,
+              disputeId: openDispute.id,
+            },
+            dedupeSuffix: `${openDispute.id}:${readiness.responseDeadlineAt.toISOString().slice(0, 13)}`,
+          });
+        }
+      }
+    }
+  }
+}
+
+async function processJob(job: {
+  id: string;
+  agreementId: string | null;
+  kind: string;
+  payloadJson: string | null;
+}) {
+  const payload = parseJobPayload(job.payloadJson);
+
+  switch (job.kind) {
+    case 'VERIFY_FUNDING':
+      if (job.agreementId) {
+        await confirmFundingIfReady(job.agreementId);
+      }
+      return;
+    case 'RECONCILE_SETTLEMENT':
+      if (job.agreementId) {
+        await reconcileAgreementSettlement(job.agreementId);
+      }
+      return;
+    case 'REMINDER_DEADLINE':
+      if (job.agreementId) {
+        await createLog({
+          agreementId: job.agreementId,
+          level: 'WARN',
+          eventType: 'RULE_CHECK_STARTED',
+          message: 'Reminder: agreement deadline is approaching',
+        });
+      }
+      return;
+    case 'REMINDER_DISPUTE_RESPONSE':
+      if (job.agreementId) {
+        await createLog({
+          agreementId: job.agreementId,
+          level: 'WARN',
+          eventType: 'DISPUTE_OPENED',
+          message: 'Reminder: dispute response window is approaching its deadline',
+          metadata: {
+            disputeId: payload.disputeId || null,
+          },
+        });
+      }
+      return;
+    case 'AGREEMENT_CONTINUE':
+    default:
+      if (!job.agreementId) {
+        return;
+      }
+
+      const agreement = await prisma.agreement.findUnique({
+        where: { id: job.agreementId },
+        include: {
+          milestones: {
+            orderBy: { sortOrder: 'asc' },
+            include: {
+              proofs: { orderBy: { submittedAt: 'desc' } },
+              disputes: {
+                orderBy: { createdAt: 'desc' },
+                include: {
+                  evidenceEntries: { orderBy: { createdAt: 'asc' } },
+                },
+              },
+              settlements: {
+                orderBy: { createdAt: 'desc' },
+              },
+            },
+          },
+          proofs: { orderBy: { submittedAt: 'desc' } },
+          disputes: {
+            orderBy: { createdAt: 'desc' },
+            include: {
+              evidenceEntries: { orderBy: { createdAt: 'asc' } },
+            },
+          },
+          settlements: {
+            orderBy: { createdAt: 'desc' },
+          },
+        },
+      });
+
+      if (!agreement) {
+        return;
+      }
+
+      await processAgreement(agreement);
+      return;
   }
 }
 

@@ -1,8 +1,9 @@
 import type { NextFunction, Request, Response } from 'express';
 import { config } from '../config';
+import { normalizeWalletAddress } from '../services/authService';
 
-function normalizeAddress(address: string) {
-  return address.trim().toLowerCase();
+export function isAdminAddress(address: string) {
+  return config.adminAddresses.includes(normalizeWalletAddress(address));
 }
 
 export function requireAdmin(req: Request, res: Response, next: NextFunction) {
@@ -12,7 +13,7 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction) {
     return res.status(401).json({ success: false, error: 'Authentication required' });
   }
 
-  if (!config.adminAddresses.includes(normalizeAddress(address))) {
+  if (!isAdminAddress(address)) {
     return res.status(403).json({ success: false, error: 'Admin access required' });
   }
 

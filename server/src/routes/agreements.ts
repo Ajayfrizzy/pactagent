@@ -1,6 +1,7 @@
 import { Request, Response, Router } from 'express';
 import { z } from 'zod';
 import { config } from '../config';
+import { requireAdmin } from '../middleware/admin';
 import { requireAuth } from '../middleware/auth';
 import { createRateLimit } from '../middleware/rateLimit';
 import { prisma } from '../db';
@@ -12,6 +13,12 @@ import {
   saveRecommendation,
 } from '../services/disputeService';
 import { isValidFiberPublicKey } from '../services/fiberService';
+import { normalizeWalletAddress } from '../services/authService';
+import {
+  enqueueAgreementJob,
+  listAgreementJobs,
+  replayJob,
+} from '../services/jobQueueService';
 import { getLogs } from '../services/logService';
 import type { ArtifactKind, DisputeResolutionChoice } from '../services/richPayloadService';
 import { runAgentCycle } from '../worker/agentLoop';
@@ -137,6 +144,54 @@ const reviewActionSchema = z.object({
   reviewerAddress: z.string().min(1),
 });
 
+const updateDraftSchema = z.object({
+  title: z.string().min(1).max(200),
+  description: z.string().min(1).max(2000),
+  workerAddress: z.string().min(1),
+  workerFiberPubkey: z.string().min(1).optional(),
+  deadlineAt: z.string().datetime(),
+  disputeWindowSecs: z.number().int().min(3600),
+  proofType: z.enum(['URL', 'TEXT', 'FILE_HASH']),
+  reviewerMode: z.enum(['AUTO', 'HYBRID', 'MANUAL']),
+  releaseMode: z.enum(['FULL', 'PARTIAL']),
+  payoutNetwork: z.enum(['CKB', 'FIBER']),
+  milestones: z.array(z.object({
+    id: z.string().optional(),
+    title: z.string().min(1).max(120),
+    description: z.string().min(1).max(1000),
+    amount: z.string().min(1),
+  })).min(1),
+});
+
+const createCommentSchema = z.object({
+  authorAddress: z.string().min(1),
+  content: z.string().min(1).max(4000),
+});
+
+const createAmendmentSchema = z.object({
+  proposedBy: z.string().min(1),
+  reason: z.string().max(2000).optional(),
+  title: z.string().max(200).optional(),
+  description: z.string().max(2000).optional(),
+  deadlineAt: z.string().datetime().optional(),
+  disputeWindowSecs: z.number().int().min(3600).optional(),
+  releaseMode: z.enum(['FULL', 'PARTIAL']).optional(),
+  payoutNetwork: z.enum(['CKB', 'FIBER']).optional(),
+  workerFiberPubkey: z.string().optional(),
+  milestones: z.array(z.object({
+    id: z.string().min(1),
+    title: z.string().max(120).optional(),
+    description: z.string().max(1000).optional(),
+    sortOrder: z.number().int().min(1).optional(),
+  })).optional(),
+});
+
+const respondAmendmentSchema = z.object({
+  actorAddress: z.string().min(1),
+  accept: z.boolean(),
+  responseNote: z.string().max(2000).optional(),
+});
+
 const onchainResolutionSchema = z.object({
   milestoneId: z.string().min(1),
   txHash: z.string().min(1),
@@ -148,13 +203,22 @@ function getAuthAddress(req: Request) {
     throw new Error('Authentication required');
   }
 
-  return req.auth.address;
+  return normalizeWalletAddress(req.auth.address);
 }
 
 function triggerAgentCycleSoon(reason: string) {
   void runAgentCycle().catch((err) => {
     console.error(`[AGENT] Immediate cycle failed after ${reason}:`, err);
   });
+}
+
+async function queueAgreementJob(agreementId: string, reason: string, kind: 'AGREEMENT_CONTINUE' | 'VERIFY_FUNDING' | 'RECONCILE_SETTLEMENT' | 'DISPUTE_RECOMMENDATION' = 'AGREEMENT_CONTINUE') {
+  await enqueueAgreementJob({
+    agreementId,
+    kind,
+    dedupeSuffix: reason,
+  });
+  triggerAgentCycleSoon(reason);
 }
 
 async function getAgreementParticipantRecord(req: Request): Promise<AgreementAccessResult<AgreementParticipantRecord>> {
@@ -166,8 +230,7 @@ async function getAgreementParticipantRecord(req: Request): Promise<AgreementAcc
   const authAddress = getAuthAddress(req);
   if (
     agreement.clientAddress !== authAddress &&
-    agreement.workerAddress !== authAddress &&
-    agreement.arbitratorAddress !== authAddress
+    agreement.workerAddress !== authAddress
   ) {
     return { error: 'You are not a participant in this agreement' as const };
   }
@@ -196,7 +259,7 @@ router.post('/', actionRateLimit, async (req: Request, res: Response) => {
     const authAddress = getAuthAddress(req);
     const data = createAgreementSchema.parse(req.body);
 
-    if (data.clientAddress !== authAddress) {
+    if (normalizeWalletAddress(data.clientAddress) !== authAddress) {
       return res.status(403).json({ success: false, error: 'Authenticated wallet must match the client address' });
     }
 
@@ -227,6 +290,7 @@ router.post('/', actionRateLimit, async (req: Request, res: Response) => {
         escrowModel: agreement.escrowModel,
       },
     });
+    await queueAgreementJob(agreement.id, 'agreement created');
     res.json({ success: true, data: agreement });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Validation error';
@@ -239,7 +303,7 @@ router.get('/', async (req: Request, res: Response) => {
     const authAddress = getAuthAddress(req);
     const requestedAddress = req.query.address as string | undefined;
 
-    if (requestedAddress && requestedAddress !== authAddress) {
+    if (requestedAddress && normalizeWalletAddress(requestedAddress) !== authAddress) {
       return res.status(403).json({ success: false, error: 'You can only view agreements for your own wallet' });
     }
 
@@ -262,6 +326,164 @@ router.get('/:id', async (req: Request, res: Response) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     res.status(500).json({ success: false, error: msg });
+  }
+});
+
+router.patch('/:id/draft', actionRateLimit, async (req: Request, res: Response) => {
+  try {
+    const result = await getAgreementParticipantRecord(req);
+    if ('error' in result) {
+      return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
+    }
+
+    const authAddress = getAuthAddress(req);
+    if (result.agreement.clientAddress !== authAddress) {
+      return res.status(403).json({ success: false, error: 'Only the client can edit a draft agreement' });
+    }
+
+    const data = updateDraftSchema.parse(req.body);
+    const updated = await agreementService.updateDraftAgreement(req.params.id, data);
+    await createAuditLog({
+      agreementId: req.params.id,
+      actorAddress: authAddress,
+      action: 'AGREEMENT_DRAFT_UPDATED',
+      resourceType: 'AGREEMENT',
+      resourceId: req.params.id,
+    });
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unable to update draft agreement';
+    res.status(400).json({ success: false, error: msg });
+  }
+});
+
+router.post('/:id/cancel', actionRateLimit, async (req: Request, res: Response) => {
+  try {
+    const result = await getAgreementParticipantRecord(req);
+    if ('error' in result) {
+      return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
+    }
+
+    const authAddress = getAuthAddress(req);
+    if (result.agreement.clientAddress !== authAddress) {
+      return res.status(403).json({ success: false, error: 'Only the client can cancel a draft agreement' });
+    }
+
+    const updated = await agreementService.cancelDraftAgreement(req.params.id);
+    await createAuditLog({
+      agreementId: req.params.id,
+      actorAddress: authAddress,
+      action: 'AGREEMENT_CANCELLED',
+      resourceType: 'AGREEMENT',
+      resourceId: req.params.id,
+    });
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unable to cancel agreement';
+    res.status(400).json({ success: false, error: msg });
+  }
+});
+
+router.get('/:id/comments', async (req: Request, res: Response) => {
+  try {
+    const result = await getAgreementDetailForParticipant(req);
+    if ('error' in result) {
+      return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
+    }
+
+    res.json({ success: true, data: result.agreement.comments || [] });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    res.status(500).json({ success: false, error: msg });
+  }
+});
+
+router.post('/:id/comments', actionRateLimit, async (req: Request, res: Response) => {
+  try {
+    const result = await getAgreementParticipantRecord(req);
+    if ('error' in result) {
+      return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
+    }
+
+    const authAddress = getAuthAddress(req);
+    const data = createCommentSchema.parse(req.body);
+    if (normalizeWalletAddress(data.authorAddress) !== authAddress) {
+      return res.status(403).json({ success: false, error: 'Authenticated wallet must match the comment author' });
+    }
+
+    const response = await agreementService.createAgreementComment(req.params.id, data.authorAddress, data.content);
+    await createAuditLog({
+      agreementId: req.params.id,
+      actorAddress: authAddress,
+      action: 'AGREEMENT_COMMENT_ADDED',
+      resourceType: 'AGREEMENT',
+      resourceId: req.params.id,
+    });
+    res.json({ success: true, data: response });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unable to add agreement comment';
+    res.status(400).json({ success: false, error: msg });
+  }
+});
+
+router.post('/:id/amendments', actionRateLimit, async (req: Request, res: Response) => {
+  try {
+    const result = await getAgreementParticipantRecord(req);
+    if ('error' in result) {
+      return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
+    }
+
+    const authAddress = getAuthAddress(req);
+    const data = createAmendmentSchema.parse(req.body);
+    if (normalizeWalletAddress(data.proposedBy) !== authAddress) {
+      return res.status(403).json({ success: false, error: 'Authenticated wallet must match the amendment proposer' });
+    }
+
+    const response = await agreementService.proposeAgreementAmendment(req.params.id, data.proposedBy, data);
+    await createAuditLog({
+      agreementId: req.params.id,
+      actorAddress: authAddress,
+      action: 'AGREEMENT_AMENDMENT_PROPOSED',
+      resourceType: 'AGREEMENT',
+      resourceId: req.params.id,
+    });
+    res.json({ success: true, data: response });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unable to propose agreement amendment';
+    res.status(400).json({ success: false, error: msg });
+  }
+});
+
+router.post('/:id/amendments/:amendmentId/respond', actionRateLimit, async (req: Request, res: Response) => {
+  try {
+    const result = await getAgreementParticipantRecord(req);
+    if ('error' in result) {
+      return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
+    }
+
+    const authAddress = getAuthAddress(req);
+    const data = respondAmendmentSchema.parse(req.body);
+    if (normalizeWalletAddress(data.actorAddress) !== authAddress) {
+      return res.status(403).json({ success: false, error: 'Authenticated wallet must match the amendment responder' });
+    }
+
+    const updated = await agreementService.respondToAgreementAmendment(
+      req.params.id,
+      req.params.amendmentId,
+      data.actorAddress,
+      data,
+    );
+    await createAuditLog({
+      agreementId: req.params.id,
+      actorAddress: authAddress,
+      action: data.accept ? 'AGREEMENT_AMENDMENT_ACCEPTED' : 'AGREEMENT_AMENDMENT_REJECTED',
+      resourceType: 'AGREEMENT',
+      resourceId: req.params.amendmentId,
+    });
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unable to respond to agreement amendment';
+    res.status(400).json({ success: false, error: msg });
   }
 });
 
@@ -290,6 +512,7 @@ router.post('/:id/fund', actionRateLimit, async (req: Request, res: Response) =>
       resourceId: req.params.id,
       metadata: { txHash },
     });
+    await queueAgreementJob(req.params.id, 'funding submitted', 'VERIFY_FUNDING');
     res.json({ success: true, data: updated });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Validation error';
@@ -385,7 +608,7 @@ router.post('/:id/submit-proof', actionRateLimit, async (req: Request, res: Resp
         proofType: data.proofType,
       },
     });
-    triggerAgentCycleSoon('proof submission');
+    await queueAgreementJob(req.params.id, 'proof submission');
     res.json({ success: true, data: response });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Validation error';
@@ -402,7 +625,7 @@ router.post('/:id/open-dispute', actionRateLimit, async (req: Request, res: Resp
 
     const authAddress = getAuthAddress(req);
     const data = openDisputeSchema.parse(req.body);
-    if (data.openedBy !== authAddress) {
+    if (normalizeWalletAddress(data.openedBy) !== authAddress) {
       return res.status(403).json({ success: false, error: 'Authenticated wallet must match the dispute opener' });
     }
 
@@ -435,7 +658,7 @@ router.post('/:id/open-dispute', actionRateLimit, async (req: Request, res: Resp
         milestoneId: data.milestoneId,
       },
     });
-    triggerAgentCycleSoon('dispute opened');
+    await queueAgreementJob(req.params.id, 'dispute opened');
     res.json({ success: true, data: response });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Validation error';
@@ -452,7 +675,7 @@ router.post('/:id/dispute/evidence', actionRateLimit, async (req: Request, res: 
 
     const authAddress = getAuthAddress(req);
     const data = addDisputeEvidenceSchema.parse(req.body);
-    if (data.submittedBy !== authAddress) {
+    if (normalizeWalletAddress(data.submittedBy) !== authAddress) {
       return res.status(403).json({ success: false, error: 'Authenticated wallet must match the evidence submitter' });
     }
 
@@ -484,7 +707,7 @@ router.post('/:id/dispute/evidence', actionRateLimit, async (req: Request, res: 
         evidenceLength: data.content.length,
       },
     });
-    triggerAgentCycleSoon('dispute evidence');
+    await queueAgreementJob(req.params.id, 'dispute evidence');
     res.json({ success: true, data: response });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Validation error';
@@ -501,7 +724,7 @@ router.post('/:id/dispute/split-offer', actionRateLimit, async (req: Request, re
 
     const authAddress = getAuthAddress(req);
     const data = splitSettlementSchema.parse(req.body);
-    if (data.actorAddress !== authAddress) {
+    if (normalizeWalletAddress(data.actorAddress) !== authAddress) {
       return res.status(403).json({ success: false, error: 'Authenticated wallet must match the split settlement actor' });
     }
 
@@ -510,7 +733,7 @@ router.post('/:id/dispute/split-offer', actionRateLimit, async (req: Request, re
       data.actorAddress,
       data.workerAmount
     );
-    triggerAgentCycleSoon('split settlement consent');
+    await queueAgreementJob(req.params.id, 'split settlement consent');
     res.json({ success: true, data: response });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Validation error';
@@ -527,12 +750,12 @@ router.post('/:id/dispute/refund-consent', actionRateLimit, async (req: Request,
 
     const authAddress = getAuthAddress(req);
     const data = mutualRefundConsentSchema.parse(req.body);
-    if (data.actorAddress !== authAddress) {
+    if (normalizeWalletAddress(data.actorAddress) !== authAddress) {
       return res.status(403).json({ success: false, error: 'Authenticated wallet must match the refund approver' });
     }
 
     const response = await agreementService.recordMutualRefundConsent(req.params.id, data.actorAddress);
-    triggerAgentCycleSoon('refund consent');
+    await queueAgreementJob(req.params.id, 'refund consent');
     res.json({ success: true, data: response });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Validation error';
@@ -555,7 +778,7 @@ router.post('/:id/review-action', actionRateLimit, async (req: Request, res: Res
     }
 
     const { action, reviewerAddress } = reviewActionSchema.parse(req.body);
-    if (reviewerAddress !== authAddress) {
+    if (normalizeWalletAddress(reviewerAddress) !== authAddress) {
       return res.status(403).json({ success: false, error: 'Authenticated wallet must match the reviewer' });
     }
 
@@ -568,7 +791,7 @@ router.post('/:id/review-action', actionRateLimit, async (req: Request, res: Res
         resourceType: 'AGREEMENT',
         resourceId: req.params.id,
       });
-      triggerAgentCycleSoon('milestone approval');
+      await queueAgreementJob(req.params.id, 'milestone approval');
       return res.json({ success: true, data: updated });
     }
 
@@ -602,6 +825,7 @@ router.post('/:id/reconcile', actionRateLimit, async (req: Request, res: Respons
       resourceType: 'SETTLEMENT',
       resourceId: req.params.id,
     });
+    await queueAgreementJob(req.params.id, 'settlement reconcile', 'RECONCILE_SETTLEMENT');
     res.json({ success: true, data: updated });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unable to reconcile agreement settlement';
@@ -625,6 +849,7 @@ router.post('/:id/settlement/retry', actionRateLimit, async (req: Request, res: 
       resourceType: 'SETTLEMENT',
       resourceId: req.params.id,
     });
+    await queueAgreementJob(req.params.id, 'settlement retry', 'RECONCILE_SETTLEMENT');
     res.json({ success: true, data: updated });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unable to retry agreement settlement';
@@ -660,6 +885,45 @@ router.get('/:id/audit', async (req: Request, res: Response) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     res.status(500).json({ success: false, error: msg });
+  }
+});
+
+router.get('/:id/jobs', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const agreement = await prisma.agreement.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    if (!agreement) {
+      return res.status(404).json({ success: false, error: 'Agreement not found' });
+    }
+
+    const limit = parseInt((req.query.limit as string) || '100', 10);
+    const jobs = await listAgreementJobs(req.params.id, limit);
+    res.json({ success: true, data: jobs });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    res.status(500).json({ success: false, error: msg });
+  }
+});
+
+router.post('/:id/jobs/:jobId/replay', requireAdmin, actionRateLimit, async (req: Request, res: Response) => {
+  try {
+    const agreement = await prisma.agreement.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    if (!agreement) {
+      return res.status(404).json({ success: false, error: 'Agreement not found' });
+    }
+
+    const replayed = await replayJob(req.params.jobId);
+    await createAuditLog({
+      agreementId: req.params.id,
+      actorAddress: req.auth?.address,
+      action: 'AGENT_JOB_REPLAYED',
+      resourceType: 'AGREEMENT',
+      resourceId: req.params.jobId,
+    });
+    triggerAgentCycleSoon('job replay');
+    res.json({ success: true, data: replayed });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unable to replay job';
+    res.status(400).json({ success: false, error: msg });
   }
 });
 

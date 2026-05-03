@@ -8,6 +8,7 @@ import {
   SignerSignType,
 } from '@ckb-ccc/core';
 import { config, requireConfig } from '../config';
+import { isAdminAddress } from '../middleware/admin';
 
 type ChallengeRecord = {
   message: string;
@@ -22,8 +23,8 @@ function getClient() {
     : new ClientPublicTestnet({ url: config.ckbNodeUrl });
 }
 
-function normalizeAddress(address: string): string {
-  return address.trim();
+export function normalizeWalletAddress(address: string): string {
+  return address.trim().toLowerCase();
 }
 
 function buildChallengeMessage(address: string, nonce: string) {
@@ -39,7 +40,7 @@ function buildChallengeMessage(address: string, nonce: string) {
 }
 
 export function createChallenge(address: string) {
-  const normalized = normalizeAddress(address);
+  const normalized = normalizeWalletAddress(address);
   const nonce = crypto.randomUUID();
   const message = buildChallengeMessage(normalized, nonce);
   challengeStore.set(normalized, {
@@ -72,7 +73,7 @@ async function deriveAddressFromSignatureIdentity(signature: {
       };
 
       if (identity.address) {
-        return normalizeAddress(identity.address);
+        return normalizeWalletAddress(identity.address);
       }
 
       if (identity.publicKey) {
@@ -91,11 +92,11 @@ async function deriveAddressFromSignatureIdentity(signature: {
   }
 
   if (signature.signType === 'EvmPersonal' && signature.requestedAddress) {
-    return normalizeAddress(signature.requestedAddress);
+    return normalizeWalletAddress(signature.requestedAddress);
   }
 
   if (signature.signType === SignerSignType.JoyId && signature.requestedAddress) {
-    return normalizeAddress(signature.requestedAddress);
+    return normalizeWalletAddress(signature.requestedAddress);
   }
 
   throw new Error(`Unsupported signer type for authentication: ${signature.signType}`);
@@ -110,7 +111,7 @@ export async function verifyChallenge(params: {
     signType: string;
   };
 }) {
-  const normalized = normalizeAddress(params.address);
+  const normalized = normalizeWalletAddress(params.address);
   const challenge = challengeStore.get(normalized);
 
   if (!challenge) {
@@ -141,7 +142,7 @@ export async function verifyChallenge(params: {
     ...params.signature,
     requestedAddress: normalized,
   });
-  if (normalizeAddress(derivedAddress) !== normalized) {
+  if (normalizeWalletAddress(derivedAddress) !== normalized) {
     throw new Error('Signed wallet address does not match the requested account.');
   }
 
@@ -156,6 +157,7 @@ export async function verifyChallenge(params: {
   return {
     token,
     address: normalized,
+    isAdmin: isAdminAddress(normalized),
     expiresAt: new Date(Date.now() + config.authTokenTtlSecs * 1000).toISOString(),
   };
 }
@@ -171,7 +173,8 @@ export function verifyAuthToken(token: string) {
   }
 
   return {
-    address: normalizeAddress(decoded.address),
+    address: normalizeWalletAddress(decoded.address),
+    isAdmin: isAdminAddress(decoded.address),
     issuedAt: typeof decoded.iat === 'number' ? decoded.iat : 0,
     expiresAt: typeof decoded.exp === 'number' ? decoded.exp : 0,
   };

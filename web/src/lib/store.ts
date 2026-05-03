@@ -17,6 +17,7 @@ interface AppState {
   walletAddress: string | null;
   authToken: string | null;
   authExpiresAt: string | null;
+  isAdmin: boolean;
   hasHydrated: boolean;
   authStatus: 'idle' | 'authenticating' | 'authenticated' | 'error';
   authError: string | null;
@@ -24,6 +25,7 @@ interface AppState {
     walletAddress: string;
     authToken: string;
     authExpiresAt: string;
+    isAdmin: boolean;
   }) => void;
   setAuthStatus: (status: AppState['authStatus'], error?: string | null) => void;
   clearWalletSession: () => void;
@@ -46,14 +48,16 @@ export const useStore = create<AppState>()(
       walletAddress: null,
       authToken: null,
       authExpiresAt: null,
+      isAdmin: false,
       hasHydrated: false,
       authStatus: 'idle',
       authError: null,
-      setWalletSession: ({ walletAddress, authToken, authExpiresAt }) =>
+      setWalletSession: ({ walletAddress, authToken, authExpiresAt, isAdmin }) =>
         set({
           walletAddress,
           authToken,
           authExpiresAt,
+          isAdmin,
           authStatus: 'authenticated',
           authError: null,
         }),
@@ -64,6 +68,7 @@ export const useStore = create<AppState>()(
           walletAddress: null,
           authToken: null,
           authExpiresAt: null,
+          isAdmin: false,
           hasHydrated: true,
           authStatus: 'idle',
           authError: null,
@@ -98,6 +103,7 @@ export const useStore = create<AppState>()(
         walletAddress: state.walletAddress,
         authToken: state.authToken,
         authExpiresAt: state.authExpiresAt,
+        isAdmin: state.isAdmin,
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHasHydrated(true);

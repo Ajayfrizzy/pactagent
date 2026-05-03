@@ -1,4 +1,4 @@
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { v4 as uuid } from 'uuid';
 import { prisma } from '../db';
 import { broadcast } from '../ws';
@@ -29,7 +29,8 @@ import {
 } from './richPayloadService';
 
 const AGREEMENT_VALID_TRANSITIONS: Record<string, string[]> = {
-  DRAFT: ['FUNDED', 'EXPIRED'],
+  DRAFT: ['FUNDED', 'EXPIRED', 'CANCELLED'],
+  CANCELLED: [],
   FUNDED: ['PROOF_SUBMITTED', 'DISPUTED', 'EXPIRED', 'REFUNDED'],
   PROOF_SUBMITTED: ['UNDER_REVIEW', 'DISPUTED', 'EXPIRED'],
   UNDER_REVIEW: ['APPROVED', 'DISPUTED', 'EXPIRED', 'REFUNDED'],
@@ -41,7 +42,8 @@ const AGREEMENT_VALID_TRANSITIONS: Record<string, string[]> = {
 };
 
 const MILESTONE_VALID_TRANSITIONS: Record<string, string[]> = {
-  PENDING: ['ACTIVE'],
+  PENDING: ['ACTIVE', 'CANCELLED'],
+  CANCELLED: [],
   ACTIVE: ['PROOF_SUBMITTED', 'DISPUTED', 'EXPIRED', 'REFUNDED'],
   PROOF_SUBMITTED: ['UNDER_REVIEW', 'DISPUTED', 'EXPIRED'],
   UNDER_REVIEW: ['APPROVED', 'DISPUTED', 'EXPIRED', 'REFUNDED'],
@@ -64,6 +66,14 @@ const agreementListInclude = {
   settlements: {
     orderBy: { createdAt: 'desc' },
     take: 1,
+  },
+  comments: {
+    orderBy: { createdAt: 'desc' },
+    take: 3,
+  },
+  amendments: {
+    orderBy: { createdAt: 'desc' },
+    take: 2,
   },
 } as const;
 
@@ -88,6 +98,16 @@ const agreementDetailInclude = {
   },
   settlements: {
     orderBy: { createdAt: 'desc' },
+  },
+  comments: {
+    orderBy: { createdAt: 'asc' },
+  },
+  amendments: {
+    orderBy: { createdAt: 'desc' },
+  },
+  jobs: {
+    orderBy: { createdAt: 'desc' },
+    take: 40,
   },
 } as const;
 
@@ -229,6 +249,10 @@ function payoutNetworkFromSettlement(network: SettlementNetwork) {
 
 function normalizeHex(value: string | null | undefined) {
   return (value || '').toLowerCase();
+}
+
+function normalizeAddress(address: string) {
+  return address.trim().toLowerCase();
 }
 
 function emptyRefundConsensusState(): RefundConsensusState {
@@ -461,12 +485,23 @@ async function decorateAgreementWithRefundConsensus<
     clientAddress: string;
     workerAddress: string;
     disputeWindowSecs: number;
+    status: string;
+    settlementStatus: string;
     disputes?: Array<any>;
     milestones?: Array<any>;
   }
 >(agreement: T): Promise<any> {
   if (!agreement.disputes?.length) {
-    return agreement;
+    const workflow = deriveAgreementWorkflowState(agreement as any);
+    return {
+      ...agreement,
+      workflowStage: workflow.workflowStage,
+      nextParticipantAction: workflow.nextParticipantAction,
+      milestones: agreement.milestones?.map((milestone: any) => ({
+        ...milestone,
+        revisionCount: milestone.proofs?.length || 0,
+      })),
+    };
   }
 
   const disputeIds = agreement.disputes.map((dispute) => dispute.id);
@@ -589,8 +624,15 @@ async function decorateAgreementWithRefundConsensus<
     }),
   }));
 
+  const workflow = deriveAgreementWorkflowState({
+    ...agreement,
+    disputes,
+  });
+
   return {
     ...agreement,
+    workflowStage: workflow.workflowStage,
+    nextParticipantAction: workflow.nextParticipantAction,
     disputes,
     milestones,
   };
@@ -668,6 +710,112 @@ function deriveDisputeWorkspaceState(params: {
     counterpartyAddress,
     awaitingAddress: counterpartyAddress,
   };
+}
+
+function deriveAgreementWorkflowState(agreement: {
+  status: string;
+  settlementStatus: string;
+  milestones?: Array<{ status: string }>;
+  disputes?: Array<{ resolvedAt?: string | Date | null }>;
+}) {
+  const openDispute = agreement.disputes?.find((dispute) => !dispute.resolvedAt);
+
+  if (agreement.status === 'CANCELLED') {
+    return {
+      workflowStage: 'CANCELLED',
+      nextParticipantAction: null,
+    };
+  }
+
+  if (agreement.settlementStatus === 'FAILED') {
+    return {
+      workflowStage: 'SETTLEMENT_ATTENTION',
+      nextParticipantAction: 'Retry or reconcile settlement',
+    };
+  }
+
+  if (agreement.settlementStatus === 'FUNDING_PENDING') {
+    return {
+      workflowStage: 'FUNDING_IN_PROGRESS',
+      nextParticipantAction: 'Wait for on-chain funding confirmation',
+    };
+  }
+
+  if (agreement.settlementStatus === 'PAYOUT_PENDING') {
+    return {
+      workflowStage: 'PAYOUT_IN_PROGRESS',
+      nextParticipantAction: 'Wait for payout confirmation',
+    };
+  }
+
+  if (agreement.settlementStatus === 'REFUND_PENDING') {
+    return {
+      workflowStage: 'REFUND_IN_PROGRESS',
+      nextParticipantAction: 'Wait for refund confirmation',
+    };
+  }
+
+  if (agreement.settlementStatus === 'SPLIT_PENDING') {
+    return {
+      workflowStage: 'SPLIT_IN_PROGRESS',
+      nextParticipantAction: 'Wait for split settlement confirmation',
+    };
+  }
+
+  if (openDispute) {
+    return {
+      workflowStage: 'DISPUTE_OPEN',
+      nextParticipantAction: 'Reply in dispute workspace or resolve settlement offer',
+    };
+  }
+
+  switch (agreement.status) {
+    case 'DRAFT':
+      return {
+        workflowStage: 'DRAFT',
+        nextParticipantAction: 'Client can edit, cancel, or fund the agreement',
+      };
+    case 'FUNDED':
+      return {
+        workflowStage: 'ACTIVE_MILESTONE',
+        nextParticipantAction: 'Worker should submit proof for the active milestone',
+      };
+    case 'PROOF_SUBMITTED':
+      return {
+        workflowStage: 'PROOF_REVIEW',
+        nextParticipantAction: 'Agent or client should review submitted proof',
+      };
+    case 'UNDER_REVIEW':
+      return {
+        workflowStage: 'UNDER_REVIEW',
+        nextParticipantAction: 'Client review or automated review is pending',
+      };
+    case 'APPROVED':
+      return {
+        workflowStage: 'APPROVED_FOR_SETTLEMENT',
+        nextParticipantAction: 'Settlement is ready to execute',
+      };
+    case 'PAID':
+      return {
+        workflowStage: 'COMPLETED',
+        nextParticipantAction: null,
+      };
+    case 'REFUNDED':
+      return {
+        workflowStage: 'REFUNDED',
+        nextParticipantAction: null,
+      };
+    case 'EXPIRED':
+      return {
+        workflowStage: 'EXPIRED',
+        nextParticipantAction: null,
+      };
+    default:
+      return {
+        workflowStage: agreement.status,
+        nextParticipantAction: null,
+      };
+  }
 }
 
 async function setAgreementSettlementState(
@@ -964,6 +1112,331 @@ export async function activateNextMilestone(agreementId: string) {
   return activated;
 }
 
+export async function updateDraftAgreement(agreementId: string, data: {
+  title: string;
+  description: string;
+  workerAddress: string;
+  workerFiberPubkey?: string;
+  deadlineAt: string;
+  disputeWindowSecs: number;
+  proofType: string;
+  reviewerMode: string;
+  releaseMode: string;
+  payoutNetwork: string;
+  milestones: Array<{
+    id?: string;
+    title: string;
+    description: string;
+    amount: string;
+  }>;
+}) {
+  const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
+  if (agreement.status !== 'DRAFT') {
+    throw new Error('Only draft agreements can be edited.');
+  }
+
+  if (!data.milestones.length) {
+    throw new Error('At least one milestone is required.');
+  }
+
+  const totalAmount = data.milestones.reduce((sum, milestone) => sum + BigInt(milestone.amount), BigInt(0)).toString();
+  const normalizedMilestones = data.milestones.map((milestone, index) => ({
+    id: milestone.id || null,
+    title: milestone.title,
+    description: milestone.description,
+    amount: milestone.amount,
+    sortOrder: index + 1,
+  }));
+  const milestoneDigest = buildMilestoneDigest(normalizedMilestones);
+  const agreementDigest = buildAgreementDigest({
+    title: data.title,
+    description: data.description,
+    clientAddress: agreement.clientAddress,
+    workerAddress: normalizeAddress(data.workerAddress),
+    workerFiberPubkey: data.workerFiberPubkey || null,
+    deadlineAt: data.deadlineAt,
+    disputeWindowSecs: data.disputeWindowSecs,
+    proofType: data.proofType,
+    reviewerMode: data.reviewerMode,
+    releaseMode: data.releaseMode,
+    payoutNetwork: data.payoutNetwork,
+    milestoneDigest,
+  });
+
+  await prisma.$transaction(async (tx) => {
+    const existingMilestoneIds = agreement.milestones.map((milestone: any) => milestone.id);
+    const incomingMilestoneIds = normalizedMilestones.map((milestone) => milestone.id).filter(Boolean) as string[];
+
+    await tx.agreement.update({
+      where: { id: agreementId },
+      data: {
+        title: data.title,
+        description: data.description,
+        workerAddress: normalizeAddress(data.workerAddress),
+        workerFiberPubkey: data.workerFiberPubkey || null,
+        deadlineAt: new Date(data.deadlineAt),
+        disputeWindowSecs: data.disputeWindowSecs,
+        proofType: data.proofType,
+        reviewerMode: data.reviewerMode,
+        releaseMode: data.releaseMode,
+        payoutNetwork: data.payoutNetwork,
+        amount: totalAmount,
+        agreementDigest,
+        milestoneDigest,
+      },
+    });
+
+    const milestonesToDelete = existingMilestoneIds.filter((id: string) => !incomingMilestoneIds.includes(id));
+    if (milestonesToDelete.length) {
+      await tx.milestone.deleteMany({
+        where: { id: { in: milestonesToDelete } },
+      });
+    }
+
+    for (const milestone of normalizedMilestones) {
+      if (milestone.id && existingMilestoneIds.includes(milestone.id)) {
+        await tx.milestone.update({
+          where: { id: milestone.id },
+          data: {
+            title: milestone.title,
+            description: milestone.description,
+            amount: milestone.amount,
+            sortOrder: milestone.sortOrder,
+          },
+        });
+      } else {
+        await tx.milestone.create({
+          data: {
+            id: randomUUID(),
+            agreementId,
+            title: milestone.title,
+            description: milestone.description,
+            amount: milestone.amount,
+            sortOrder: milestone.sortOrder,
+            status: 'PENDING',
+          },
+        });
+      }
+    }
+  });
+
+  await createLog({
+    agreementId,
+    level: 'INFO',
+    eventType: 'AGREEMENT_CREATED',
+    message: 'Draft agreement updated before funding',
+    metadata: {
+      milestoneCount: normalizedMilestones.length,
+      amount: totalAmount,
+    },
+  });
+
+  return getAgreementById(agreementId);
+}
+
+export async function cancelDraftAgreement(agreementId: string) {
+  const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
+  if (agreement.status !== 'DRAFT') {
+    throw new Error('Only draft agreements can be cancelled.');
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.milestone.updateMany({
+      where: { agreementId, status: 'PENDING' },
+      data: { status: 'CANCELLED' },
+    });
+    await tx.agreement.update({
+      where: { id: agreementId },
+      data: {
+        status: 'CANCELLED',
+        settlementStatus: 'UNFUNDED',
+      },
+    });
+  });
+
+  await broadcastAgreementUpdateById(agreementId);
+  await createLog({
+    agreementId,
+    level: 'WARN',
+    eventType: 'AGREEMENT_CREATED',
+    message: 'Draft agreement was cancelled before funding',
+  });
+
+  return getAgreementById(agreementId);
+}
+
+export async function createAgreementComment(
+  agreementId: string,
+  authorAddress: string,
+  content: string
+) {
+  const comment = await prisma.agreementComment.create({
+    data: {
+      id: randomUUID(),
+      agreementId,
+      authorAddress: normalizeAddress(authorAddress),
+      content: content.trim(),
+    },
+  });
+
+  await broadcastAgreementUpdateById(agreementId);
+  await createLog({
+    agreementId,
+    level: 'INFO',
+    eventType: 'DISPUTE_OPENED',
+    message: `Agreement comment added by ${normalizeAddress(authorAddress)}`,
+    metadata: {
+      commentId: comment.id,
+    },
+  });
+
+  return {
+    comment,
+    agreement: await getAgreementById(agreementId),
+  };
+}
+
+export async function proposeAgreementAmendment(
+  agreementId: string,
+  proposedBy: string,
+  input: {
+    reason?: string;
+    title?: string;
+    description?: string;
+    deadlineAt?: string;
+    disputeWindowSecs?: number;
+    releaseMode?: string;
+    payoutNetwork?: string;
+    workerFiberPubkey?: string;
+    milestones?: Array<{
+      id: string;
+      title?: string;
+      description?: string;
+      sortOrder?: number;
+    }>;
+  }
+) {
+  const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
+  if (agreement.status === 'DRAFT' || agreement.status === 'CANCELLED') {
+    throw new Error('Use draft editing before funding instead of amendment proposals.');
+  }
+
+  const amendment = await prisma.agreementAmendment.create({
+    data: {
+      id: randomUUID(),
+      agreementId,
+      proposedBy: normalizeAddress(proposedBy),
+      reason: input.reason?.trim() || null,
+      title: input.title?.trim() || null,
+      description: input.description?.trim() || null,
+      deadlineAt: input.deadlineAt ? new Date(input.deadlineAt) : null,
+      disputeWindowSecs: input.disputeWindowSecs ?? null,
+      releaseMode: input.releaseMode || null,
+      payoutNetwork: input.payoutNetwork || null,
+      workerFiberPubkey: input.workerFiberPubkey?.trim() || null,
+      milestonesJson: input.milestones ? JSON.stringify(input.milestones) : null,
+    },
+  });
+
+  await broadcastAgreementUpdateById(agreementId);
+  return {
+    amendment,
+    agreement: await getAgreementById(agreementId),
+  };
+}
+
+export async function respondToAgreementAmendment(
+  agreementId: string,
+  amendmentId: string,
+  actorAddress: string,
+  input: {
+    accept: boolean;
+    responseNote?: string;
+  }
+) {
+  const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
+  const amendment = agreement.amendments?.find((item: any) => item.id === amendmentId);
+
+  if (!amendment) {
+    throw new Error('Amendment proposal not found.');
+  }
+
+  if (amendment.status !== 'PROPOSED') {
+    throw new Error('This amendment proposal has already been resolved.');
+  }
+
+  const normalizedActor = normalizeAddress(actorAddress);
+  if (normalizedActor === amendment.proposedBy) {
+    throw new Error('The proposer cannot accept their own amendment.');
+  }
+
+  if (input.accept) {
+    await prisma.$transaction(async (tx) => {
+      await tx.agreementAmendment.update({
+        where: { id: amendmentId },
+        data: {
+          status: 'ACCEPTED',
+          responseNote: input.responseNote?.trim() || null,
+          respondedAt: new Date(),
+        },
+      });
+
+      const agreementUpdate: Record<string, unknown> = {};
+      if (amendment.title) agreementUpdate.title = amendment.title;
+      if (amendment.description) agreementUpdate.description = amendment.description;
+      if (amendment.deadlineAt) agreementUpdate.deadlineAt = amendment.deadlineAt;
+      if (amendment.disputeWindowSecs != null) agreementUpdate.disputeWindowSecs = amendment.disputeWindowSecs;
+      if (amendment.releaseMode) agreementUpdate.releaseMode = amendment.releaseMode;
+      if (amendment.payoutNetwork) agreementUpdate.payoutNetwork = amendment.payoutNetwork;
+      if (amendment.workerFiberPubkey !== null) agreementUpdate.workerFiberPubkey = amendment.workerFiberPubkey;
+
+      if (Object.keys(agreementUpdate).length > 0) {
+        await tx.agreement.update({
+          where: { id: agreementId },
+          data: agreementUpdate,
+        });
+      }
+
+      if (amendment.milestonesJson) {
+        const milestoneUpdates = JSON.parse(amendment.milestonesJson) as Array<{
+          id: string;
+          title?: string;
+          description?: string;
+          sortOrder?: number;
+        }>;
+
+        for (const milestoneUpdate of milestoneUpdates) {
+          const existing = agreement.milestones.find((milestone: any) => milestone.id === milestoneUpdate.id);
+          if (!existing || existing.status !== 'PENDING') {
+            continue;
+          }
+
+          await tx.milestone.update({
+            where: { id: milestoneUpdate.id },
+            data: {
+              title: milestoneUpdate.title ?? existing.title,
+              description: milestoneUpdate.description ?? existing.description,
+              sortOrder: milestoneUpdate.sortOrder ?? existing.sortOrder,
+            },
+          });
+        }
+      }
+    });
+  } else {
+    await prisma.agreementAmendment.update({
+      where: { id: amendmentId },
+      data: {
+        status: 'REJECTED',
+        responseNote: input.responseNote?.trim() || null,
+        respondedAt: new Date(),
+      },
+    });
+  }
+
+  await broadcastAgreementUpdateById(agreementId);
+  return getAgreementById(agreementId);
+}
+
 export async function createAgreement(data: {
   title: string;
   description: string;
@@ -987,6 +1460,9 @@ export async function createAgreement(data: {
     throw new Error('At least one milestone is required');
   }
 
+  const clientAddress = normalizeAddress(data.clientAddress);
+  const workerAddress = normalizeAddress(data.workerAddress);
+
   const totalAmount = data.milestones
     .reduce((sum, milestone) => sum + BigInt(milestone.amount), BigInt(0))
     .toString();
@@ -1001,8 +1477,8 @@ export async function createAgreement(data: {
   const agreementDigest = buildAgreementDigest({
     title: data.title,
     description: data.description,
-    clientAddress: data.clientAddress,
-    workerAddress: data.workerAddress,
+    clientAddress,
+    workerAddress,
     workerFiberPubkey: data.workerFiberPubkey || null,
     deadlineAt: data.deadlineAt,
     disputeWindowSecs: data.disputeWindowSecs,
@@ -1023,8 +1499,8 @@ export async function createAgreement(data: {
       ? await buildOnchainEscrowDescriptor({
           agreementId,
           agreementDigest,
-          clientAddress: data.clientAddress,
-          workerAddress: data.workerAddress,
+          clientAddress,
+          workerAddress,
         })
       : null;
   const escrowAddress =
@@ -1037,8 +1513,8 @@ export async function createAgreement(data: {
       id: agreementId,
       title: data.title,
       description: data.description,
-      clientAddress: data.clientAddress,
-      workerAddress: data.workerAddress,
+      clientAddress,
+      workerAddress,
       arbitratorAddress: null,
       workerFiberPubkey: data.workerFiberPubkey || null,
       amount: totalAmount,
@@ -2384,7 +2860,6 @@ export async function getAgreements(address?: string) {
           OR: [
             { clientAddress: address },
             { workerAddress: address },
-            { arbitratorAddress: address },
           ],
         }
       : undefined,

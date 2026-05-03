@@ -95,6 +95,7 @@ name = "pact-escrow-lock"
 version = "0.1.0"
 dependencies = [
  "ckb-std",
+ "molecule",
 ]
 
 [[package]]

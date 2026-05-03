@@ -1,5 +1,6 @@
 export enum AgreementStatus {
   DRAFT = 'DRAFT',
+  CANCELLED = 'CANCELLED',
   FUNDED = 'FUNDED',
   PROOF_SUBMITTED = 'PROOF_SUBMITTED',
   UNDER_REVIEW = 'UNDER_REVIEW',
@@ -12,6 +13,7 @@ export enum AgreementStatus {
 
 export enum MilestoneStatus {
   PENDING = 'PENDING',
+  CANCELLED = 'CANCELLED',
   ACTIVE = 'ACTIVE',
   PROOF_SUBMITTED = 'PROOF_SUBMITTED',
   UNDER_REVIEW = 'UNDER_REVIEW',

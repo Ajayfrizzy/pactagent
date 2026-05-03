@@ -124,14 +124,14 @@ export async function verifyWalletAuth(data: {
     signType: string;
   };
 }) {
-  return request<{ token: string; address: string; expiresAt: string }>('/auth/verify', {
+  return request<{ token: string; address: string; isAdmin: boolean; expiresAt: string }>('/auth/verify', {
     method: 'POST',
     body: JSON.stringify(data),
   });
 }
 
 export async function fetchCurrentSession() {
-  return request<{ address: string; issuedAt: number; expiresAt: number }>('/auth/me');
+  return request<{ address: string; isAdmin: boolean; issuedAt: number; expiresAt: number }>('/auth/me');
 }
 
 export async function fetchAgreements(address?: string) {
@@ -165,6 +165,36 @@ export async function createAgreement(data: {
   return request<any>('/agreements', {
     method: 'POST',
     body: JSON.stringify(data),
+  });
+}
+
+export async function updateDraftAgreement(id: string, data: {
+  title: string;
+  description: string;
+  workerAddress: string;
+  workerFiberPubkey?: string;
+  deadlineAt: string;
+  disputeWindowSecs: number;
+  proofType: string;
+  reviewerMode: string;
+  releaseMode: string;
+  payoutNetwork: string;
+  milestones: Array<{
+    id?: string;
+    title: string;
+    description: string;
+    amount: string;
+  }>;
+}) {
+  return request<any>(`/agreements/${id}/draft`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function cancelDraftAgreement(id: string) {
+  return request<any>(`/agreements/${id}/cancel`, {
+    method: 'POST',
   });
 }
 
@@ -301,6 +331,54 @@ export async function retryAgreementSettlement(id: string) {
   });
 }
 
+export async function fetchAgreementComments(id: string) {
+  return request<any[]>(`/agreements/${id}/comments`);
+}
+
+export async function addAgreementComment(id: string, data: {
+  authorAddress: string;
+  content: string;
+}) {
+  return request<any>(`/agreements/${id}/comments`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function proposeAgreementAmendment(id: string, data: {
+  proposedBy: string;
+  reason?: string;
+  title?: string;
+  description?: string;
+  deadlineAt?: string;
+  disputeWindowSecs?: number;
+  releaseMode?: string;
+  payoutNetwork?: string;
+  workerFiberPubkey?: string;
+  milestones?: Array<{
+    id: string;
+    title?: string;
+    description?: string;
+    sortOrder?: number;
+  }>;
+}) {
+  return request<any>(`/agreements/${id}/amendments`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function respondToAgreementAmendment(id: string, amendmentId: string, data: {
+  actorAddress: string;
+  accept: boolean;
+  responseNote?: string;
+}) {
+  return request<any>(`/agreements/${id}/amendments/${amendmentId}/respond`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
 export async function fetchLogs(agreementId?: string, limit = 100) {
   const params = new URLSearchParams();
   if (agreementId) {
@@ -326,8 +404,36 @@ export async function fetchAgreementAuditLogs(id: string, limit = 100) {
   return request<any[]>(`/agreements/${id}/audit?${params.toString()}`);
 }
 
+export async function fetchAgreementJobs(id: string, limit = 100) {
+  const params = new URLSearchParams();
+  params.set('limit', String(limit));
+  return request<any[]>(`/agreements/${id}/jobs?${params.toString()}`);
+}
+
+export async function replayAgreementJob(id: string, jobId: string) {
+  return request<any>(`/agreements/${id}/jobs/${jobId}/replay`, {
+    method: 'POST',
+  });
+}
+
+export async function fetchFiberAdminHealth() {
+  return request<any>('/fiber/health');
+}
+
+export async function fetchFiberAdminInfo() {
+  return request<any>('/fiber/info');
+}
+
+export async function fetchFiberAdminChannels() {
+  return request<any>('/fiber/channels');
+}
+
 export async function fetchConfig() {
   return request<any>('/config');
+}
+
+export async function fetchConfigFresh() {
+  return performRequest<any>(`/config?ts=${Date.now()}`);
 }
 
 export async function fetchHealth() {

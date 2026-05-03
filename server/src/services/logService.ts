@@ -1,6 +1,7 @@
 import { prisma } from '../db';
 import { broadcast } from '../ws';
 import { v4 as uuid } from 'uuid';
+import { normalizeWalletAddress } from './authService';
 
 /**
  * Agent Log Service
@@ -46,14 +47,14 @@ export async function getLogs(agreementId?: string, limit = 100) {
 }
 
 export async function getLogsForParticipant(address: string, agreementId?: string, limit = 100) {
+  const normalizedAddress = normalizeWalletAddress(address);
   return prisma.agentLog.findMany({
     where: {
       agreementId: agreementId ? agreementId : { not: null },
       agreement: {
         OR: [
-          { clientAddress: address },
-          { workerAddress: address },
-          { arbitratorAddress: address },
+          { clientAddress: normalizedAddress },
+          { workerAddress: normalizedAddress },
         ],
       },
     },
@@ -63,7 +64,7 @@ export async function getLogsForParticipant(address: string, agreementId?: strin
 }
 
 export async function getPublicLogs(limit = 25) {
-  return prisma.agentLog.findMany({
+  const logs = await prisma.agentLog.findMany({
     where: {
       agreementId: { not: null },
       level: { in: ['INFO', 'SUCCESS', 'WARN'] },
@@ -71,4 +72,9 @@ export async function getPublicLogs(limit = 25) {
     orderBy: { createdAt: 'desc' },
     take: limit,
   });
+
+  return logs.map((log) => ({
+    ...log,
+    metadataJson: null,
+  }));
 }

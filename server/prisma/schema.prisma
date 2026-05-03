@@ -57,6 +57,9 @@ model Agreement {
   agentLogs AgentLog[]
   settlements MilestoneSettlement[]
   auditLogs AuditLog[]
+  comments AgreementComment[]
+  amendments AgreementAmendment[]
+  jobs AgentJob[]
 
   @@index([clientAddress, createdAt])
   @@index([workerAddress, createdAt])
@@ -190,4 +193,65 @@ model MilestoneSettlement {
 
   @@index([agreementId, direction, status, createdAt])
   @@index([milestoneId, direction, createdAt])
+}
+
+model AgreementComment {
+  id            String   @id @default(uuid())
+  agreementId    String
+  authorAddress  String
+  content        String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  agreement Agreement @relation(fields: [agreementId], references: [id])
+
+  @@index([agreementId, createdAt])
+}
+
+model AgreementAmendment {
+  id               String   @id @default(uuid())
+  agreementId       String
+  proposedBy        String
+  status            String   @default("PROPOSED")
+  reason            String?
+  title             String?
+  description       String?
+  deadlineAt        DateTime?
+  disputeWindowSecs Int?
+  releaseMode       String?
+  payoutNetwork     String?
+  workerFiberPubkey String?
+  milestonesJson    String?
+  responseNote      String?
+  respondedAt       DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  agreement Agreement @relation(fields: [agreementId], references: [id])
+
+  @@index([agreementId, status, createdAt])
+}
+
+model AgentJob {
+  id             String    @id @default(uuid())
+  agreementId     String?
+  kind           String
+  status         String    @default("QUEUED")
+  dedupeKey      String?   @unique
+  payloadJson    String?
+  attempts       Int       @default(0)
+  maxAttempts    Int       @default(5)
+  availableAt    DateTime  @default(now())
+  lockedAt       DateTime?
+  lockedBy       String?
+  lastError      String?
+  completedAt    DateTime?
+  deadLetteredAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  agreement Agreement? @relation(fields: [agreementId], references: [id])
+
+  @@index([status, availableAt, createdAt])
+  @@index([agreementId, createdAt])
 }

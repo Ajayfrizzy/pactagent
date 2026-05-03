@@ -15,6 +15,7 @@ export default function HomePage() {
   const signer = ccc.useSigner();
   const walletAddress = useStore((s) => s.walletAddress);
   const authToken = useStore((s) => s.authToken);
+  const isAdmin = useStore((s) => s.isAdmin);
   const [agreementIds, setAgreementIds] = useState<string[]>([]);
   const needsSignIn = Boolean(signer && !authToken);
 
@@ -48,9 +49,16 @@ export default function HomePage() {
           </div>
           <NavbarMenu>
             {walletAddress ? (
-              <Link href="/dashboard" className="text-sm text-gray-400 transition-colors hover:text-white">
-                Dashboard
-              </Link>
+              <>
+                <Link href="/dashboard" className="text-sm text-gray-400 transition-colors hover:text-white">
+                  Dashboard
+                </Link>
+                {isAdmin ? (
+                  <Link href="/admin" className="text-sm text-agent-accent transition-colors hover:text-blue-300">
+                    Admin
+                  </Link>
+                ) : null}
+              </>
             ) : null}
           </NavbarMenu>
         </div>

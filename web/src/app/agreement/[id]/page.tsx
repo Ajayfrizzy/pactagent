@@ -190,6 +190,7 @@ export default function AgreementDetailPage() {
   const hasHydrated = useStore((s) => s.hasHydrated);
   const walletAddress = useStore((s) => s.walletAddress);
   const authToken = useStore((s) => s.authToken);
+  const isAdmin = useStore((s) => s.isAdmin);
   const updateCount = useStore((s) => s.agreementUpdateCount);
   const wsConnected = useStore((s) => s.wsConnected);
 
@@ -214,6 +215,30 @@ export default function AgreementDetailPage() {
   const [replyUrlDraft, setReplyUrlDraft] = useState('');
   const [replyArtifacts, setReplyArtifacts] = useState<DraftArtifact[]>([]);
   const [pendingDisputeReplies, setPendingDisputeReplies] = useState<PendingDisputeReply[]>([]);
+  const [commentContent, setCommentContent] = useState('');
+  const [draftForm, setDraftForm] = useState<null | {
+    title: string;
+    description: string;
+    workerAddress: string;
+    workerFiberPubkey: string;
+    deadlineAt: string;
+    disputeWindowHours: string;
+    proofType: string;
+    reviewerMode: string;
+    releaseMode: string;
+    payoutNetwork: string;
+  }>(null);
+  const [draftMilestones, setDraftMilestones] = useState<Array<{
+    id?: string;
+    title: string;
+    description: string;
+    amount: string;
+  }>>([]);
+  const [amendmentReason, setAmendmentReason] = useState('');
+  const [amendmentTitle, setAmendmentTitle] = useState('');
+  const [amendmentDescription, setAmendmentDescription] = useState('');
+  const [amendmentDeadlineAt, setAmendmentDeadlineAt] = useState('');
+  const [amendmentResponseNote, setAmendmentResponseNote] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -295,6 +320,33 @@ export default function AgreementDetailPage() {
       cancelled = true;
     };
   }, [authToken, hasHydrated, id, updateCount]);
+
+  useEffect(() => {
+    if (!agreement || agreement.status !== 'DRAFT') {
+      setDraftForm(null);
+      setDraftMilestones([]);
+      return;
+    }
+
+    setDraftForm({
+      title: agreement.title || '',
+      description: agreement.description || '',
+      workerAddress: agreement.workerAddress || '',
+      workerFiberPubkey: agreement.workerFiberPubkey || '',
+      deadlineAt: agreement.deadlineAt ? new Date(agreement.deadlineAt).toISOString().slice(0, 16) : '',
+      disputeWindowHours: agreement.disputeWindowSecs ? String(Math.max(1, Math.round(agreement.disputeWindowSecs / 3600))) : '24',
+      proofType: agreement.proofType || 'URL',
+      reviewerMode: agreement.reviewerMode || 'AUTO',
+      releaseMode: agreement.releaseMode || 'PARTIAL',
+      payoutNetwork: agreement.payoutNetwork || 'CKB',
+    });
+    setDraftMilestones((agreement.milestones || []).map((milestone: any) => ({
+      id: milestone.id,
+      title: milestone.title,
+      description: milestone.description,
+      amount: milestone.amount,
+    })));
+  }, [agreement]);
 
   useEffect(() => {
     let cancelled = false;
@@ -638,12 +690,15 @@ export default function AgreementDetailPage() {
           throw new Error('Reconnect your wallet before signing an on-chain escrow settlement.');
         }
 
+        const latestConfig = await api.fetchConfigFresh();
+        setPublicConfig(latestConfig);
+
         if (action === 'APPROVE') {
           const txHash = await sendOnchainEscrowResolution({
             signer,
             agreement,
             milestone: currentMilestone,
-            config: publicConfig || {},
+            config: latestConfig || publicConfig || {},
             direction: 'PAYOUT',
           });
           await api.submitOnchainResolution(id, {
@@ -668,7 +723,7 @@ export default function AgreementDetailPage() {
             signer,
             agreement,
             milestone: currentMilestone,
-            config: publicConfig || {},
+            config: latestConfig || publicConfig || {},
             direction: 'REFUND',
             useTimeout: useTimeoutRefund,
           });
@@ -765,6 +820,138 @@ export default function AgreementDetailPage() {
       setAgreement(updated);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to retry settlement');
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleSaveDraft() {
+    if (!walletAddress || !draftForm) {
+      return;
+    }
+
+    setActionLoading('save-draft');
+    setError(null);
+
+    try {
+      const updated = await api.updateDraftAgreement(id, {
+        title: draftForm.title,
+        description: draftForm.description,
+        workerAddress: draftForm.workerAddress,
+        workerFiberPubkey: draftForm.workerFiberPubkey.trim() || undefined,
+        deadlineAt: new Date(draftForm.deadlineAt).toISOString(),
+        disputeWindowSecs: parseInt(draftForm.disputeWindowHours || '24', 10) * 3600,
+        proofType: draftForm.proofType,
+        reviewerMode: draftForm.reviewerMode,
+        releaseMode: draftForm.releaseMode,
+        payoutNetwork: draftForm.payoutNetwork,
+        milestones: draftMilestones.map((milestone) => ({
+          id: milestone.id,
+          title: milestone.title,
+          description: milestone.description,
+          amount: milestone.amount,
+        })),
+      });
+      setAgreement(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save draft');
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleCancelDraft() {
+    setActionLoading('cancel-draft');
+    setError(null);
+
+    try {
+      const updated = await api.cancelDraftAgreement(id);
+      setAgreement(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to cancel draft');
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleAddComment() {
+    if (!walletAddress || !commentContent.trim()) {
+      return;
+    }
+
+    setActionLoading('comment');
+    setError(null);
+
+    try {
+      const response = await api.addAgreementComment(id, {
+        authorAddress: walletAddress,
+        content: commentContent,
+      });
+      setCommentContent('');
+      applyAgreementPayload(response);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send comment');
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleProposeAmendment() {
+    if (!walletAddress) {
+      return;
+    }
+
+    setActionLoading('amendment');
+    setError(null);
+
+    try {
+      const pendingMilestones = (agreement?.milestones || [])
+        .filter((milestone: any) => milestone.status === 'PENDING')
+        .map((milestone: any) => ({
+          id: milestone.id,
+          title: milestone.title,
+          description: milestone.description,
+          sortOrder: milestone.sortOrder,
+        }));
+
+      const response = await api.proposeAgreementAmendment(id, {
+        proposedBy: walletAddress,
+        reason: amendmentReason.trim() || undefined,
+        title: amendmentTitle.trim() || undefined,
+        description: amendmentDescription.trim() || undefined,
+        deadlineAt: amendmentDeadlineAt ? new Date(amendmentDeadlineAt).toISOString() : undefined,
+        milestones: pendingMilestones,
+      });
+      setAmendmentReason('');
+      setAmendmentTitle('');
+      setAmendmentDescription('');
+      setAmendmentDeadlineAt('');
+      applyAgreementPayload(response);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to propose amendment');
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleRespondToAmendment(amendmentId: string, accept: boolean) {
+    if (!walletAddress) {
+      return;
+    }
+
+    setActionLoading(`amendment-${amendmentId}`);
+    setError(null);
+
+    try {
+      const updated = await api.respondToAgreementAmendment(id, amendmentId, {
+        actorAddress: walletAddress,
+        accept,
+        responseNote: amendmentResponseNote.trim() || undefined,
+      });
+      setAmendmentResponseNote('');
+      setAgreement(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to respond to amendment');
     } finally {
       setActionLoading(null);
     }
@@ -972,7 +1159,16 @@ export default function AgreementDetailPage() {
             <span className="text-gray-600">/</span>
             <span className="truncate text-sm text-gray-400">{agreement.title}</span>
           </div>
-          <NavbarMenu />
+          <NavbarMenu>
+            <Link href="/dashboard" className="text-sm text-gray-400 transition-colors hover:text-white">
+              Dashboard
+            </Link>
+            {isAdmin ? (
+              <Link href="/admin" className="text-sm text-agent-accent transition-colors hover:text-blue-300">
+                Admin
+              </Link>
+            ) : null}
+          </NavbarMenu>
         </div>
       </nav>
 
@@ -1021,6 +1217,17 @@ export default function AgreementDetailPage() {
                   </span>
                 </div>
               </div>
+
+              {(agreement.workflowStage || agreement.nextParticipantAction) && (
+                <div className="mt-4 rounded-lg border border-agent-border bg-agent-bg/60 px-4 py-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    {agreement.workflowStage ? <StatusBadge status={agreement.workflowStage} /> : null}
+                    {agreement.nextParticipantAction ? (
+                      <span className="text-sm text-gray-300">{agreement.nextParticipantAction}</span>
+                    ) : null}
+                  </div>
+                </div>
+              )}
 
               <div className={`mt-4 pt-4 border-t border-agent-border grid gap-4 ${
                 agreement.payoutNetwork === 'FIBER' && agreement.workerFiberPubkey ? 'grid-cols-1 md:grid-cols-4' : 'grid-cols-3'
@@ -1257,6 +1464,155 @@ export default function AgreementDetailPage() {
               </div>
             )}
 
+            <div className="bg-agent-card border border-agent-border rounded-xl p-6">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-white font-semibold">Agreement Thread</h2>
+                  <p className="text-xs text-gray-400 mt-1">Participant comments and coordination outside the dispute workspace.</p>
+                </div>
+                <div className="text-xs text-gray-500">{agreement.comments?.length || 0} messages</div>
+              </div>
+
+              <div className="space-y-3">
+                {(agreement.comments || []).map((comment: any) => (
+                  <div key={comment.id} className="rounded-lg border border-agent-border bg-agent-bg/60 p-4">
+                    <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                      <span className="rounded-full bg-slate-900/60 px-2 py-1 text-gray-300">
+                        {getParticipantLabel(comment.authorAddress, agreement)}
+                      </span>
+                      <span>{new Date(comment.createdAt).toLocaleString()}</span>
+                    </div>
+                    <p className="whitespace-pre-wrap text-sm text-gray-300">{comment.content}</p>
+                  </div>
+                ))}
+              </div>
+
+              {(isClient || isWorker) && (
+                <div className="mt-4">
+                  <textarea
+                    className="w-full bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-agent-accent min-h-[96px]"
+                    placeholder="Message the other participant..."
+                    value={commentContent}
+                    onChange={(e) => setCommentContent(e.target.value)}
+                  />
+                  <button
+                    onClick={handleAddComment}
+                    disabled={actionLoading === 'comment' || !commentContent.trim()}
+                    className="mt-3 rounded-lg border border-agent-border px-4 py-2 text-sm font-medium text-white hover:bg-agent-bg disabled:opacity-50"
+                  >
+                    {actionLoading === 'comment' ? 'Sending...' : 'Send Message'}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {agreement.status !== 'DRAFT' && agreement.status !== 'CANCELLED' && (
+              <div className="bg-agent-card border border-agent-border rounded-xl p-6">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-white font-semibold">Amendment Proposals</h2>
+                    <p className="text-xs text-gray-400 mt-1">Propose post-funding changes and have the counterparty accept or reject them.</p>
+                  </div>
+                  <div className="text-xs text-gray-500">{agreement.amendments?.length || 0} proposals</div>
+                </div>
+
+                {(isClient || isWorker) && (
+                  <div className="mb-5 rounded-lg border border-agent-border bg-agent-bg/60 p-4">
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <input
+                        className="bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white"
+                        value={amendmentTitle}
+                        onChange={(e) => setAmendmentTitle(e.target.value)}
+                        placeholder="Proposed title change (optional)"
+                      />
+                      <input
+                        type="datetime-local"
+                        className="bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white"
+                        value={amendmentDeadlineAt}
+                        onChange={(e) => setAmendmentDeadlineAt(e.target.value)}
+                      />
+                      <textarea
+                        className="md:col-span-2 bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white min-h-[90px]"
+                        value={amendmentDescription}
+                        onChange={(e) => setAmendmentDescription(e.target.value)}
+                        placeholder="Describe the proposed amendment..."
+                      />
+                      <textarea
+                        className="md:col-span-2 bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white min-h-[80px]"
+                        value={amendmentReason}
+                        onChange={(e) => setAmendmentReason(e.target.value)}
+                        placeholder="Why is this amendment needed?"
+                      />
+                    </div>
+                    <button
+                      onClick={handleProposeAmendment}
+                      disabled={actionLoading === 'amendment'}
+                      className="mt-3 rounded-lg bg-agent-accent px-4 py-2 text-sm font-medium text-white hover:bg-blue-600 disabled:opacity-60"
+                    >
+                      {actionLoading === 'amendment' ? 'Submitting...' : 'Propose Amendment'}
+                    </button>
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  {(agreement.amendments || []).map((amendment: any) => {
+                    const canRespond =
+                      walletAddress
+                      && amendment.status === 'PROPOSED'
+                      && walletAddress !== amendment.proposedBy;
+                    return (
+                      <div key={amendment.id} className="rounded-lg border border-agent-border bg-agent-bg/60 p-4">
+                        <div className="mb-2 flex flex-wrap items-center gap-2">
+                          <StatusBadge status={amendment.status} />
+                          <span className="text-xs text-gray-400">
+                            Proposed by {getParticipantLabel(amendment.proposedBy, agreement)} on {new Date(amendment.createdAt).toLocaleString()}
+                          </span>
+                        </div>
+                        {amendment.reason ? (
+                          <p className="mb-2 text-sm text-gray-300 whitespace-pre-wrap">{amendment.reason}</p>
+                        ) : null}
+                        <div className="grid gap-2 text-xs text-gray-400 md:grid-cols-2">
+                          {amendment.title ? <span>Title: {amendment.title}</span> : null}
+                          {amendment.description ? <span>Description updated</span> : null}
+                          {amendment.deadlineAt ? <span>Deadline: {new Date(amendment.deadlineAt).toLocaleString()}</span> : null}
+                          {amendment.releaseMode ? <span>Release mode: {amendment.releaseMode}</span> : null}
+                        </div>
+                        {amendment.responseNote ? (
+                          <p className="mt-3 text-sm text-gray-400 whitespace-pre-wrap">{amendment.responseNote}</p>
+                        ) : null}
+                        {canRespond ? (
+                          <div className="mt-3">
+                            <textarea
+                              className="w-full bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white min-h-[80px]"
+                              value={amendmentResponseNote}
+                              onChange={(e) => setAmendmentResponseNote(e.target.value)}
+                              placeholder="Optional response note..."
+                            />
+                            <div className="mt-3 flex gap-3">
+                              <button
+                                onClick={() => handleRespondToAmendment(amendment.id, true)}
+                                disabled={actionLoading === `amendment-${amendment.id}`}
+                                className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-60"
+                              >
+                                Accept
+                              </button>
+                              <button
+                                onClick={() => handleRespondToAmendment(amendment.id, false)}
+                                disabled={actionLoading === `amendment-${amendment.id}`}
+                                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
+                              >
+                                Reject
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {error && (
               <div className="bg-red-900/30 border border-red-800 rounded-lg px-4 py-3 text-sm text-red-300">
                 {error}
@@ -1308,6 +1664,124 @@ export default function AgreementDetailPage() {
                   className="mt-3 rounded-lg border border-agent-border px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-agent-bg disabled:opacity-60"
                 >
                   {retrySettlementLoading ? 'Retrying...' : 'Retry Settlement'}
+                </button>
+              </div>
+            )}
+
+            {agreement.status === 'DRAFT' && isClient && draftForm && (
+              <div className="bg-agent-card border border-agent-border rounded-xl p-6">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-white font-semibold">Edit Draft Before Funding</h3>
+                    <p className="text-sm text-gray-400 mt-1">
+                      Update the draft, reorder milestones, or cancel it before the client sends funds.
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleCancelDraft}
+                    disabled={actionLoading === 'cancel-draft'}
+                    className="rounded-lg border border-red-700/50 px-4 py-2 text-sm text-red-300 hover:bg-red-950/20 disabled:opacity-60"
+                  >
+                    {actionLoading === 'cancel-draft' ? 'Cancelling...' : 'Cancel Draft'}
+                  </button>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <input
+                    className="bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white"
+                    value={draftForm.title}
+                    onChange={(e) => setDraftForm((prev) => prev ? { ...prev, title: e.target.value } : prev)}
+                    placeholder="Agreement title"
+                  />
+                  <input
+                    className="bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white"
+                    value={draftForm.workerAddress}
+                    onChange={(e) => setDraftForm((prev) => prev ? { ...prev, workerAddress: e.target.value } : prev)}
+                    placeholder="Worker address"
+                  />
+                  <textarea
+                    className="md:col-span-2 bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white min-h-[100px]"
+                    value={draftForm.description}
+                    onChange={(e) => setDraftForm((prev) => prev ? { ...prev, description: e.target.value } : prev)}
+                    placeholder="Agreement description"
+                  />
+                  <input
+                    type="datetime-local"
+                    className="bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white"
+                    value={draftForm.deadlineAt}
+                    onChange={(e) => setDraftForm((prev) => prev ? { ...prev, deadlineAt: e.target.value } : prev)}
+                  />
+                  <input
+                    type="number"
+                    className="bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white"
+                    value={draftForm.disputeWindowHours}
+                    onChange={(e) => setDraftForm((prev) => prev ? { ...prev, disputeWindowHours: e.target.value } : prev)}
+                    placeholder="Dispute window (hours)"
+                  />
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  {draftMilestones.map((milestone, index) => (
+                    <div key={milestone.id || index} className="rounded-lg border border-agent-border bg-agent-bg/60 p-4">
+                      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-sm font-medium text-white">Milestone {index + 1}</span>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            disabled={index === 0}
+                            onClick={() => setDraftMilestones((prev) => {
+                              const next = [...prev];
+                              [next[index - 1], next[index]] = [next[index], next[index - 1]];
+                              return next;
+                            })}
+                            className="rounded-lg border border-agent-border px-3 py-1.5 text-xs text-gray-300 disabled:opacity-40"
+                          >
+                            Up
+                          </button>
+                          <button
+                            type="button"
+                            disabled={index === draftMilestones.length - 1}
+                            onClick={() => setDraftMilestones((prev) => {
+                              const next = [...prev];
+                              [next[index], next[index + 1]] = [next[index + 1], next[index]];
+                              return next;
+                            })}
+                            className="rounded-lg border border-agent-border px-3 py-1.5 text-xs text-gray-300 disabled:opacity-40"
+                          >
+                            Down
+                          </button>
+                        </div>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <input
+                          className="bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white"
+                          value={milestone.title}
+                          onChange={(e) => setDraftMilestones((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, title: e.target.value } : item))}
+                          placeholder="Milestone title"
+                        />
+                        <input
+                          className="bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white"
+                          value={shannonsToCKB(milestone.amount)}
+                          onChange={(e) => setDraftMilestones((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, amount: ckbToShannons(e.target.value || '0').toString() } : item))}
+                          placeholder="Amount in CKB"
+                        />
+                        <textarea
+                          className="md:col-span-2 bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white min-h-[80px]"
+                          value={milestone.description}
+                          onChange={(e) => setDraftMilestones((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, description: e.target.value } : item))}
+                          placeholder="Milestone description"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <button
+                  onClick={handleSaveDraft}
+                  disabled={actionLoading === 'save-draft'}
+                  className="mt-4 rounded-lg bg-agent-accent px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-600 disabled:opacity-60"
+                >
+                  {actionLoading === 'save-draft' ? 'Saving Draft...' : 'Save Draft Changes'}
                 </button>
               </div>
             )}
