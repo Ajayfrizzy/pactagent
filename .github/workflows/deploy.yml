@@ -7,9 +7,10 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest   
+    runs-on: ubuntu-latest
+
     steps:
-      - name: Deploy secrets
+      - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -21,30 +22,22 @@ jobs:
           script: |
             set -e
 
-            echo "Connected to server"
-
             git config --global --add safe.directory /home/pactagent
 
             cd /home/pactagent
 
-            echo "Pulling latest code..."
             git fetch origin
             git reset --hard origin/main
 
-            echo "Building backend..."
             cd server
             npm install
             npx prisma generate
             npm run build
             pm2 restart pactagent-server || pm2 start dist/index.js --name pactagent-server
 
-            echo "Building frontend..."
             cd ../web
             npm install
             npm run build
             pm2 restart pactagent-web || pm2 start npm --name pactagent-web -- start
 
-            echo "Saving PM2 process list..."
             pm2 save
-
-            echo "Deployment completed successfully"
