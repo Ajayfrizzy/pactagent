@@ -335,6 +335,8 @@ router.post('/import-bounty', actionRateLimit, async (req: Request, res: Respons
 
     const agreement = await agreementService.createAgreement({
       ...data.agreement,
+      reviewerMode: 'MANUAL',
+      releaseMode: 'PARTIAL',
       sourceMetadata: {
         sourceType: data.sourceType,
         sourceLabel: data.sourceLabel,

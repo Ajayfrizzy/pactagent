@@ -4,10 +4,18 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { NavbarMenu } from '@/components/NavbarMenu';
-import { AgentIcon, ArrowLeftIcon, DocumentTextIcon } from '@/components/Icons';
-import { ckbToShannons } from '@/lib/ckb';
+import { AgentIcon, ArrowLeftIcon, DocumentTextIcon, PlusIcon, XCircleIcon } from '@/components/Icons';
+import { ckbToShannons, MIN_CELL_CAPACITY, shannonsToCKB } from '@/lib/ckb';
 import { fetchConfig, importBountyAgreement } from '@/lib/api';
 import { useStore } from '@/lib/store';
+
+type MilestoneDraft = {
+  title: string;
+  description: string;
+  amountCkb: string;
+};
+
+const MIN_MILESTONE_CKB = Number(shannonsToCKB(MIN_CELL_CAPACITY.toString()));
 
 export default function ImportBountyPage() {
   const router = useRouter();
@@ -16,6 +24,13 @@ export default function ImportBountyPage() {
   const [publicConfig, setPublicConfig] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [milestones, setMilestones] = useState<MilestoneDraft[]>([
+    {
+      title: 'Milestone 1',
+      description: 'Define the first grant deliverable and what the reviewer should inspect.',
+      amountCkb: '',
+    },
+  ]);
   const [form, setForm] = useState({
     sourceType: 'BOUNTY',
     sourceLabel: '',
@@ -32,12 +47,7 @@ export default function ImportBountyPage() {
     deadlineDays: '7',
     disputeWindowHours: '24',
     proofType: 'URL',
-    reviewerMode: 'AUTO',
-    releaseMode: 'PARTIAL',
     payoutNetwork: 'CKB',
-    milestoneTitle: 'Initial delivery',
-    milestoneDescription: 'Complete the bounty deliverable and submit proof.',
-    milestoneAmountCkb: '',
   });
 
   useEffect(() => {
@@ -53,10 +63,55 @@ export default function ImportBountyPage() {
     void load();
   }, []);
 
+  function addMilestone() {
+    setMilestones((prev) => [
+      ...prev,
+      {
+        title: `Milestone ${prev.length + 1}`,
+        description: 'Describe the next grant deliverable and the review expectation.',
+        amountCkb: '',
+      },
+    ]);
+  }
+
+  function removeMilestone(index: number) {
+    setMilestones((prev) => prev.filter((_, currentIndex) => currentIndex !== index));
+  }
+
+  function updateMilestone(index: number, field: keyof MilestoneDraft, value: string) {
+    setMilestones((prev) =>
+      prev.map((milestone, currentIndex) =>
+        currentIndex === index ? { ...milestone, [field]: value } : milestone,
+      ),
+    );
+  }
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (!walletAddress || !authToken) {
       setError('Connect and authenticate your wallet first.');
+      return;
+    }
+
+    if (!milestones.length) {
+      setError('Add at least one milestone to the grant.');
+      return;
+    }
+
+    const invalidMilestone = milestones.find((milestone) =>
+      !milestone.title.trim()
+      || !milestone.description.trim()
+      || !milestone.amountCkb.trim()
+      || !Number.isFinite(Number(milestone.amountCkb))
+      || Number(milestone.amountCkb) < MIN_MILESTONE_CKB,
+    );
+    if (invalidMilestone) {
+      setError(`Each milestone needs a title, description, and at least ${MIN_MILESTONE_CKB} CKB.`);
+      return;
+    }
+
+    if (form.payoutNetwork === 'FIBER' && !form.workerFiberPubkey.trim()) {
+      setError('Fiber payouts require the worker Fiber public key.');
       return;
     }
 
@@ -79,24 +134,22 @@ export default function ImportBountyPage() {
           description: form.agreementDescription || form.bountyDescription,
           clientAddress: walletAddress,
           workerAddress: form.workerAddress,
-          workerFiberPubkey: form.workerFiberPubkey || undefined,
+          workerFiberPubkey: form.workerFiberPubkey.trim() || undefined,
           deadlineAt,
           disputeWindowSecs: Number(form.disputeWindowHours) * 3600,
           proofType: form.proofType,
-          reviewerMode: form.reviewerMode,
-          releaseMode: form.releaseMode,
+          reviewerMode: 'MANUAL',
+          releaseMode: 'PARTIAL',
           payoutNetwork: form.payoutNetwork,
           escrowModel:
             publicConfig?.onchainEscrowReady && form.payoutNetwork === 'CKB'
               ? 'ONCHAIN_LOCK'
               : 'TREASURY_BRIDGE',
-          milestones: [
-            {
-              title: form.milestoneTitle,
-              description: form.milestoneDescription,
-              amount: ckbToShannons(form.milestoneAmountCkb).toString(),
-            },
-          ],
+          milestones: milestones.map((milestone) => ({
+            title: milestone.title,
+            description: milestone.description,
+            amount: ckbToShannons(milestone.amountCkb).toString(),
+          })),
         },
       });
 
@@ -110,6 +163,7 @@ export default function ImportBountyPage() {
 
   const inputClass =
     'w-full rounded-lg border border-agent-border bg-agent-bg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:border-agent-accent focus:outline-none';
+  const totalGrantCkb = milestones.reduce((sum, milestone) => sum + (Number(milestone.amountCkb) || 0), 0);
 
   return (
     <div className="min-h-screen">
@@ -140,7 +194,9 @@ export default function ImportBountyPage() {
               DAO / Bounty Import
             </div>
             <h1 className="text-2xl font-bold text-white">Import a Bounty into PactAgent</h1>
-            <p className="mt-2 text-sm text-gray-400">Attach source metadata, create the draft agreement, and preserve attribution on the deal.</p>
+            <p className="mt-2 text-sm text-gray-400">
+              Attach source metadata, define the full milestone grant, lock the total once, and release each milestone only after manual reviewer approval.
+            </p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -160,6 +216,13 @@ export default function ImportBountyPage() {
             <textarea className={`${inputClass} min-h-24`} value={form.bountyDescription} onChange={(e) => setForm((prev) => ({ ...prev, bountyDescription: e.target.value }))} placeholder="Bounty description" />
             <textarea className={`${inputClass} min-h-20`} value={form.governanceNotes} onChange={(e) => setForm((prev) => ({ ...prev, governanceNotes: e.target.value }))} placeholder="Governance notes (optional)" />
 
+            <div className="rounded-2xl border border-agent-border bg-agent-bg/40 p-5">
+              <h2 className="text-lg font-semibold text-white">Imported Agreement Terms</h2>
+              <p className="mt-2 text-sm text-gray-400">
+                This section defines the real PactAgent grant contract. The sponsor funds the full total after creation, then each milestone is reviewed manually and paid individually.
+              </p>
+            </div>
+
             <div className="grid gap-4 md:grid-cols-2">
               <input className={inputClass} value={form.agreementTitle} onChange={(e) => setForm((prev) => ({ ...prev, agreementTitle: e.target.value }))} placeholder="Agreement title" />
               <input className={inputClass} value={form.workerAddress} onChange={(e) => setForm((prev) => ({ ...prev, workerAddress: e.target.value }))} placeholder="Worker wallet address" />
@@ -167,14 +230,80 @@ export default function ImportBountyPage() {
             <textarea className={`${inputClass} min-h-20`} value={form.agreementDescription} onChange={(e) => setForm((prev) => ({ ...prev, agreementDescription: e.target.value }))} placeholder="Agreement description" />
             <input className={inputClass} value={form.workerFiberPubkey} onChange={(e) => setForm((prev) => ({ ...prev, workerFiberPubkey: e.target.value }))} placeholder="Worker Fiber public key (optional)" />
 
-            <div className="grid gap-4 md:grid-cols-3">
-              <input className={inputClass} value={form.milestoneTitle} onChange={(e) => setForm((prev) => ({ ...prev, milestoneTitle: e.target.value }))} placeholder="Milestone title" />
-              <input className={inputClass} value={form.milestoneAmountCkb} onChange={(e) => setForm((prev) => ({ ...prev, milestoneAmountCkb: e.target.value }))} placeholder="Milestone amount (CKB)" />
-              <input className={inputClass} value={form.deadlineDays} onChange={(e) => setForm((prev) => ({ ...prev, deadlineDays: e.target.value }))} placeholder="Deadline days" />
-            </div>
-            <textarea className={`${inputClass} min-h-20`} value={form.milestoneDescription} onChange={(e) => setForm((prev) => ({ ...prev, milestoneDescription: e.target.value }))} placeholder="Milestone description" />
+            <div className="rounded-2xl border border-agent-border bg-agent-bg/40 p-5">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-white">Grant Milestones</h2>
+                  <p className="mt-1 text-sm text-gray-400">
+                    Define every deliverable the builder must complete. The total below is what the sponsor will fund once after the agreement is created.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={addMilestone}
+                  className="inline-flex items-center gap-2 rounded-xl border border-agent-accent/40 bg-agent-accent/10 px-4 py-2 text-sm font-medium text-agent-accent hover:bg-agent-accent/20"
+                >
+                  <PlusIcon className="h-4 w-4" />
+                  Add Milestone
+                </button>
+              </div>
 
-            <div className="grid gap-4 md:grid-cols-4">
+              <div className="mt-4 rounded-xl border border-agent-border bg-agent-card/50 p-4">
+                <div className="text-xs uppercase tracking-[0.16em] text-gray-500">Total Grant Amount To Lock Upfront</div>
+                <div className="mt-2 text-2xl font-bold text-white">{totalGrantCkb || 0} CKB</div>
+                <p className="mt-1 text-sm text-gray-400">
+                  PactAgent will release this total progressively, one approved milestone at a time.
+                </p>
+              </div>
+
+              <div className="mt-4 space-y-4">
+                {milestones.map((milestone, index) => (
+                  <div key={`${milestone.title}-${index}`} className="rounded-2xl border border-agent-border bg-agent-card/50 p-4">
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-base font-semibold text-white">Milestone {index + 1}</h3>
+                        <p className="text-xs text-gray-500">Reviewer-approved payout checkpoint</p>
+                      </div>
+                      {milestones.length > 1 ? (
+                        <button
+                          type="button"
+                          onClick={() => removeMilestone(index)}
+                          className="inline-flex items-center gap-2 rounded-lg border border-red-700/40 px-3 py-2 text-xs text-red-300 hover:bg-red-950/20"
+                        >
+                          <XCircleIcon className="h-4 w-4" />
+                          Remove
+                        </button>
+                      ) : null}
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
+                      <input
+                        className={inputClass}
+                        value={milestone.title}
+                        onChange={(e) => updateMilestone(index, 'title', e.target.value)}
+                        placeholder="Milestone title"
+                      />
+                      <input
+                        className={inputClass}
+                        value={milestone.amountCkb}
+                        onChange={(e) => updateMilestone(index, 'amountCkb', e.target.value)}
+                        placeholder={`Milestone amount (min ${MIN_MILESTONE_CKB} CKB)`}
+                      />
+                    </div>
+
+                    <textarea
+                      className={`${inputClass} mt-4 min-h-24`}
+                      value={milestone.description}
+                      onChange={(e) => updateMilestone(index, 'description', e.target.value)}
+                      placeholder="Describe exactly what the builder must ship and what the reviewer should verify."
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-[0.9fr_0.9fr_1.1fr_1.1fr]">
+              <input className={inputClass} value={form.deadlineDays} onChange={(e) => setForm((prev) => ({ ...prev, deadlineDays: e.target.value }))} placeholder="Deadline days" />
               <select className={inputClass} value={form.disputeWindowHours} onChange={(e) => setForm((prev) => ({ ...prev, disputeWindowHours: e.target.value }))}>
                 <option value="24">24h dispute</option>
                 <option value="48">48h dispute</option>
@@ -185,15 +314,17 @@ export default function ImportBountyPage() {
                 <option value="TEXT">Text proof</option>
                 <option value="FILE_HASH">File hash</option>
               </select>
-              <select className={inputClass} value={form.reviewerMode} onChange={(e) => setForm((prev) => ({ ...prev, reviewerMode: e.target.value }))}>
-                <option value="AUTO">Auto review</option>
-                <option value="HYBRID">Hybrid review</option>
-                <option value="MANUAL">Manual review</option>
-              </select>
               <select className={inputClass} value={form.payoutNetwork} onChange={(e) => setForm((prev) => ({ ...prev, payoutNetwork: e.target.value }))}>
                 <option value="CKB">CKB</option>
                 <option value="FIBER">Fiber</option>
               </select>
+            </div>
+
+            <div className="rounded-2xl border border-amber-800/40 bg-amber-950/20 p-4">
+              <div className="text-sm font-medium text-amber-200">Review Mode: Manual only</div>
+              <p className="mt-1 text-sm text-amber-100/80">
+                Imported DAO and bounty agreements always require human review before each milestone payout. Auto and hybrid review are intentionally disabled for grant-style funding.
+              </p>
             </div>
 
             {error ? <div className="rounded-xl border border-red-800 bg-red-900/30 p-4 text-sm text-red-200">{error}</div> : null}
