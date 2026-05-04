@@ -60,6 +60,8 @@ export const config = {
   authRateLimitMax: parseNumber(process.env.AUTH_RATE_LIMIT_MAX, 20),
   actionRateLimitWindowMs: parseNumber(process.env.ACTION_RATE_LIMIT_WINDOW_MS, 60 * 1000),
   actionRateLimitMax: parseNumber(process.env.ACTION_RATE_LIMIT_MAX, 12),
+  webhookTimeoutMs: parseNumber(process.env.WEBHOOK_TIMEOUT_MS, 10_000),
+  webhookMaxAttempts: parseNumber(process.env.WEBHOOK_MAX_ATTEMPTS, 5),
 
   onchainEscrowEnabled: process.env.ONCHAIN_ESCROW_ENABLED === 'true',
   onchainLockCodeHash: process.env.ONCHAIN_LOCK_CODE_HASH || '',

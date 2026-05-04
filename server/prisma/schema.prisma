@@ -60,12 +60,132 @@ model Agreement {
   comments AgreementComment[]
   amendments AgreementAmendment[]
   jobs AgentJob[]
+  source AgreementSource?
+  webhookDeliveries WebhookDelivery[]
 
   @@index([clientAddress, createdAt])
   @@index([workerAddress, createdAt])
   @@index([status, createdAt])
   @@index([settlementStatus, createdAt])
   @@index([deadlineAt])
+}
+
+model PublicProfile {
+  id            String   @id @default(uuid())
+  walletAddress String   @unique
+  handle        String   @unique
+  displayName   String?
+  bio           String?
+  avatarUrl     String?
+  skillsJson    String?
+  linksJson     String?
+  fiberPubkey   String?
+  visibility    String   @default("PUBLIC") // PUBLIC | PRIVATE
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([visibility, handle])
+  @@index([walletAddress, visibility])
+}
+
+model ReputationSnapshot {
+  id                         String   @id @default(uuid())
+  walletAddress              String   @unique
+  completedAgreements        Int      @default(0)
+  totalFundedAmount          String   @default("0")
+  totalPaidAmount            String   @default("0")
+  payoutSuccessRate          Float    @default(0)
+  disputeRate                Float    @default(0)
+  repeatCounterpartyCount    Int      @default(0)
+  onTimeMilestoneRate        Float    @default(0)
+  sourceAgreementCount       Int      @default(0)
+  updatedAt                  DateTime @updatedAt
+
+  @@index([walletAddress, updatedAt])
+}
+
+model InviteLink {
+  id                  String   @id @default(uuid())
+  token               String   @unique
+  createdByAddress    String
+  creatorRole         String   // CLIENT | WORKER
+  targetRole          String   // CLIENT | WORKER
+  title               String?
+  description         String?
+  agreementTemplateJson String
+  expiresAt           DateTime?
+  maxUses             Int      @default(1)
+  useCount            Int      @default(0)
+  acceptedByAddress   String?
+  acceptedAt          DateTime?
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([createdByAddress, createdAt])
+  @@index([isActive, expiresAt])
+}
+
+model AgreementSource {
+  id                String   @id @default(uuid())
+  agreementId       String   @unique
+  sourceType        String   // DAO | BOUNTY
+  sourceLabel       String
+  externalUrl       String
+  sourceReferenceId String?
+  sponsorName       String?
+  bountyTitle       String
+  bountyDescription String?
+  governanceNotes   String?
+  createdByAddress  String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  agreement Agreement @relation(fields: [agreementId], references: [id])
+
+  @@index([sourceType, createdAt])
+  @@index([createdByAddress, createdAt])
+}
+
+model WebhookEndpoint {
+  id             String   @id @default(uuid())
+  ownerAddress   String
+  label          String?
+  targetUrl      String
+  eventTypesJson String
+  signingSecret  String
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  deliveries WebhookDelivery[]
+
+  @@index([ownerAddress, createdAt])
+  @@index([isActive, createdAt])
+}
+
+model WebhookDelivery {
+  id           String    @id @default(uuid())
+  endpointId    String
+  agreementId   String?
+  eventType     String
+  payloadJson   String
+  payloadHash   String
+  status        String    @default("PENDING") // PENDING | DELIVERED | FAILED | RETRY
+  statusCode    Int?
+  attempts      Int       @default(0)
+  lastError     String?
+  nextRetryAt   DateTime?
+  deliveredAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  endpoint  WebhookEndpoint @relation(fields: [endpointId], references: [id])
+  agreement Agreement?      @relation(fields: [agreementId], references: [id])
+
+  @@index([endpointId, createdAt])
+  @@index([status, nextRetryAt, createdAt])
+  @@index([agreementId, createdAt])
 }
 
 model Milestone {

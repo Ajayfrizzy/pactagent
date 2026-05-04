@@ -239,6 +239,7 @@ export default function AgreementDetailPage() {
   const [amendmentDescription, setAmendmentDescription] = useState('');
   const [amendmentDeadlineAt, setAmendmentDeadlineAt] = useState('');
   const [amendmentResponseNote, setAmendmentResponseNote] = useState('');
+  const [inviteFeedback, setInviteFeedback] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -874,6 +875,55 @@ export default function AgreementDetailPage() {
     }
   }
 
+  async function handleCreateInviteFromDraft() {
+    if (!walletAddress || !agreement) {
+      return;
+    }
+
+    setActionLoading('draft-invite');
+    setError(null);
+    setInviteFeedback(null);
+
+    try {
+      const invite = await api.createInvite({
+        createdByAddress: walletAddress,
+        creatorRole: 'CLIENT',
+        targetRole: 'WORKER',
+        title: `${agreement.title} worker invite`,
+        description: agreement.description,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        agreementTemplate: {
+          title: draftForm?.title || agreement.title,
+          description: draftForm?.description || agreement.description,
+          deadlineAt: new Date(draftForm?.deadlineAt || agreement.deadlineAt).toISOString(),
+          disputeWindowSecs: parseInt(
+            draftForm?.disputeWindowHours || String((agreement.disputeWindowSecs || 86400) / 3600),
+            10,
+          ) * 3600,
+          proofType: draftForm?.proofType || agreement.proofType,
+          reviewerMode: draftForm?.reviewerMode || agreement.reviewerMode,
+          releaseMode: draftForm?.releaseMode || agreement.releaseMode,
+          payoutNetwork: draftForm?.payoutNetwork || agreement.payoutNetwork,
+          escrowModel: agreement.escrowModel,
+          workerFiberPubkey: draftForm?.workerFiberPubkey?.trim() || agreement.workerFiberPubkey || undefined,
+          milestones: (draftMilestones.length ? draftMilestones : agreement.milestones || []).map((milestone: any) => ({
+            title: milestone.title,
+            description: milestone.description,
+            amount: milestone.amount,
+          })),
+        },
+      });
+
+      const inviteUrl = `${window.location.origin}/invites/${invite.token}`;
+      await navigator.clipboard.writeText(inviteUrl);
+      setInviteFeedback('Invite link copied to clipboard.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create invite');
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
   async function handleAddComment() {
     if (!walletAddress || !commentContent.trim()) {
       return;
@@ -1430,6 +1480,40 @@ export default function AgreementDetailPage() {
               </div>
             )}
 
+            {agreement.source ? (
+              <div className="bg-agent-card border border-agent-border rounded-xl p-6">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-white font-semibold">Source Attribution</h2>
+                    <p className="text-xs text-gray-400 mt-1">This agreement was created from DAO or bounty source metadata.</p>
+                  </div>
+                  <StatusBadge status={agreement.source.sourceType} />
+                </div>
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4">
+                    <div className="text-xs uppercase tracking-wide text-gray-500">Source Label</div>
+                    <div className="mt-2 text-sm text-white">{agreement.source.sourceLabel}</div>
+                  </div>
+                  <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4">
+                    <div className="text-xs uppercase tracking-wide text-gray-500">Sponsor</div>
+                    <div className="mt-2 text-sm text-white">{agreement.source.sponsorName || 'Not provided'}</div>
+                  </div>
+                  <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4 md:col-span-2">
+                    <div className="text-xs uppercase tracking-wide text-gray-500">External URL</div>
+                    <a href={agreement.source.externalUrl} target="_blank" rel="noreferrer" className="mt-2 block break-all text-sm text-agent-accent hover:text-blue-300">
+                      {agreement.source.externalUrl}
+                    </a>
+                  </div>
+                  {agreement.source.governanceNotes ? (
+                    <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4 md:col-span-2">
+                      <div className="text-xs uppercase tracking-wide text-gray-500">Governance Notes</div>
+                      <div className="mt-2 whitespace-pre-wrap text-sm text-gray-300">{agreement.source.governanceNotes}</div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
             {auditLogs.length > 0 && (
               <div className="bg-agent-card border border-agent-border rounded-xl p-6">
                 <div className="flex items-center justify-between mb-4">
@@ -1782,6 +1866,31 @@ export default function AgreementDetailPage() {
                   className="mt-4 rounded-lg bg-agent-accent px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-600 disabled:opacity-60"
                 >
                   {actionLoading === 'save-draft' ? 'Saving Draft...' : 'Save Draft Changes'}
+                </button>
+              </div>
+            )}
+
+            {agreement.status === 'DRAFT' && isClient && (
+              <div className="bg-agent-card border border-agent-border rounded-xl p-6">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-white font-semibold">Invite a Worker</h3>
+                    <p className="text-sm text-gray-400 mt-1">
+                      Create a shareable invite link from this draft. The link is copied automatically once created.
+                    </p>
+                  </div>
+                </div>
+                {inviteFeedback ? (
+                  <div className="mb-4 rounded-lg border border-emerald-800 bg-emerald-900/20 px-3 py-2 text-sm text-emerald-200">
+                    {inviteFeedback}
+                  </div>
+                ) : null}
+                <button
+                  onClick={handleCreateInviteFromDraft}
+                  disabled={actionLoading === 'draft-invite'}
+                  className="rounded-lg border border-agent-accent/40 bg-agent-accent/10 px-4 py-2 text-sm font-medium text-agent-accent hover:bg-agent-accent/20 disabled:opacity-60"
+                >
+                  {actionLoading === 'draft-invite' ? 'Creating invite...' : 'Create Worker Invite Link'}
                 </button>
               </div>
             )}

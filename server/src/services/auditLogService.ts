@@ -1,5 +1,6 @@
 import { v4 as uuid } from 'uuid';
 import { prisma } from '../db';
+import { enqueueWebhookEventsForAuditLog } from './webhookService';
 
 export async function createAuditLog(params: {
   agreementId?: string | null;
@@ -10,7 +11,7 @@ export async function createAuditLog(params: {
   resourceId: string;
   metadata?: Record<string, unknown>;
 }) {
-  return prisma.auditLog.create({
+  const log = await prisma.auditLog.create({
     data: {
       id: uuid(),
       agreementId: params.agreementId ?? null,
@@ -22,6 +23,12 @@ export async function createAuditLog(params: {
       metadataJson: params.metadata ? JSON.stringify(params.metadata) : null,
     },
   });
+
+  void enqueueWebhookEventsForAuditLog(log).catch((error) => {
+    console.error('[WEBHOOK] Failed to enqueue events from audit log:', error);
+  });
+
+  return log;
 }
 
 export async function getAuditLogsForAgreement(agreementId: string, limit = 100) {

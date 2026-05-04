@@ -7,7 +7,7 @@ import { AgentLogPanel } from '@/components/AgentLogPanel';
 import { StatusBadge, NetworkBadge } from '@/components/StatusBadge';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useStore } from '@/lib/store';
-import { fetchAgreements } from '@/lib/api';
+import { createInvite, fetchAgreements } from '@/lib/api';
 import { shannonsToCKB } from '@/lib/ckb';
 import {
   AgentIcon,
@@ -31,6 +31,7 @@ export default function DashboardPage() {
   const [agreements, setAgreements] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [inviteMessage, setInviteMessage] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -115,6 +116,51 @@ export default function DashboardPage() {
     ],
     [agreements.length, stats.activeCount, stats.reviewCount, stats.totalEscrow]
   );
+
+  async function handleCreateInvite(event: React.MouseEvent, agreement: any) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!walletAddress) {
+      setError('Connect and authenticate your wallet first.');
+      return;
+    }
+
+    try {
+      const invite = await createInvite({
+        createdByAddress: walletAddress,
+        creatorRole: 'CLIENT',
+        targetRole: 'WORKER',
+        title: `${agreement.title} worker invite`,
+        description: agreement.description,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        agreementTemplate: {
+          title: agreement.title,
+          description: agreement.description,
+          deadlineAt: agreement.deadlineAt,
+          disputeWindowSecs: agreement.disputeWindowSecs,
+          proofType: agreement.proofType,
+          reviewerMode: agreement.reviewerMode,
+          releaseMode: agreement.releaseMode,
+          payoutNetwork: agreement.payoutNetwork,
+          escrowModel: agreement.escrowModel,
+          workerFiberPubkey: agreement.workerFiberPubkey || undefined,
+          milestones: (agreement.milestones || []).map((milestone: any) => ({
+            title: milestone.title,
+            description: milestone.description,
+            amount: milestone.amount,
+          })),
+        },
+      });
+
+      const inviteUrl = `${window.location.origin}/invites/${invite.token}`;
+      await navigator.clipboard.writeText(inviteUrl);
+      setInviteMessage(`Copied invite link for "${agreement.title}"`);
+      window.setTimeout(() => setInviteMessage(null), 4000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create invite');
+    }
+  }
 
   return (
     <div className="min-h-screen">
@@ -263,6 +309,11 @@ export default function DashboardPage() {
                 </div>
               ) : (
                 <div className="space-y-4">
+                  {inviteMessage ? (
+                    <div className="rounded-xl border border-emerald-800 bg-emerald-900/20 p-4 text-sm text-emerald-200">
+                      {inviteMessage}
+                    </div>
+                  ) : null}
                   {agreements.map((ag) => {
                     const paidMilestones =
                       ag.milestones?.filter((milestone: any) => milestone.status === 'PAID').length ?? 0;
@@ -296,6 +347,20 @@ export default function DashboardPage() {
                           <span>Mode {ag.reviewerMode}</span>
                           <span>{new Date(ag.deadlineAt).toLocaleDateString()}</span>
                         </div>
+                        {ag.status === 'DRAFT' ? (
+                          <div className="mt-4 flex flex-wrap gap-3">
+                            <button
+                              type="button"
+                              onClick={(event) => void handleCreateInvite(event, ag)}
+                              className="rounded-lg border border-agent-accent/40 bg-agent-accent/10 px-3 py-2 text-xs font-medium text-agent-accent hover:bg-agent-accent/20"
+                            >
+                              Create Worker Invite
+                            </button>
+                            <span className="self-center text-xs text-gray-500">
+                              Generates a shareable link and copies it to your clipboard.
+                            </span>
+                          </div>
+                        ) : null}
                       </Link>
                     );
                   })}
@@ -306,6 +371,20 @@ export default function DashboardPage() {
 
           <div className="space-y-6">
             <section className="rounded-2xl border border-agent-border bg-agent-card/70 p-4 sm:p-5">
+              <div className="mb-4 rounded-xl border border-agent-border bg-agent-bg/50 p-4">
+                <h3 className="text-sm font-semibold text-white">Marketplace Setup</h3>
+                <div className="mt-3 flex flex-wrap gap-3 text-sm">
+                  <Link href="/settings/profile" className="text-agent-accent hover:text-blue-300">
+                    Edit public profile
+                  </Link>
+                  <Link href="/settings/webhooks" className="text-agent-accent hover:text-blue-300">
+                    Manage webhooks
+                  </Link>
+                  <Link href="/agreement/import-bounty" className="text-agent-accent hover:text-blue-300">
+                    Import DAO / bounty
+                  </Link>
+                </div>
+              </div>
               <h2 className="mb-3 flex items-center gap-2 text-base font-semibold text-white sm:text-lg">
                 <span className="h-2 w-2 animate-pulse rounded-full bg-green-400" />
                 Agent Activity

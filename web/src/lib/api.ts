@@ -168,6 +168,41 @@ export async function createAgreement(data: {
   });
 }
 
+export async function importBountyAgreement(data: {
+  sourceType: 'DAO' | 'BOUNTY';
+  sourceLabel: string;
+  externalUrl: string;
+  sourceReferenceId?: string;
+  sponsorName?: string;
+  bountyTitle: string;
+  bountyDescription?: string;
+  governanceNotes?: string;
+  agreement: {
+    title: string;
+    description: string;
+    clientAddress: string;
+    workerAddress: string;
+    workerFiberPubkey?: string;
+    deadlineAt: string;
+    disputeWindowSecs: number;
+    proofType: string;
+    reviewerMode: string;
+    releaseMode: string;
+    payoutNetwork: string;
+    escrowModel?: string;
+    milestones: Array<{
+      title: string;
+      description: string;
+      amount: string;
+    }>;
+  };
+}) {
+  return request<any>('/agreements/import-bounty', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
 export async function updateDraftAgreement(id: string, data: {
   title: string;
   description: string;
@@ -402,6 +437,107 @@ export async function fetchAgreementAuditLogs(id: string, limit = 100) {
   const params = new URLSearchParams();
   params.set('limit', String(limit));
   return request<any[]>(`/agreements/${id}/audit?${params.toString()}`);
+}
+
+export async function fetchMyProfile() {
+  return request<any>('/me/profile');
+}
+
+export async function updateMyProfile(data: {
+  handle?: string;
+  displayName?: string;
+  bio?: string;
+  avatarUrl?: string;
+  skills?: string[];
+  links?: Array<{ label: string; url: string }>;
+  fiberPubkey?: string;
+  visibility?: 'PUBLIC' | 'PRIVATE';
+}) {
+  return request<any>('/me/profile', {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function fetchPublicProfile(handle: string) {
+  return performRequest<any>(`/profiles/${handle}`);
+}
+
+export async function fetchPublicProfileReputation(handle: string) {
+  return performRequest<any>(`/profiles/${handle}/reputation`);
+}
+
+export async function fetchPublicProfileActivity(handle: string, limit = 25) {
+  const params = new URLSearchParams();
+  params.set('limit', String(limit));
+  return performRequest<any>(`/profiles/${handle}/activity?${params.toString()}`);
+}
+
+export async function fetchInvites() {
+  return request<any[]>('/invites');
+}
+
+export async function createInvite(data: {
+  createdByAddress: string;
+  creatorRole: 'CLIENT' | 'WORKER';
+  targetRole: 'CLIENT' | 'WORKER';
+  title?: string;
+  description?: string;
+  expiresAt?: string;
+  maxUses?: number;
+  agreementTemplate: {
+    title: string;
+    description: string;
+    deadlineAt: string;
+    disputeWindowSecs: number;
+    proofType: string;
+    reviewerMode: string;
+    releaseMode: string;
+    payoutNetwork: string;
+    escrowModel?: string;
+    workerFiberPubkey?: string;
+    milestones: Array<{
+      title: string;
+      description: string;
+      amount: string;
+    }>;
+  };
+}) {
+  return request<any>('/invites', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function fetchInvitePreview(token: string) {
+  return performRequest<any>(`/invites/${token}`);
+}
+
+export async function acceptInvite(token: string) {
+  return request<any>(`/invites/${token}/accept`, {
+    method: 'POST',
+  });
+}
+
+export async function fetchWebhooks() {
+  return request<any[]>('/webhooks');
+}
+
+export async function createWebhook(data: {
+  label?: string;
+  targetUrl: string;
+  eventTypes: string[];
+}) {
+  return request<any>('/webhooks', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function fetchWebhookDeliveries(id: string, limit = 50) {
+  const params = new URLSearchParams();
+  params.set('limit', String(limit));
+  return request<any[]>(`/webhooks/${id}/deliveries?${params.toString()}`);
 }
 
 export async function fetchAgreementJobs(id: string, limit = 100) {

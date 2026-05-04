@@ -27,6 +27,7 @@ import {
   serializeDisputeEvidenceBundle,
   serializeProofBundle,
 } from './richPayloadService';
+import { refreshReputationForAgreement } from './reputationService';
 
 const AGREEMENT_VALID_TRANSITIONS: Record<string, string[]> = {
   DRAFT: ['FUNDED', 'EXPIRED', 'CANCELLED'],
@@ -59,6 +60,9 @@ const agreementListInclude = {
     orderBy: { sortOrder: 'asc' },
     select: {
       id: true,
+      title: true,
+      description: true,
+      amount: true,
       sortOrder: true,
       status: true,
     },
@@ -75,6 +79,7 @@ const agreementListInclude = {
     orderBy: { createdAt: 'desc' },
     take: 2,
   },
+  source: true,
 } as const;
 
 const agreementDetailInclude = {
@@ -105,6 +110,7 @@ const agreementDetailInclude = {
   amendments: {
     orderBy: { createdAt: 'desc' },
   },
+  source: true,
   jobs: {
     orderBy: { createdAt: 'desc' },
     take: 40,
@@ -839,6 +845,10 @@ async function setAgreementSettlementState(
     payload: toJsonSafe(serializeAgreementForBroadcast(updated)),
   });
 
+  void refreshReputationForAgreement(agreementId).catch((error) => {
+    console.error('[REPUTATION] Failed to refresh after settlement update:', error);
+  });
+
   return updated;
 }
 
@@ -988,6 +998,10 @@ export async function broadcastAgreementUpdateById(agreementId: string) {
     payload: toJsonSafe(serializeAgreementForBroadcast(agreement)),
   });
 
+  void refreshReputationForAgreement(agreementId).catch((error) => {
+    console.error('[REPUTATION] Failed to refresh after agreement broadcast:', error);
+  });
+
   return agreement;
 }
 
@@ -1055,6 +1069,10 @@ export async function transitionStatus(agreementId: string, newStatus: string) {
   broadcast({
     type: 'AGREEMENT_UPDATE',
     payload: toJsonSafe(serializeAgreementForBroadcast(updated)),
+  });
+
+  void refreshReputationForAgreement(agreementId).catch((error) => {
+    console.error('[REPUTATION] Failed to refresh after status transition:', error);
   });
 
   return updated;
@@ -1455,6 +1473,17 @@ export async function createAgreement(data: {
     description: string;
     amount: string;
   }>;
+  sourceMetadata?: {
+    sourceType: string;
+    sourceLabel: string;
+    externalUrl: string;
+    sourceReferenceId?: string;
+    sponsorName?: string;
+    bountyTitle: string;
+    bountyDescription?: string;
+    governanceNotes?: string;
+    createdByAddress: string;
+  };
 }) {
   if (!data.milestones.length) {
     throw new Error('At least one milestone is required');
@@ -1554,6 +1583,24 @@ export async function createAgreement(data: {
     },
   });
 
+  if (data.sourceMetadata) {
+    await prisma.agreementSource.create({
+      data: {
+        id: randomUUID(),
+        agreementId: agreement.id,
+        sourceType: data.sourceMetadata.sourceType,
+        sourceLabel: data.sourceMetadata.sourceLabel,
+        externalUrl: data.sourceMetadata.externalUrl,
+        sourceReferenceId: data.sourceMetadata.sourceReferenceId || null,
+        sponsorName: data.sourceMetadata.sponsorName || null,
+        bountyTitle: data.sourceMetadata.bountyTitle,
+        bountyDescription: data.sourceMetadata.bountyDescription || null,
+        governanceNotes: data.sourceMetadata.governanceNotes || null,
+        createdByAddress: normalizeAddress(data.sourceMetadata.createdByAddress),
+      },
+    });
+  }
+
   await createLog({
     agreementId: agreement.id,
     level: 'INFO',
@@ -1575,6 +1622,14 @@ export async function createAgreement(data: {
       milestoneDigest: agreement.milestoneDigest,
     },
   });
+
+  void refreshReputationForAgreement(agreement.id).catch((error) => {
+    console.error('[REPUTATION] Failed to refresh after agreement creation:', error);
+  });
+
+  if (data.sourceMetadata) {
+    return getAgreementById(agreement.id);
+  }
 
   return agreement;
 }

@@ -8,12 +8,14 @@ export type AgentJobKind =
   | 'RECONCILE_SETTLEMENT'
   | 'DISPUTE_RECOMMENDATION'
   | 'REMINDER_DEADLINE'
-  | 'REMINDER_DISPUTE_RESPONSE';
+  | 'REMINDER_DISPUTE_RESPONSE'
+  | 'DELIVER_WEBHOOK';
 
 export type AgentJobPayload = {
   agreementId?: string;
   milestoneId?: string;
   disputeId?: string;
+  deliveryId?: string;
   note?: string;
 };
 

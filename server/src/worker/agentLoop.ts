@@ -27,6 +27,7 @@ import {
   parseJobPayload,
   releaseStaleLocks,
 } from '../services/jobQueueService';
+import { deliverWebhookDelivery } from '../services/webhookService';
 
 let cycleInProgress = false;
 const workerId = `embedded-worker:${process.pid}`;
@@ -271,6 +272,11 @@ async function processJob(job: {
             disputeId: payload.disputeId || null,
           },
         });
+      }
+      return;
+    case 'DELIVER_WEBHOOK':
+      if (payload.deliveryId) {
+        await deliverWebhookDelivery(payload.deliveryId);
       }
       return;
     case 'AGREEMENT_CONTINUE':

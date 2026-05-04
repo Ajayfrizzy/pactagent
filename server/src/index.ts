@@ -5,7 +5,11 @@ import { config } from './config';
 import agreementRoutes from './routes/agreements';
 import authRoutes from './routes/auth';
 import fiberRoutes from './routes/fiber';
+import inviteRoutes from './routes/invites';
 import logRoutes from './routes/logs';
+import meRoutes from './routes/me';
+import profileRoutes from './routes/profiles';
+import webhookRoutes from './routes/webhooks';
 import { createLog } from './services/logService';
 import { checkFiberHealth } from './services/fiberService';
 import { getTreasuryAddress } from './services/ckbService';
@@ -31,6 +35,10 @@ app.use(
 app.use(express.json());
 
 app.use('/api/auth', authRoutes);
+app.use('/api/me', meRoutes);
+app.use('/api/profiles', profileRoutes);
+app.use('/api/invites', inviteRoutes);
+app.use('/api/webhooks', webhookRoutes);
 app.use('/api/agreements', agreementRoutes);
 app.use('/api/logs', logRoutes);
 app.use('/api/fiber', fiberRoutes);

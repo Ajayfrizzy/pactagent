@@ -2,6 +2,7 @@ import { prisma } from '../db';
 import { broadcast } from '../ws';
 import { v4 as uuid } from 'uuid';
 import { normalizeWalletAddress } from './authService';
+import { enqueueWebhookEventsForLog } from './webhookService';
 
 /**
  * Agent Log Service
@@ -35,6 +36,11 @@ export async function createLog(params: {
   });
 
   console.log(`[AGENT][${params.level}] ${params.eventType}: ${params.message}`);
+
+  void enqueueWebhookEventsForLog(log).catch((error) => {
+    console.error('[WEBHOOK] Failed to enqueue events from log:', error);
+  });
+
   return log;
 }
 
@@ -68,6 +74,29 @@ export async function getPublicLogs(limit = 25) {
     where: {
       agreementId: { not: null },
       level: { in: ['INFO', 'SUCCESS', 'WARN'] },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+  });
+
+  return logs.map((log) => ({
+    ...log,
+    metadataJson: null,
+  }));
+}
+
+export async function getPublicLogsForParticipantAddress(address: string, limit = 25) {
+  const normalizedAddress = normalizeWalletAddress(address);
+  const logs = await prisma.agentLog.findMany({
+    where: {
+      agreementId: { not: null },
+      level: { in: ['INFO', 'SUCCESS', 'WARN'] },
+      agreement: {
+        OR: [
+          { clientAddress: normalizedAddress },
+          { workerAddress: normalizedAddress },
+        ],
+      },
     },
     orderBy: { createdAt: 'desc' },
     take: limit,

@@ -63,6 +63,18 @@ const createAgreementSchema = z.object({
     .min(1),
 });
 
+const importBountySchema = z.object({
+  sourceType: z.enum(['DAO', 'BOUNTY']),
+  sourceLabel: z.string().min(1).max(120),
+  externalUrl: z.string().url(),
+  sourceReferenceId: z.string().max(120).optional(),
+  sponsorName: z.string().max(120).optional(),
+  bountyTitle: z.string().min(1).max(200),
+  bountyDescription: z.string().max(4000).optional(),
+  governanceNotes: z.string().max(2000).optional(),
+  agreement: createAgreementSchema,
+});
+
 const fundSchema = z.object({
   txHash: z.string().min(1),
   milestoneOutputs: z.array(
@@ -291,6 +303,64 @@ router.post('/', actionRateLimit, async (req: Request, res: Response) => {
       },
     });
     await queueAgreementJob(agreement.id, 'agreement created');
+    res.json({ success: true, data: agreement });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Validation error';
+    res.status(400).json({ success: false, error: msg });
+  }
+});
+
+router.post('/import-bounty', actionRateLimit, async (req: Request, res: Response) => {
+  try {
+    const authAddress = getAuthAddress(req);
+    const data = importBountySchema.parse(req.body);
+
+    if (normalizeWalletAddress(data.agreement.clientAddress) !== authAddress) {
+      return res.status(403).json({ success: false, error: 'Authenticated wallet must match the client address' });
+    }
+
+    if (data.agreement.payoutNetwork === 'FIBER' && !data.agreement.workerFiberPubkey) {
+      return res.status(400).json({
+        success: false,
+        error: 'Fiber payouts require the worker Fiber public key.',
+      });
+    }
+
+    if (data.agreement.workerFiberPubkey && !isValidFiberPublicKey(data.agreement.workerFiberPubkey)) {
+      return res.status(400).json({
+        success: false,
+        error: 'The worker Fiber public key format is invalid.',
+      });
+    }
+
+    const agreement = await agreementService.createAgreement({
+      ...data.agreement,
+      sourceMetadata: {
+        sourceType: data.sourceType,
+        sourceLabel: data.sourceLabel,
+        externalUrl: data.externalUrl,
+        sourceReferenceId: data.sourceReferenceId,
+        sponsorName: data.sponsorName,
+        bountyTitle: data.bountyTitle,
+        bountyDescription: data.bountyDescription,
+        governanceNotes: data.governanceNotes,
+        createdByAddress: authAddress,
+      },
+    });
+
+    await createAuditLog({
+      agreementId: agreement.id,
+      actorAddress: authAddress,
+      action: 'AGREEMENT_IMPORTED_FROM_BOUNTY',
+      resourceType: 'AGREEMENT',
+      resourceId: agreement.id,
+      metadata: {
+        sourceType: data.sourceType,
+        sourceLabel: data.sourceLabel,
+        externalUrl: data.externalUrl,
+      },
+    });
+    await queueAgreementJob(agreement.id, 'bounty imported');
     res.json({ success: true, data: agreement });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Validation error';
