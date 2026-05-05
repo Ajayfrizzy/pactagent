@@ -344,163 +344,186 @@ export default function NewAgreementPage() {
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          <div>
-            <label className={labelClass}>Agreement Title</label>
-            <input
-              type="text"
-              className={`${inputClass} ${shouldShowFieldError(form.title, fieldErrors.title) ? errorInputClass : ''}`}
-              placeholder="e.g., Landing Page Redesign"
-              value={form.title}
-              onChange={(e) => updateField('title', e.target.value)}
-              required
-            />
-            {shouldShowFieldError(form.title, fieldErrors.title) ? (
-              <p className={fieldErrorClass}>{fieldErrors.title}</p>
-            ) : (
-              <p className={helperClass}>Use a short agreement name both parties will immediately recognize.</p>
-            )}
-          </div>
-
-          <div>
-            <label className={labelClass}>Agreement Description</label>
-            <textarea
-              className={`${inputClass} h-28 resize-none ${shouldShowFieldError(form.description, fieldErrors.description) ? errorInputClass : ''}`}
-              placeholder="Describe the full engagement, expected outcome, and acceptance criteria."
-              value={form.description}
-              onChange={(e) => updateField('description', e.target.value)}
-              required
-            />
-            {shouldShowFieldError(form.description, fieldErrors.description) ? (
-              <p className={fieldErrorClass}>{fieldErrors.description}</p>
-            ) : (
-              <p className={helperClass}>Explain the scope clearly enough that disputes can be resolved against this text later.</p>
-            )}
-          </div>
-
-          <div>
-            <label className={labelClass}>Worker Address</label>
-            <input
-              type="text"
-              className={`${inputClass} ${shouldShowFieldError(form.workerAddress, fieldErrors.workerAddress) ? errorInputClass : ''}`}
-              placeholder="ckt1q..."
-              value={form.workerAddress}
-              onChange={(e) => updateField('workerAddress', e.target.value)}
-              required
-              autoCapitalize="none"
-              spellCheck={false}
-            />
-            {shouldShowFieldError(form.workerAddress, fieldErrors.workerAddress) ? (
-              <p className={fieldErrorClass}>{fieldErrors.workerAddress}</p>
-            ) : (
-              <p className={helperClass}>
-                Enter the worker CKB wallet address for agreement participation, proof submission, and CKB fallback settlement.
+          <section className="rounded-2xl border border-agent-border bg-agent-card/60 p-5 sm:p-6">
+            <div className="mb-5">
+              <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Agreement Basics</div>
+              <h2 className="mt-2 text-lg font-semibold text-white">Define the contract clearly</h2>
+              <p className="mt-1 text-sm text-gray-400">
+                Start with the overall scope and the worker wallet. This becomes the foundation every milestone and dispute refers back to later.
               </p>
-            )}
-          </div>
+            </div>
 
-          {form.payoutNetwork === 'FIBER' && (
-            <div>
-              <label className={labelClass}>Worker Fiber Public Key</label>
-              <input
-                type="text"
-                className={`${inputClass} ${shouldShowFieldError(form.workerFiberPubkey, fieldErrors.workerFiberPubkey) ? errorInputClass : ''}`}
-                placeholder="02ab... or 03ab..."
-                value={form.workerFiberPubkey}
-                onChange={(e) => updateField('workerFiberPubkey', e.target.value)}
-                required
-                autoCapitalize="none"
-                spellCheck={false}
-              />
-              {shouldShowFieldError(form.workerFiberPubkey, fieldErrors.workerFiberPubkey) ? (
-                <p className={fieldErrorClass}>{fieldErrors.workerFiberPubkey}</p>
-              ) : (
-                <p className={helperClass}>
-                  Ask the worker for the public key from their Fiber node. They can usually get it from their node info output or a `node_info` RPC call.
-                </p>
+            <div className="space-y-5">
+              <div>
+                <label className={labelClass}>Agreement Title</label>
+                <input
+                  type="text"
+                  className={`${inputClass} ${shouldShowFieldError(form.title, fieldErrors.title) ? errorInputClass : ''}`}
+                  placeholder="e.g., Landing Page Redesign"
+                  value={form.title}
+                  onChange={(e) => updateField('title', e.target.value)}
+                  required
+                />
+                {shouldShowFieldError(form.title, fieldErrors.title) ? (
+                  <p className={fieldErrorClass}>{fieldErrors.title}</p>
+                ) : (
+                  <p className={helperClass}>Use a short agreement name both parties will immediately recognize.</p>
+                )}
+              </div>
+
+              <div>
+                <label className={labelClass}>Agreement Description</label>
+                <textarea
+                  className={`${inputClass} h-28 resize-none ${shouldShowFieldError(form.description, fieldErrors.description) ? errorInputClass : ''}`}
+                  placeholder="Describe the full engagement, expected outcome, and acceptance criteria."
+                  value={form.description}
+                  onChange={(e) => updateField('description', e.target.value)}
+                  required
+                />
+                {shouldShowFieldError(form.description, fieldErrors.description) ? (
+                  <p className={fieldErrorClass}>{fieldErrors.description}</p>
+                ) : (
+                  <p className={helperClass}>Explain the scope clearly enough that disputes can be resolved against this text later.</p>
+                )}
+              </div>
+
+              <div>
+                <label className={labelClass}>Worker Address</label>
+                <input
+                  type="text"
+                  className={`${inputClass} ${shouldShowFieldError(form.workerAddress, fieldErrors.workerAddress) ? errorInputClass : ''}`}
+                  placeholder="ckt1q..."
+                  value={form.workerAddress}
+                  onChange={(e) => updateField('workerAddress', e.target.value)}
+                  required
+                  autoCapitalize="none"
+                  spellCheck={false}
+                />
+                {shouldShowFieldError(form.workerAddress, fieldErrors.workerAddress) ? (
+                  <p className={fieldErrorClass}>{fieldErrors.workerAddress}</p>
+                ) : (
+                  <p className={helperClass}>
+                    Enter the worker CKB wallet address for agreement participation, proof submission, and CKB fallback settlement.
+                  </p>
+                )}
+              </div>
+
+              {form.payoutNetwork === 'FIBER' && (
+                <div>
+                  <label className={labelClass}>Worker Fiber Public Key</label>
+                  <input
+                    type="text"
+                    className={`${inputClass} ${shouldShowFieldError(form.workerFiberPubkey, fieldErrors.workerFiberPubkey) ? errorInputClass : ''}`}
+                    placeholder="02ab... or 03ab..."
+                    value={form.workerFiberPubkey}
+                    onChange={(e) => updateField('workerFiberPubkey', e.target.value)}
+                    required
+                    autoCapitalize="none"
+                    spellCheck={false}
+                  />
+                  {shouldShowFieldError(form.workerFiberPubkey, fieldErrors.workerFiberPubkey) ? (
+                    <p className={fieldErrorClass}>{fieldErrors.workerFiberPubkey}</p>
+                  ) : (
+                    <p className={helperClass}>
+                      Ask the worker for the public key from their Fiber node. They can usually get it from their node info output or a `node_info` RPC call.
+                    </p>
+                  )}
+                </div>
               )}
             </div>
-          )}
+          </section>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <label className={labelClass}>Deadline (days from now)</label>
-              <input
-                type="number"
-                className={`${inputClass} ${shouldShowFieldError(form.deadlineDays, fieldErrors.deadlineDays) ? errorInputClass : ''}`}
-                value={form.deadlineDays}
-                onChange={(e) => updateField('deadlineDays', e.target.value)}
-                required
-                min="1"
-                step="1"
-              />
-              {shouldShowFieldError(form.deadlineDays, fieldErrors.deadlineDays) ? (
-                <p className={fieldErrorClass}>{fieldErrors.deadlineDays}</p>
-              ) : (
-                <p className={helperClass}>How many full days the worker has to complete the agreement.</p>
-              )}
+          <section className="rounded-2xl border border-agent-border bg-agent-card/60 p-5 sm:p-6">
+            <div className="mb-5">
+              <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Workflow Rules</div>
+              <h2 className="mt-2 text-lg font-semibold text-white">Choose how delivery gets reviewed and paid</h2>
+              <p className="mt-1 text-sm text-gray-400">
+                These settings decide when proof is expected, who reviews it, and whether settlement happens milestone by milestone or in one route.
+              </p>
             </div>
-            <div>
-              <label className={labelClass}>Dispute Window (hours)</label>
-              <input
-                type="number"
-                className={`${inputClass} ${shouldShowFieldError(form.disputeWindowHours, fieldErrors.disputeWindowHours) ? errorInputClass : ''}`}
-                value={form.disputeWindowHours}
-                onChange={(e) => updateField('disputeWindowHours', e.target.value)}
-                min="1"
-                step="1"
-              />
-              {shouldShowFieldError(form.disputeWindowHours, fieldErrors.disputeWindowHours) ? (
-                <p className={fieldErrorClass}>{fieldErrors.disputeWindowHours}</p>
-              ) : (
-                <p className={helperClass}>How many hours each party has to respond if a dispute is opened.</p>
-              )}
-            </div>
-          </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <div>
-              <label className={labelClass}>Proof Type</label>
-              <select className={selectClass} value={form.proofType} onChange={(e) => updateField('proofType', e.target.value)}>
-                <option value="URL">URL</option>
-                <option value="TEXT">Text</option>
-                <option value="FILE_HASH">File Hash</option>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label className={labelClass}>Deadline (days from now)</label>
+                <input
+                  type="number"
+                  className={`${inputClass} ${shouldShowFieldError(form.deadlineDays, fieldErrors.deadlineDays) ? errorInputClass : ''}`}
+                  value={form.deadlineDays}
+                  onChange={(e) => updateField('deadlineDays', e.target.value)}
+                  required
+                  min="1"
+                  step="1"
+                />
+                {shouldShowFieldError(form.deadlineDays, fieldErrors.deadlineDays) ? (
+                  <p className={fieldErrorClass}>{fieldErrors.deadlineDays}</p>
+                ) : (
+                  <p className={helperClass}>How many full days the worker has to complete the agreement.</p>
+                )}
+              </div>
+              <div>
+                <label className={labelClass}>Dispute Window (hours)</label>
+                <input
+                  type="number"
+                  className={`${inputClass} ${shouldShowFieldError(form.disputeWindowHours, fieldErrors.disputeWindowHours) ? errorInputClass : ''}`}
+                  value={form.disputeWindowHours}
+                  onChange={(e) => updateField('disputeWindowHours', e.target.value)}
+                  min="1"
+                  step="1"
+                />
+                {shouldShowFieldError(form.disputeWindowHours, fieldErrors.disputeWindowHours) ? (
+                  <p className={fieldErrorClass}>{fieldErrors.disputeWindowHours}</p>
+                ) : (
+                  <p className={helperClass}>How many hours each party has to respond if a dispute is opened.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div>
+                <label className={labelClass}>Proof Type</label>
+                <select className={selectClass} value={form.proofType} onChange={(e) => updateField('proofType', e.target.value)}>
+                  <option value="URL">URL</option>
+                  <option value="TEXT">Text</option>
+                  <option value="FILE_HASH">File Hash</option>
+                </select>
+                <p className={helperClass}>Choose the proof format the worker should submit for review.</p>
+              </div>
+              <div>
+                <label className={labelClass}>Reviewer Mode</label>
+                <select className={selectClass} value={form.reviewerMode} onChange={(e) => updateField('reviewerMode', e.target.value)}>
+                  <option value="AUTO">Auto</option>
+                  <option value="HYBRID">Hybrid</option>
+                  <option value="MANUAL">Manual</option>
+                </select>
+                <p className={helperClass}>`Auto` is fastest, `Hybrid` mixes automation with human review, `Manual` requires explicit reviewer action.</p>
+              </div>
+              <div>
+                <label className={labelClass}>Payout Network</label>
+                <select className={selectClass} value={form.payoutNetwork} onChange={(e) => updateField('payoutNetwork', e.target.value)}>
+                  <option value="CKB">CKB (L1)</option>
+                  <option value="FIBER">Fiber (L2)</option>
+                </select>
+                <p className={helperClass}>Choose `Fiber` only if the worker can provide a valid Fiber public key.</p>
+              </div>
+            </div>
+
+            <div className="mt-5">
+              <label className={labelClass}>Release Mode</label>
+              <select className={selectClass} value={form.releaseMode} onChange={(e) => updateField('releaseMode', e.target.value)}>
+                <option value="PARTIAL">Partial milestone payouts</option>
+                <option value="FULL">Standard settlement route</option>
               </select>
-              <p className={helperClass}>Choose the proof format the worker should submit for review.</p>
+              <p className={helperClass}>`Partial` pays milestone by milestone. `Full` follows the standard single settlement route.</p>
             </div>
-            <div>
-              <label className={labelClass}>Reviewer Mode</label>
-              <select className={selectClass} value={form.reviewerMode} onChange={(e) => updateField('reviewerMode', e.target.value)}>
-                <option value="AUTO">Auto</option>
-                <option value="HYBRID">Hybrid</option>
-                <option value="MANUAL">Manual</option>
-              </select>
-              <p className={helperClass}>`Auto` is fastest, `Hybrid` mixes automation with human review, `Manual` requires explicit reviewer action.</p>
-            </div>
-            <div>
-              <label className={labelClass}>Payout Network</label>
-              <select className={selectClass} value={form.payoutNetwork} onChange={(e) => updateField('payoutNetwork', e.target.value)}>
-                <option value="CKB">CKB (L1)</option>
-                <option value="FIBER">Fiber (L2)</option>
-              </select>
-              <p className={helperClass}>Choose `Fiber` only if the worker can provide a valid Fiber public key.</p>
-            </div>
-          </div>
+          </section>
 
-          <div>
-            <label className={labelClass}>Release Mode</label>
-            <select className={selectClass} value={form.releaseMode} onChange={(e) => updateField('releaseMode', e.target.value)}>
-              <option value="PARTIAL">Partial milestone payouts</option>
-              <option value="FULL">Standard settlement route</option>
-            </select>
-            <p className={helperClass}>`Partial` pays milestone by milestone. `Full` follows the standard single settlement route.</p>
-          </div>
-
-          <div className="space-y-4 rounded-xl border border-agent-border bg-agent-card p-4 sm:p-5">
+          <section className="space-y-4 rounded-xl border border-agent-border bg-agent-card p-4 sm:p-5">
             <div className="flex flex-col items-stretch gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h2 className="text-white font-semibold">Milestones</h2>
+                <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Milestone Plan</div>
+                <h2 className="mt-2 text-white font-semibold">Break the payout into reviewable checkpoints</h2>
                 <p className="mt-1 text-xs text-gray-400">
-                  The worker will deliver and get paid one milestone at a time.
+                  The worker will deliver and get paid one milestone at a time. Keep each milestone concrete enough that approval feels obvious.
                 </p>
               </div>
               <button
@@ -592,7 +615,7 @@ export default function NewAgreementPage() {
               <span className="text-gray-400">Total escrow amount</span>
               <span className="font-mono text-white">{totalCkb || 0} CKB</span>
             </div>
-          </div>
+          </section>
 
           {error && (
             <div className="rounded-lg border border-red-800 bg-red-900/30 px-4 py-3 text-sm text-red-300">

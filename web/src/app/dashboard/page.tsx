@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { NavbarMenu } from '@/components/NavbarMenu';
 import { AgentLogPanel } from '@/components/AgentLogPanel';
-import { StatusBadge, NetworkBadge } from '@/components/StatusBadge';
+import { StatusBadge, NetworkBadge, getStatusMeta } from '@/components/StatusBadge';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useStore } from '@/lib/store';
 import { createInvite, fetchAgreements } from '@/lib/api';
@@ -116,6 +116,10 @@ export default function DashboardPage() {
     ],
     [agreements.length, stats.activeCount, stats.reviewCount, stats.totalEscrow]
   );
+
+  const agreementsNeedingAttention = agreements.filter((agreement) =>
+    ['UNDER_REVIEW', 'DISPUTED', 'PROOF_SUBMITTED', 'FAILED'].includes(agreement.status)
+  ).length;
 
   async function handleCreateInvite(event: React.MouseEvent, agreement: any) {
     event.preventDefault();
@@ -257,6 +261,13 @@ export default function DashboardPage() {
                     </div>
                   </div>
                   <div className="min-w-[180px] rounded-xl border border-agent-border bg-agent-bg/60 px-4 py-3">
+                    <div className="mb-1 text-xs uppercase tracking-wide text-gray-500">Needs attention</div>
+                    <div className="flex items-center gap-2 font-medium text-white">
+                      <ShieldCheckIcon className="h-4 w-4 text-amber-300" />
+                      {agreementsNeedingAttention} agreements
+                    </div>
+                  </div>
+                  <div className="min-w-[180px] rounded-xl border border-agent-border bg-agent-bg/60 px-4 py-3">
                     <div className="mb-1 text-xs uppercase tracking-wide text-gray-500">Connected wallet</div>
                     <div className="break-all font-mono text-xs text-white">
                       {walletAddress || 'Connect to unlock agreement actions'}
@@ -285,9 +296,9 @@ export default function DashboardPage() {
               ) : !authToken ? (
                 <div className="rounded-2xl border border-agent-border bg-agent-card p-12 text-center">
                   <DocumentTextIcon className="mx-auto mb-4 h-10 w-10 text-gray-600" />
-                  <h3 className="mb-2 font-semibold text-white">Connect your wallet to continue</h3>
+                  <h3 className="mb-2 font-semibold text-white">Connect and finish wallet sign-in</h3>
                   <p className="text-sm text-gray-400">
-                    Agreement access is tied to your authenticated wallet session.
+                    Your dashboard, invites, webhooks, and agreement actions are all tied to your authenticated wallet session.
                   </p>
                 </div>
               ) : error ? (
@@ -298,7 +309,15 @@ export default function DashboardPage() {
                 <div className="rounded-2xl border border-agent-border bg-agent-card p-12 text-center">
                   <DocumentTextIcon className="mx-auto mb-4 h-10 w-10 text-gray-600" />
                   <h3 className="mb-2 font-semibold text-white">No agreements yet</h3>
-                  <p className="mb-6 text-sm text-gray-400">Create your first payment agreement to get started.</p>
+                  <p className="mb-3 text-sm text-gray-400">
+                    Start with a direct milestone agreement, or import a DAO / bounty grant and fund the full milestone plan from one place.
+                  </p>
+                  <div className="mb-6 flex flex-wrap items-center justify-center gap-3 text-xs text-gray-500">
+                    <span className="rounded-full border border-agent-border px-3 py-1">1. Define milestones</span>
+                    <span className="rounded-full border border-agent-border px-3 py-1">2. Fund once</span>
+                    <span className="rounded-full border border-agent-border px-3 py-1">3. Review and release</span>
+                  </div>
+                  <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
                   <Link
                     href="/agreement/new"
                     className="inline-flex items-center gap-1.5 rounded-lg bg-agent-accent px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-600"
@@ -306,6 +325,13 @@ export default function DashboardPage() {
                     <PlusIcon className="h-4 w-4" />
                     Create Agreement
                   </Link>
+                    <Link
+                      href="/agreement/import-bounty"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-agent-border px-6 py-2.5 text-sm font-medium text-gray-200 transition-colors hover:bg-agent-bg"
+                    >
+                      Import DAO / Bounty
+                    </Link>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -318,6 +344,9 @@ export default function DashboardPage() {
                     const paidMilestones =
                       ag.milestones?.filter((milestone: any) => milestone.status === 'PAID').length ?? 0;
                     const totalMilestones = ag.milestones?.length ?? 0;
+                    const milestoneProgress = totalMilestones ? Math.round((paidMilestones / totalMilestones) * 100) : 0;
+                    const primaryStatus = getStatusMeta(ag.status);
+                    const settlementStatus = getStatusMeta(ag.settlementStatus || 'UNFUNDED');
 
                     return (
                       <Link
@@ -338,13 +367,37 @@ export default function DashboardPage() {
                           </div>
                         </div>
                         <p className="mb-4 line-clamp-2 text-sm text-gray-400">{ag.description}</p>
+                        <div className="mb-4 rounded-xl border border-agent-border bg-agent-bg/50 px-4 py-3">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <div className="text-[11px] uppercase tracking-[0.14em] text-gray-500">What happens next</div>
+                              <div className="mt-1 text-sm text-white">{ag.nextParticipantAction || primaryStatus.hint || 'Open the agreement to continue the next step.'}</div>
+                            </div>
+                            <div className="text-right text-xs text-gray-400">
+                              <div>{primaryStatus.label}</div>
+                              <div>{settlementStatus.label}</div>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mb-4">
+                          <div className="mb-2 flex items-center justify-between text-xs text-gray-500">
+                            <span>Milestone progress</span>
+                            <span>{paidMilestones}/{totalMilestones} paid</span>
+                          </div>
+                          <div className="h-2 rounded-full bg-agent-bg/80">
+                            <div
+                              className="h-2 rounded-full bg-agent-accent transition-[width]"
+                              style={{ width: `${milestoneProgress}%` }}
+                            />
+                          </div>
+                        </div>
                         <div className="grid grid-cols-2 gap-3 text-xs text-gray-500 md:grid-cols-5">
                           <span className="font-mono text-gray-300">{shannonsToCKB(ag.amount)} CKB</span>
                           <NetworkBadge network={ag.payoutNetwork} />
                           <span>
                             Milestones {paidMilestones}/{totalMilestones}
                           </span>
-                          <span>Mode {ag.reviewerMode}</span>
+                          <span>{ag.reviewerMode} review</span>
                           <span>{new Date(ag.deadlineAt).toLocaleDateString()}</span>
                         </div>
                         {ag.status === 'DRAFT' ? (
@@ -354,10 +407,10 @@ export default function DashboardPage() {
                               onClick={(event) => void handleCreateInvite(event, ag)}
                               className="rounded-lg border border-agent-accent/40 bg-agent-accent/10 px-3 py-2 text-xs font-medium text-agent-accent hover:bg-agent-accent/20"
                             >
-                              Create Worker Invite
+                              Create and Copy Worker Invite
                             </button>
                             <span className="self-center text-xs text-gray-500">
-                              Generates a shareable link and copies it to your clipboard.
+                              Generates a shareable invite link and copies it to your clipboard automatically.
                             </span>
                           </div>
                         ) : null}
@@ -373,6 +426,9 @@ export default function DashboardPage() {
             <section className="rounded-2xl border border-agent-border bg-agent-card/70 p-4 sm:p-5">
               <div className="mb-4 rounded-xl border border-agent-border bg-agent-bg/50 p-4">
                 <h3 className="text-sm font-semibold text-white">Marketplace Setup</h3>
+                <p className="mt-2 text-xs text-gray-400">
+                  Configure the surfaces that help people discover, trust, and integrate your agreements.
+                </p>
                 <div className="mt-3 flex flex-wrap gap-3 text-sm">
                   <Link href="/settings/profile" className="text-agent-accent hover:text-blue-300">
                     Edit public profile

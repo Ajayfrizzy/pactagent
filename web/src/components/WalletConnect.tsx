@@ -64,13 +64,13 @@ export function WalletConnect() {
   const walletSummary = [wallet?.name, signerTypeLabel].filter(Boolean).join(' - ');
   const connectionLabel = hasAuthenticatedSession
     ? hasLiveSigner
-      ? 'Connected'
+      ? 'Ready to use'
       : 'Session active'
     : hasLiveSigner
       ? authStatus === 'error'
-        ? 'Sign-in incomplete'
-        : 'Finish sign-in to continue'
-      : 'Reconnect wallet to continue';
+        ? 'Wallet auth needs attention'
+        : 'Finish wallet sign-in'
+      : 'Reconnect wallet';
   const statusDotClass = hasAuthenticatedSession
     ? hasLiveSigner
       ? 'bg-green-400'
@@ -344,6 +344,16 @@ export function WalletConnect() {
     }
   }
 
+  const authHint = hasAuthenticatedSession
+    ? hasLiveSigner
+      ? walletSummary || 'Wallet connected and ready for agreement actions.'
+      : 'Your API session is still active, but you need to reconnect the wallet signer before signing transactions.'
+    : hasLiveSigner
+      ? authError
+        ? authError
+        : 'Approve the PactAgent sign-in message in your wallet to finish authentication.'
+      : 'Connect a CCC-compatible wallet, then approve the PactAgent sign-in message.';
+
   if (displayAddress) {
     return (
       <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-3">
@@ -366,17 +376,11 @@ export function WalletConnect() {
             }`}>
               {connectionLabel}
             </span>
-            {(walletSummary || needsAuthentication || (hasAuthenticatedSession && !hasLiveSigner)) && !(hasAuthenticatedSession && hasLiveSigner) && (
-              <span className={`text-[10px] ${
-                hasAuthenticatedSession ? 'text-gray-500' : 'text-gray-400'
-              }`}>
-                {hasAuthenticatedSession && !hasLiveSigner
-                  ? 'Reconnect wallet to sign transactions'
-                  : needsAuthentication
-                    ? `${walletSummary || 'Wallet connected'}${authError ? ' - sign-in not completed' : ' - approve the sign-in prompt'}`
-                    : walletSummary}
-              </span>
-            )}
+            <span className={`text-[10px] ${
+              hasAuthenticatedSession ? 'text-gray-500' : authStatus === 'error' ? 'text-red-200' : 'text-gray-400'
+            }`}>
+              {authHint}
+            </span>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -386,7 +390,7 @@ export function WalletConnect() {
               disabled={working || authStatus === 'authenticating'}
               className="rounded-md border border-agent-accent/50 px-3 py-1.5 text-xs font-medium text-agent-accent transition-colors hover:bg-agent-accent/10 disabled:opacity-50"
             >
-              {authStatus === 'authenticating' ? 'Awaiting signature...' : authError ? 'Retry Sign-In' : 'Complete Sign-In'}
+              {authStatus === 'authenticating' ? 'Awaiting Signature...' : authError ? 'Retry Wallet Sign-In' : 'Finish Wallet Sign-In'}
             </button>
           ) : null}
           <button
@@ -420,7 +424,9 @@ export function WalletConnect() {
           </>
         )}
       </button>
-      {authError && <span className="text-[11px] text-red-300">{authError}</span>}
+      <span className={`text-[11px] ${authError ? 'text-red-300' : 'text-gray-500'}`}>
+        {authError || 'Connect first, then approve the signed challenge to unlock agreements, webhooks, and profile settings.'}
+      </span>
     </div>
   );
 }

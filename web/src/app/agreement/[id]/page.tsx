@@ -6,7 +6,7 @@ import { ccc } from '@ckb-ccc/connector-react';
 import { WalletConnect } from '@/components/WalletConnect';
 import { NavbarMenu } from '@/components/NavbarMenu';
 import { AgentLogPanel } from '@/components/AgentLogPanel';
-import { StatusBadge, NetworkBadge } from '@/components/StatusBadge';
+import { StatusBadge, NetworkBadge, getStatusMeta } from '@/components/StatusBadge';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useStore } from '@/lib/store';
 import {
@@ -88,6 +88,31 @@ function getRecommendationAvailability(dispute: any, agreement: any) {
     responseWindowExpired,
     responseDeadlineAt,
   };
+}
+
+function getMilestonePhaseLabel(status: string) {
+  switch (status) {
+    case 'PENDING':
+      return 'Queued';
+    case 'ACTIVE':
+      return 'In delivery';
+    case 'PROOF_SUBMITTED':
+      return 'Proof delivered';
+    case 'UNDER_REVIEW':
+      return 'Awaiting review';
+    case 'APPROVED':
+      return 'Approved for payout';
+    case 'PAID':
+      return 'Paid out';
+    case 'DISPUTED':
+      return 'Blocked by dispute';
+    case 'REFUNDED':
+      return 'Refunded';
+    case 'EXPIRED':
+      return 'Expired';
+    default:
+      return getStatusMeta(status).label;
+  }
 }
 
 function ArtifactPreviewList({
@@ -1021,7 +1046,7 @@ export default function AgreementDetailPage() {
         <div className="max-w-md w-full bg-agent-card border border-agent-border rounded-xl p-6 text-center">
           <h1 className="text-xl font-semibold text-white mb-2">Connect your wallet to open this agreement</h1>
           <p className="text-sm text-gray-400 mb-4">
-            Viewing agreement details and taking milestone actions now requires an authenticated wallet session.
+            Viewing agreement details, proof, disputes, and settlement actions requires an authenticated wallet session.
           </p>
           <div className="flex justify-center">
             <WalletConnect />
@@ -1033,8 +1058,13 @@ export default function AgreementDetailPage() {
 
   if (!agreement) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-gray-500">
-        {error || 'Agreement not found'}
+      <div className="min-h-screen flex items-center justify-center px-6">
+        <div className="max-w-md w-full rounded-xl border border-agent-border bg-agent-card p-6 text-center">
+          <h1 className="mb-2 text-xl font-semibold text-white">Agreement unavailable</h1>
+          <p className="text-sm text-gray-400">
+            {error || 'This agreement could not be loaded. It may not belong to the connected wallet, or it may no longer exist.'}
+          </p>
+        </div>
       </div>
     );
   }
@@ -1196,6 +1226,52 @@ export default function AgreementDetailPage() {
       agreement.settlementStatus === 'PAYOUT_PENDING' ||
       agreement.settlementStatus === 'SPLIT_PENDING' ||
       agreement.settlementStatus === 'REFUND_PENDING');
+  const agreementStatusMeta = getStatusMeta(agreement.status);
+  const settlementStatusMeta = getStatusMeta(agreement.settlementStatus || 'UNFUNDED');
+  const currentMilestoneIndex = currentMilestone
+    ? milestones.findIndex((milestone: any) => milestone.id === currentMilestone.id)
+    : -1;
+  const currentMilestoneSummary = currentMilestone
+    ? `${currentMilestone.title} · ${shannonsToCKB(currentMilestone.amount)} CKB · ${getMilestonePhaseLabel(currentMilestone.status)}`
+    : 'No active milestone yet.';
+  const nextActionSummary = agreement.nextParticipantAction
+    || (agreement.status === 'DRAFT'
+      ? 'Finish the draft and fund the agreement to start the first milestone.'
+      : agreement.status === 'FUNDED' && isWorker
+        ? 'Submit proof for the current milestone so review can begin.'
+        : agreement.status === 'UNDER_REVIEW' && isClient
+          ? 'Review the current milestone and choose whether to approve or dispute it.'
+          : agreement.status === 'DISPUTED'
+            ? 'Use the dispute workspace to reply, negotiate, or request a recommendation.'
+            : settlementStatusMeta.hint
+              ? settlementStatusMeta.hint
+              : agreementStatusMeta.hint || 'Open the current milestone details and continue the next step.');
+  const actionPanel = agreement.status === 'DRAFT'
+    ? {
+        title: isClient ? 'Draft agreement is waiting on you' : 'Draft agreement is waiting on the client',
+        body: isClient
+          ? 'Check the draft terms, invite the worker if needed, and fund the agreement once everything is ready.'
+          : 'The client still needs to finalize and fund this draft before work can begin.',
+      }
+    : agreement.status === 'FUNDED' && isWorker && currentMilestone?.status === 'ACTIVE'
+      ? {
+          title: 'Current milestone is ready for delivery',
+          body: `Submit proof for ${currentMilestone.title} when the work is ready for review.`,
+        }
+      : canClientReview && currentMilestone
+        ? {
+            title: 'Review decision needed now',
+            body: `The worker has delivered ${currentMilestone.title}. Approve the payout, reject it, or open a dispute based on the submitted proof.`,
+          }
+        : agreement.status === 'DISPUTED' && currentMilestone
+          ? {
+              title: 'Dispute workspace is active',
+              body: `Use the shared dispute thread for ${currentMilestone.title} to exchange evidence and choose a resolution path.`,
+            }
+          : {
+              title: 'Agreement is progressing',
+              body: nextActionSummary,
+            };
 
   return (
     <div className="min-h-screen">
@@ -1247,6 +1323,20 @@ export default function AgreementDetailPage() {
 
               <p className="text-sm text-gray-300 mb-6">{agreement.description}</p>
 
+              <div className="mb-6 rounded-2xl border border-agent-border bg-agent-bg/60 p-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">What Needs Attention</div>
+                    <h2 className="mt-2 text-lg font-semibold text-white">{actionPanel.title}</h2>
+                    <p className="mt-1 text-sm text-gray-400">{actionPanel.body}</p>
+                  </div>
+                  <div className="rounded-xl border border-agent-border bg-agent-card/70 px-4 py-3 text-sm">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-gray-500">Current Milestone</div>
+                    <div className="mt-2 text-white">{currentMilestoneSummary}</div>
+                  </div>
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div>
                   <span className="text-[10px] uppercase text-gray-500 block mb-1">Total Value</span>
@@ -1261,7 +1351,7 @@ export default function AgreementDetailPage() {
                   <span className="text-sm text-white">{agreement.reviewerMode}</span>
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase text-gray-500 block mb-1">Progress</span>
+                  <span className="text-[10px] uppercase text-gray-500 block mb-1">Milestone Progress</span>
                   <span className="text-sm text-white">
                     {paidMilestones}/{milestones.length} milestones paid
                   </span>
@@ -1374,8 +1464,8 @@ export default function AgreementDetailPage() {
             <div className="bg-agent-card border border-agent-border rounded-xl p-6">
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <h2 className="text-white font-semibold">Milestone Timeline</h2>
-                  <p className="text-xs text-gray-400 mt-1">The agent processes one milestone at a time.</p>
+                  <h2 className="text-white font-semibold">Milestone Journey</h2>
+                  <p className="text-xs text-gray-400 mt-1">Each milestone moves from delivery to review to payout one step at a time.</p>
                 </div>
                 <div className="text-xs text-gray-500">{milestones.length} milestones</div>
               </div>
@@ -1386,69 +1476,99 @@ export default function AgreementDetailPage() {
                   const latestProof = milestone.proofs?.[0];
                   const openDispute = milestone.disputes?.find((dispute: any) => !dispute.resolvedAt);
                   const latestSettlement = milestone.settlements?.[0];
+                  const milestoneStatusMeta = getStatusMeta(milestone.status);
+                  const milestoneProgressIndex = milestones.findIndex((item: any) => item.id === milestone.id);
+                  const isCompleted = ['PAID', 'REFUNDED', 'EXPIRED'].includes(milestone.status);
 
                   return (
                     <div
                       key={milestone.id}
                       className={`rounded-xl border p-4 ${
-                        isCurrent ? 'border-agent-accent bg-blue-950/20' : 'border-agent-border bg-agent-bg/60'
+                        isCurrent ? 'border-agent-accent bg-blue-950/20 shadow-[0_0_0_1px_rgba(59,130,246,0.18)]' : 'border-agent-border bg-agent-bg/60'
                       }`}
                     >
-                      <div className="flex items-start justify-between gap-4 mb-3">
-                        <div>
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-xs uppercase tracking-wide text-gray-500">
-                              Milestone {milestone.sortOrder}
-                            </span>
-                            {isCurrent && (
-                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-agent-accent/20 text-agent-accent">
-                                Current
-                              </span>
-                            )}
+                      <div className="flex gap-4">
+                        <div className="flex w-9 shrink-0 flex-col items-center">
+                          <div className={`flex h-9 w-9 items-center justify-center rounded-full border text-xs font-semibold ${
+                            isCurrent
+                              ? 'border-agent-accent bg-agent-accent/15 text-agent-accent'
+                              : isCompleted
+                                ? 'border-emerald-500/40 bg-emerald-950/30 text-emerald-300'
+                                : 'border-agent-border bg-agent-card/80 text-gray-300'
+                          }`}>
+                            {milestone.sortOrder}
                           </div>
-                          <h3 className="text-white font-semibold">{milestone.title}</h3>
+                          {milestoneProgressIndex < milestones.length - 1 ? (
+                            <div className={`mt-2 h-full min-h-10 w-px ${
+                              isCompleted ? 'bg-emerald-500/40' : 'bg-agent-border'
+                            }`} />
+                          ) : null}
                         </div>
-                        <div className="text-right">
-                          <StatusBadge status={milestone.status} />
-                          <div className="text-xs font-mono text-gray-400 mt-1">{shannonsToCKB(milestone.amount)} CKB</div>
+                        <div className="min-w-0 flex-1">
+                          <div className="mb-3 flex items-start justify-between gap-4">
+                            <div>
+                              <div className="mb-1 flex items-center gap-2">
+                                <span className="text-xs uppercase tracking-wide text-gray-500">
+                                  Milestone {milestone.sortOrder}
+                                </span>
+                                {isCurrent ? (
+                                  <span className="rounded-full bg-agent-accent/20 px-2 py-0.5 text-[10px] text-agent-accent">
+                                    Current checkpoint
+                                  </span>
+                                ) : null}
+                              </div>
+                              <h3 className="text-white font-semibold">{milestone.title}</h3>
+                              <p className="mt-1 text-xs text-gray-500">{getMilestonePhaseLabel(milestone.status)}</p>
+                            </div>
+                            <div className="text-right">
+                              <StatusBadge status={milestone.status} />
+                              <div className="mt-1 text-xs font-mono text-gray-400">{shannonsToCKB(milestone.amount)} CKB</div>
+                            </div>
+                          </div>
+
+                          <p className="mb-3 text-sm text-gray-400">{milestone.description}</p>
+
+                          <div className="mb-3 grid gap-2 text-xs text-gray-500 md:grid-cols-2 xl:grid-cols-4">
+                            <span>Phase: {milestoneStatusMeta.label}</span>
+                            <span>Proofs: {milestone.proofs?.length || 0}</span>
+                            <span>Disputes: {milestone.disputes?.length || 0}</span>
+                            <span>Settlements: {milestone.settlements?.length || 0}</span>
+                          </div>
+
+                          {(latestProof || latestSettlement) ? (
+                            <div className="rounded-lg border border-agent-border bg-agent-card/60 px-3 py-2 text-xs text-gray-400">
+                              {latestProof ? <div>Latest proof submitted {new Date(latestProof.submittedAt).toLocaleString()}</div> : null}
+                              {latestSettlement ? (
+                                <div>
+                                  Latest settlement {latestSettlement.direction.toLowerCase()} is {getStatusMeta(latestSettlement.status).label.toLowerCase()}.
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : null}
+
+                          {openDispute ? (
+                            <div className="mt-3 rounded-lg border border-red-900/60 bg-red-950/20 px-3 py-2 text-xs text-red-200">
+                              Open dispute: {openDispute.reason}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
-
-                      <p className="text-sm text-gray-400 mb-3">{milestone.description}</p>
-
-                      <div className="flex flex-wrap gap-4 text-xs text-gray-500">
-                        <span>Proofs: {milestone.proofs?.length || 0}</span>
-                        <span>Disputes: {milestone.disputes?.length || 0}</span>
-                        <span>Settlement attempts: {milestone.settlements?.length || 0}</span>
-                        {latestProof && <span>Latest proof: {new Date(latestProof.submittedAt).toLocaleString()}</span>}
-                        {latestSettlement && (
-                          <span>
-                            Latest settlement: {latestSettlement.direction} {latestSettlement.status}
-                          </span>
-                        )}
-                      </div>
-
-                      {openDispute && (
-                        <div className="mt-3 rounded-lg border border-red-900/60 bg-red-950/20 px-3 py-2 text-xs text-red-200">
-                          Open dispute: {openDispute.reason}
-                        </div>
-                      )}
                     </div>
                   );
                 })}
               </div>
             </div>
 
-            {settlementHistory.length > 0 && (
-              <div className="bg-agent-card border border-agent-border rounded-xl p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h2 className="text-white font-semibold">Settlement History</h2>
-                    <p className="text-xs text-gray-400 mt-1">On-chain funding, payout, and refund attempts are tracked separately from workflow.</p>
-                  </div>
-                  <div className="text-xs text-gray-500">{settlementHistory.length} records</div>
+            <div className="bg-agent-card border border-agent-border rounded-xl p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-white font-semibold">Settlement History</h2>
+                  <p className="text-xs text-gray-400 mt-1">On-chain funding, payout, and refund attempts are tracked separately from workflow.</p>
                 </div>
+                <div className="text-xs text-gray-500">{settlementHistory.length} records</div>
+              </div>
 
+              {settlementHistory.length ? (
                 <div className="space-y-3">
                   {settlementHistory.map((settlement: any) => (
                     <div key={settlement.id} className="rounded-xl border border-agent-border bg-agent-bg/60 p-4">
@@ -1477,8 +1597,12 @@ export default function AgreementDetailPage() {
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
+              ) : (
+                <div className="rounded-xl border border-agent-border bg-agent-bg/60 p-4 text-sm text-gray-400">
+                  No settlement records yet. Funding, payout, refund, and split attempts will appear here as the agreement moves forward.
+                </div>
+              )}
+            </div>
 
             {agreement.source ? (
               <div className="bg-agent-card border border-agent-border rounded-xl p-6">
@@ -1514,16 +1638,16 @@ export default function AgreementDetailPage() {
               </div>
             ) : null}
 
-            {auditLogs.length > 0 && (
-              <div className="bg-agent-card border border-agent-border rounded-xl p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h2 className="text-white font-semibold">Audit Trail</h2>
-                    <p className="text-xs text-gray-400 mt-1">Participant and operator actions recorded for this agreement.</p>
-                  </div>
-                  <div className="text-xs text-gray-500">{auditLogs.length} entries</div>
+            <div className="bg-agent-card border border-agent-border rounded-xl p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-white font-semibold">Audit Trail</h2>
+                  <p className="text-xs text-gray-400 mt-1">Participant and operator actions recorded for this agreement.</p>
                 </div>
+                <div className="text-xs text-gray-500">{auditLogs.length} entries</div>
+              </div>
 
+              {auditLogs.length ? (
                 <div className="space-y-3">
                   {auditLogs.map((entry: any) => (
                     <div key={entry.id} className="rounded-xl border border-agent-border bg-agent-bg/60 p-4">
@@ -1545,8 +1669,12 @@ export default function AgreementDetailPage() {
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
+              ) : (
+                <div className="rounded-xl border border-agent-border bg-agent-bg/60 p-4 text-sm text-gray-400">
+                  No audit entries yet. Agreement edits, funding confirmations, approvals, disputes, and amendments will be recorded here.
+                </div>
+              )}
+            </div>
 
             <div className="bg-agent-card border border-agent-border rounded-xl p-6">
               <div className="mb-4 flex items-center justify-between gap-3">
@@ -1558,17 +1686,23 @@ export default function AgreementDetailPage() {
               </div>
 
               <div className="space-y-3">
-                {(agreement.comments || []).map((comment: any) => (
-                  <div key={comment.id} className="rounded-lg border border-agent-border bg-agent-bg/60 p-4">
-                    <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-gray-500">
-                      <span className="rounded-full bg-slate-900/60 px-2 py-1 text-gray-300">
-                        {getParticipantLabel(comment.authorAddress, agreement)}
-                      </span>
-                      <span>{new Date(comment.createdAt).toLocaleString()}</span>
+                {(agreement.comments || []).length ? (
+                  (agreement.comments || []).map((comment: any) => (
+                    <div key={comment.id} className="rounded-lg border border-agent-border bg-agent-bg/60 p-4">
+                      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                        <span className="rounded-full bg-slate-900/60 px-2 py-1 text-gray-300">
+                          {getParticipantLabel(comment.authorAddress, agreement)}
+                        </span>
+                        <span>{new Date(comment.createdAt).toLocaleString()}</span>
+                      </div>
+                      <p className="whitespace-pre-wrap text-sm text-gray-300">{comment.content}</p>
                     </div>
-                    <p className="whitespace-pre-wrap text-sm text-gray-300">{comment.content}</p>
+                  ))
+                ) : (
+                  <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4 text-sm text-gray-400">
+                    No messages yet. Use this thread for normal coordination that does not belong in the formal dispute workspace.
                   </div>
-                ))}
+                )}
               </div>
 
               {(isClient || isWorker) && (
@@ -1899,7 +2033,7 @@ export default function AgreementDetailPage() {
               <div className="bg-agent-card border border-blue-800/50 rounded-xl p-6">
                 <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
                   <CurrencyDollarIcon className="w-5 h-5 text-blue-400" />
-                  Fund Agreement
+                  Lock and Fund Agreement
                 </h3>
                 <p className="text-sm text-gray-400 mb-4">
                   Lock {shannonsToCKB(agreement.amount)} CKB once, then the agent will release milestone payouts as work is approved.
@@ -1960,7 +2094,7 @@ export default function AgreementDetailPage() {
                           ? 'Funding Awaiting Confirmation'
                           : fundingUnsupportedSigner
                             ? 'Funding Requires CKB Wallet'
-                            : 'Fund on CKB'}
+                            : 'Lock Funds on CKB'}
                       </>
                       )}
                   </button>
@@ -2031,7 +2165,7 @@ export default function AgreementDetailPage() {
                   ) : (
                     <>
                       <PaperClipIcon className="w-4 h-4" />
-                      Submit Proof
+                      Submit Delivery Proof
                     </>
                   )}
                 </button>
@@ -2093,7 +2227,7 @@ export default function AgreementDetailPage() {
                       ) : (
                         <>
                           <CheckCircleIcon className="w-4 h-4" />
-                          {agreement.escrowModel === 'ONCHAIN_LOCK' ? 'Sign Payout Tx' : 'Approve Payout'}
+                          {agreement.escrowModel === 'ONCHAIN_LOCK' ? 'Sign Milestone Payout Transaction' : 'Approve Milestone Payout'}
                         </>
                       )}
                     </button>
@@ -2123,7 +2257,7 @@ export default function AgreementDetailPage() {
                   ) : (
                     <>
                       <XCircleIcon className="w-4 h-4" />
-                      Sign Refund Tx
+                      Sign Milestone Refund Transaction
                     </>
                   )}
                 </button>
@@ -2134,8 +2268,11 @@ export default function AgreementDetailPage() {
               <div className="bg-agent-card border border-red-800/30 rounded-xl p-6">
                 <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
                   <ExclamationTriangleIcon className="w-5 h-5 text-orange-400" />
-                  Open Dispute on {currentMilestone.title}
+                  Open Milestone Dispute for {currentMilestone.title}
                 </h3>
+                <p className="mb-4 text-sm text-gray-400">
+                  Use this only when proof, payout direction, or delivery quality is contested. The shared dispute thread below becomes the source of truth for both sides.
+                </p>
                 <textarea
                   className="w-full bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-red-500 mb-2 h-16 resize-none"
                   placeholder="Reason for dispute..."
@@ -2212,7 +2349,7 @@ export default function AgreementDetailPage() {
                   ) : (
                     <>
                       <ExclamationTriangleIcon className="w-4 h-4" />
-                      Open Dispute
+                      Open Milestone Dispute
                     </>
                   )}
                 </button>
