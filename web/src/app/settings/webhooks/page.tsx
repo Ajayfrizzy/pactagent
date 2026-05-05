@@ -22,6 +22,15 @@ const EVENT_OPTIONS = [
   'settlement.failed',
 ];
 
+function isValidWebhookUrl(value: string) {
+  try {
+    const parsed = new URL(value.trim());
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
 export default function WebhookSettingsPage() {
   const authToken = useStore((s) => s.authToken);
   const [endpoints, setEndpoints] = useState<any[]>([]);
@@ -30,6 +39,7 @@ export default function WebhookSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
   const [form, setForm] = useState({
     label: '',
     targetUrl: '',
@@ -73,6 +83,23 @@ export default function WebhookSettingsPage() {
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
+    setSubmitAttempted(true);
+
+    if (!form.targetUrl.trim()) {
+      setError('Enter the public webhook receiver URL that should receive PactAgent events.');
+      return;
+    }
+
+    if (!isValidWebhookUrl(form.targetUrl)) {
+      setError('Enter a valid webhook URL that starts with https:// or http://.');
+      return;
+    }
+
+    if (!form.eventTypes.length) {
+      setError('Choose at least one event type to send to this endpoint.');
+      return;
+    }
+
     setSaving(true);
     setError(null);
     try {
@@ -95,6 +122,17 @@ export default function WebhookSettingsPage() {
 
   const inputClass =
     'w-full rounded-lg border border-agent-border bg-agent-bg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:border-agent-accent focus:outline-none';
+  const errorInputClass = 'border-red-500/70 focus:border-red-400';
+  const helperClass = 'mt-1 text-xs text-gray-500';
+  const fieldErrorClass = 'mt-1 text-xs text-red-300';
+  const labelError = !form.label.trim() && submitAttempted
+    ? 'Optional, but adding a label makes it easier to tell endpoints apart later.'
+    : null;
+  const targetUrlError = !form.targetUrl.trim()
+    ? 'Paste the receiver endpoint, for example a webhook.site or your own API URL.'
+    : !isValidWebhookUrl(form.targetUrl)
+      ? 'Use a full URL such as https://example.com/api/pactagent/webhook.'
+      : null;
 
   return (
     <div className="min-h-screen">
@@ -132,8 +170,36 @@ export default function WebhookSettingsPage() {
               <div className="text-sm text-gray-400">Connect and sign in to manage webhook endpoints.</div>
             ) : (
               <form onSubmit={handleSubmit} className="space-y-4">
-                <input className={inputClass} value={form.label} onChange={(e) => setForm((prev) => ({ ...prev, label: e.target.value }))} placeholder="Endpoint label" />
-                <input className={inputClass} value={form.targetUrl} onChange={(e) => setForm((prev) => ({ ...prev, targetUrl: e.target.value }))} placeholder="https://example.com/webhooks/pactagent" />
+                <div>
+                  <input
+                    className={inputClass}
+                    value={form.label}
+                    onChange={(e) => setForm((prev) => ({ ...prev, label: e.target.value }))}
+                    placeholder="Treasury alerts"
+                  />
+                  {labelError ? (
+                    <p className={fieldErrorClass}>{labelError}</p>
+                  ) : (
+                    <p className={helperClass}>Optional display name for your own reference.</p>
+                  )}
+                </div>
+                <div>
+                  <input
+                    type="url"
+                    className={`${inputClass} ${targetUrlError && (submitAttempted || form.targetUrl.trim()) ? errorInputClass : ''}`}
+                    value={form.targetUrl}
+                    onChange={(e) => setForm((prev) => ({ ...prev, targetUrl: e.target.value }))}
+                    placeholder="https://example.com/webhooks/pactagent"
+                    inputMode="url"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                  />
+                  {targetUrlError && (submitAttempted || form.targetUrl.trim()) ? (
+                    <p className={fieldErrorClass}>{targetUrlError}</p>
+                  ) : (
+                    <p className={helperClass}>This must be a public URL that accepts JSON `POST` requests from PactAgent.</p>
+                  )}
+                </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   {EVENT_OPTIONS.map((eventType) => (
                     <label key={eventType} className="flex items-center gap-3 rounded-xl border border-agent-border bg-agent-bg/50 px-3 py-2 text-sm text-gray-300">
@@ -153,6 +219,11 @@ export default function WebhookSettingsPage() {
                     </label>
                   ))}
                 </div>
+                {!form.eventTypes.length ? (
+                  <p className={fieldErrorClass}>Select at least one event type so PactAgent knows what to send.</p>
+                ) : (
+                  <p className={helperClass}>Pick only the lifecycle events this endpoint actually needs.</p>
+                )}
                 {error ? <div className="rounded-xl border border-red-800 bg-red-900/30 p-4 text-sm text-red-200">{error}</div> : null}
                 <button type="submit" disabled={saving || !form.eventTypes.length} className="rounded-xl bg-agent-accent px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-70">
                   {saving ? 'Creating...' : 'Create Webhook'}

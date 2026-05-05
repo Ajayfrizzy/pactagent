@@ -40,10 +40,15 @@ function isValidFiberPublicKey(value: string) {
   return /^(?:0x)?(?:02|03)[0-9a-f]{64}$/i.test(trimmed) || /^(?:0x)?04[0-9a-f]{128}$/i.test(trimmed);
 }
 
+function isLikelyCkbAddress(value: string) {
+  const trimmed = value.trim().toLowerCase();
+  return /^(ckt|ckb)1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]{20,}$/i.test(trimmed);
+}
+
 function getMilestoneAmountError(amountCKB: string) {
   const trimmed = amountCKB.trim();
   if (!trimmed) {
-    return null;
+    return 'Enter the amount to release when this milestone is approved.';
   }
 
   const amount = Number(trimmed);
@@ -67,6 +72,7 @@ export default function NewAgreementPage() {
   const isAdmin = useStore((s) => s.isAdmin);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
   const [publicConfig, setPublicConfig] = useState<any>(null);
   const [form, setForm] = useState({
     title: '',
@@ -106,10 +112,16 @@ export default function NewAgreementPage() {
   }, []);
 
   function updateField(field: string, value: string) {
+    if (error) {
+      setError(null);
+    }
     setForm((prev) => ({ ...prev, [field]: value }));
   }
 
   function updateMilestone(index: number, field: keyof MilestoneDraft, value: string) {
+    if (error) {
+      setError(null);
+    }
     setMilestones((prev) =>
       prev.map((milestone, milestoneIndex) =>
         milestoneIndex === index ? { ...milestone, [field]: value } : milestone
@@ -138,6 +150,7 @@ export default function NewAgreementPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setSubmitAttempted(true);
     if (!walletAddress || !authToken) {
       setError('Please connect and authenticate your wallet first');
       return;
@@ -152,6 +165,38 @@ export default function NewAgreementPage() {
       setError(
         'This wallet can authenticate, but only CKB-compatible funding wallets can create agreements. Use JoyID or an EVM wallet that supports CKB OmniLock funding.',
       );
+      return;
+    }
+
+    if (!form.title.trim()) {
+      setError('Add a clear agreement title so both parties know what this deal covers.');
+      return;
+    }
+
+    if (!form.description.trim()) {
+      setError('Add an agreement description that explains the scope and acceptance criteria.');
+      return;
+    }
+
+    if (!form.workerAddress.trim()) {
+      setError('Enter the worker wallet address that should participate in the agreement.');
+      return;
+    }
+
+    if (!isLikelyCkbAddress(form.workerAddress)) {
+      setError('Enter a valid CKB wallet address for the worker.');
+      return;
+    }
+
+    const deadlineDays = Number(form.deadlineDays);
+    if (!Number.isInteger(deadlineDays) || deadlineDays < 1) {
+      setError('Deadline days must be a whole number greater than 0.');
+      return;
+    }
+
+    const disputeWindowHours = Number(form.disputeWindowHours);
+    if (!Number.isInteger(disputeWindowHours) || disputeWindowHours < 1) {
+      setError('Dispute window hours must be a whole number greater than 0.');
       return;
     }
 
@@ -219,9 +264,45 @@ export default function NewAgreementPage() {
 
   const inputClass =
     'w-full bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-agent-accent transition-colors';
+  const errorInputClass = 'border-red-500 focus:border-red-400';
   const labelClass = 'block text-sm font-medium text-gray-300 mb-1.5';
   const selectClass =
     'w-full bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-agent-accent transition-colors';
+  const helperClass = 'mt-1.5 text-xs text-gray-500';
+  const fieldErrorClass = 'mt-1.5 text-xs text-red-300';
+  const fieldErrors = {
+    title: !form.title.trim() ? 'Give the agreement a concise title, for example “Wallet Integration Sprint”.' : null,
+    description: !form.description.trim() ? 'Describe the full scope, deliverables, and acceptance bar.' : null,
+    workerAddress:
+      !form.workerAddress.trim()
+        ? 'Enter the worker wallet that should receive payouts and submit proof.'
+        : !isLikelyCkbAddress(form.workerAddress)
+          ? 'Use a valid CKB address starting with ckt1 or ckb1.'
+          : null,
+    workerFiberPubkey:
+      form.payoutNetwork === 'FIBER' && !form.workerFiberPubkey.trim()
+        ? 'Fiber payouts require the worker public key.'
+        : form.workerFiberPubkey.trim() && !isValidFiberPublicKey(form.workerFiberPubkey)
+          ? 'Use a compressed 33-byte or uncompressed 65-byte Fiber public key.'
+          : null,
+    deadlineDays:
+      !Number.isInteger(Number(form.deadlineDays)) || Number(form.deadlineDays) < 1
+        ? 'Use a whole number of days, for example 7 or 14.'
+        : null,
+    disputeWindowHours:
+      !Number.isInteger(Number(form.disputeWindowHours)) || Number(form.disputeWindowHours) < 1
+        ? 'Use a whole number of hours, for example 24 or 48.'
+        : null,
+  };
+  const milestoneFieldErrors = milestones.map((milestone, index) => ({
+    title: !milestone.title.trim() ? `Give milestone ${index + 1} a short deliverable title.` : null,
+    description: !milestone.description.trim() ? 'Describe what the worker must ship and what “done” looks like.' : null,
+    amount: getMilestoneAmountError(milestone.amountCKB),
+  }));
+
+  function shouldShowFieldError(value: string, message: string | null) {
+    return Boolean(message && (submitAttempted || value.trim()));
+  }
 
   return (
     <div className="min-h-screen">
@@ -267,38 +348,54 @@ export default function NewAgreementPage() {
             <label className={labelClass}>Agreement Title</label>
             <input
               type="text"
-              className={inputClass}
+              className={`${inputClass} ${shouldShowFieldError(form.title, fieldErrors.title) ? errorInputClass : ''}`}
               placeholder="e.g., Landing Page Redesign"
               value={form.title}
               onChange={(e) => updateField('title', e.target.value)}
               required
             />
+            {shouldShowFieldError(form.title, fieldErrors.title) ? (
+              <p className={fieldErrorClass}>{fieldErrors.title}</p>
+            ) : (
+              <p className={helperClass}>Use a short agreement name both parties will immediately recognize.</p>
+            )}
           </div>
 
           <div>
             <label className={labelClass}>Agreement Description</label>
             <textarea
-              className={`${inputClass} h-28 resize-none`}
+              className={`${inputClass} h-28 resize-none ${shouldShowFieldError(form.description, fieldErrors.description) ? errorInputClass : ''}`}
               placeholder="Describe the full engagement, expected outcome, and acceptance criteria."
               value={form.description}
               onChange={(e) => updateField('description', e.target.value)}
               required
             />
+            {shouldShowFieldError(form.description, fieldErrors.description) ? (
+              <p className={fieldErrorClass}>{fieldErrors.description}</p>
+            ) : (
+              <p className={helperClass}>Explain the scope clearly enough that disputes can be resolved against this text later.</p>
+            )}
           </div>
 
           <div>
             <label className={labelClass}>Worker Address</label>
             <input
               type="text"
-              className={inputClass}
+              className={`${inputClass} ${shouldShowFieldError(form.workerAddress, fieldErrors.workerAddress) ? errorInputClass : ''}`}
               placeholder="ckt1q..."
               value={form.workerAddress}
               onChange={(e) => updateField('workerAddress', e.target.value)}
               required
+              autoCapitalize="none"
+              spellCheck={false}
             />
-            <p className="mt-1.5 text-xs text-gray-500">
-              Enter the worker CKB wallet address for agreement participation, proof submission, and CKB fallback settlement.
-            </p>
+            {shouldShowFieldError(form.workerAddress, fieldErrors.workerAddress) ? (
+              <p className={fieldErrorClass}>{fieldErrors.workerAddress}</p>
+            ) : (
+              <p className={helperClass}>
+                Enter the worker CKB wallet address for agreement participation, proof submission, and CKB fallback settlement.
+              </p>
+            )}
           </div>
 
           {form.payoutNetwork === 'FIBER' && (
@@ -306,15 +403,21 @@ export default function NewAgreementPage() {
               <label className={labelClass}>Worker Fiber Public Key</label>
               <input
                 type="text"
-                className={inputClass}
+                className={`${inputClass} ${shouldShowFieldError(form.workerFiberPubkey, fieldErrors.workerFiberPubkey) ? errorInputClass : ''}`}
                 placeholder="02ab... or 03ab..."
                 value={form.workerFiberPubkey}
                 onChange={(e) => updateField('workerFiberPubkey', e.target.value)}
                 required
+                autoCapitalize="none"
+                spellCheck={false}
               />
-              <p className="mt-1.5 text-xs text-gray-500">
-                Ask the worker for the public key from their Fiber node. They can usually get it from their node info output or a `node_info` RPC call.
-              </p>
+              {shouldShowFieldError(form.workerFiberPubkey, fieldErrors.workerFiberPubkey) ? (
+                <p className={fieldErrorClass}>{fieldErrors.workerFiberPubkey}</p>
+              ) : (
+                <p className={helperClass}>
+                  Ask the worker for the public key from their Fiber node. They can usually get it from their node info output or a `node_info` RPC call.
+                </p>
+              )}
             </div>
           )}
 
@@ -323,22 +426,34 @@ export default function NewAgreementPage() {
               <label className={labelClass}>Deadline (days from now)</label>
               <input
                 type="number"
-                className={inputClass}
+                className={`${inputClass} ${shouldShowFieldError(form.deadlineDays, fieldErrors.deadlineDays) ? errorInputClass : ''}`}
                 value={form.deadlineDays}
                 onChange={(e) => updateField('deadlineDays', e.target.value)}
                 required
                 min="1"
+                step="1"
               />
+              {shouldShowFieldError(form.deadlineDays, fieldErrors.deadlineDays) ? (
+                <p className={fieldErrorClass}>{fieldErrors.deadlineDays}</p>
+              ) : (
+                <p className={helperClass}>How many full days the worker has to complete the agreement.</p>
+              )}
             </div>
             <div>
               <label className={labelClass}>Dispute Window (hours)</label>
               <input
                 type="number"
-                className={inputClass}
+                className={`${inputClass} ${shouldShowFieldError(form.disputeWindowHours, fieldErrors.disputeWindowHours) ? errorInputClass : ''}`}
                 value={form.disputeWindowHours}
                 onChange={(e) => updateField('disputeWindowHours', e.target.value)}
                 min="1"
+                step="1"
               />
+              {shouldShowFieldError(form.disputeWindowHours, fieldErrors.disputeWindowHours) ? (
+                <p className={fieldErrorClass}>{fieldErrors.disputeWindowHours}</p>
+              ) : (
+                <p className={helperClass}>How many hours each party has to respond if a dispute is opened.</p>
+              )}
             </div>
           </div>
 
@@ -350,6 +465,7 @@ export default function NewAgreementPage() {
                 <option value="TEXT">Text</option>
                 <option value="FILE_HASH">File Hash</option>
               </select>
+              <p className={helperClass}>Choose the proof format the worker should submit for review.</p>
             </div>
             <div>
               <label className={labelClass}>Reviewer Mode</label>
@@ -358,6 +474,7 @@ export default function NewAgreementPage() {
                 <option value="HYBRID">Hybrid</option>
                 <option value="MANUAL">Manual</option>
               </select>
+              <p className={helperClass}>`Auto` is fastest, `Hybrid` mixes automation with human review, `Manual` requires explicit reviewer action.</p>
             </div>
             <div>
               <label className={labelClass}>Payout Network</label>
@@ -365,6 +482,7 @@ export default function NewAgreementPage() {
                 <option value="CKB">CKB (L1)</option>
                 <option value="FIBER">Fiber (L2)</option>
               </select>
+              <p className={helperClass}>Choose `Fiber` only if the worker can provide a valid Fiber public key.</p>
             </div>
           </div>
 
@@ -374,6 +492,7 @@ export default function NewAgreementPage() {
               <option value="PARTIAL">Partial milestone payouts</option>
               <option value="FULL">Standard settlement route</option>
             </select>
+            <p className={helperClass}>`Partial` pays milestone by milestone. `Full` follows the standard single settlement route.</p>
           </div>
 
           <div className="space-y-4 rounded-xl border border-agent-border bg-agent-card p-4 sm:p-5">
@@ -416,30 +535,40 @@ export default function NewAgreementPage() {
                       <label className={labelClass}>Milestone Title</label>
                       <input
                         type="text"
-                        className={inputClass}
+                        className={`${inputClass} ${milestoneFieldErrors[index]?.title && (submitAttempted || milestone.title.trim()) ? errorInputClass : ''}`}
                         value={milestone.title}
                         onChange={(e) => updateMilestone(index, 'title', e.target.value)}
                         required
                       />
+                      {milestoneFieldErrors[index]?.title && (submitAttempted || milestone.title.trim()) ? (
+                        <p className={fieldErrorClass}>{milestoneFieldErrors[index]?.title}</p>
+                      ) : (
+                        <p className={helperClass}>Short checkpoint name, for example “Prototype shipped”.</p>
+                      )}
                     </div>
                     <div>
                       <label className={labelClass}>Milestone Description</label>
                       <textarea
-                        className={`${inputClass} h-24 resize-none`}
+                        className={`${inputClass} h-24 resize-none ${milestoneFieldErrors[index]?.description && (submitAttempted || milestone.description.trim()) ? errorInputClass : ''}`}
                         value={milestone.description}
                         onChange={(e) => updateMilestone(index, 'description', e.target.value)}
                         required
                       />
+                      {milestoneFieldErrors[index]?.description && (submitAttempted || milestone.description.trim()) ? (
+                        <p className={fieldErrorClass}>{milestoneFieldErrors[index]?.description}</p>
+                      ) : (
+                        <p className={helperClass}>Describe the deliverable, review expectation, and what counts as approval.</p>
+                      )}
                     </div>
                     <div>
                       <label className={labelClass}>Milestone Amount (CKB)</label>
                       {(() => {
-                        const amountError = milestoneAmountErrors[index];
+                        const amountError = milestoneFieldErrors[index]?.amount;
                         return (
                           <>
                       <input
                         type="number"
-                        className={amountError ? `${inputClass} border-red-500 focus:border-red-400` : inputClass}
+                        className={amountError && (submitAttempted || milestone.amountCKB.trim()) ? `${inputClass} ${errorInputClass}` : inputClass}
                         placeholder="100"
                         min={String(MIN_MILESTONE_CKB)}
                         step="any"
@@ -447,8 +576,8 @@ export default function NewAgreementPage() {
                         onChange={(e) => updateMilestone(index, 'amountCKB', e.target.value)}
                         required
                       />
-                            <p className={`mt-1.5 text-xs ${amountError ? 'text-red-300' : 'text-gray-500'}`}>
-                              {amountError || `Minimum ${MIN_MILESTONE_CKB} CKB required per milestone.`}
+                            <p className={`mt-1.5 text-xs ${amountError && (submitAttempted || milestone.amountCKB.trim()) ? 'text-red-300' : 'text-gray-500'}`}>
+                              {(amountError && (submitAttempted || milestone.amountCKB.trim())) ? amountError : `Minimum ${MIN_MILESTONE_CKB} CKB required per milestone.`}
                             </p>
                           </>
                         );
