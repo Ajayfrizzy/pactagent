@@ -54,6 +54,12 @@ const STATUS_COLORS: Record<string, StatusAppearance> = {
   EXPIRED: { bg: 'bg-zinc-700/50', text: 'text-zinc-400', dot: 'bg-zinc-500', label: 'Expired' },
   DAO: { bg: 'bg-violet-950/60', text: 'text-violet-300', dot: 'bg-violet-400', label: 'DAO Source' },
   BOUNTY: { bg: 'bg-sky-950/60', text: 'text-sky-300', dot: 'bg-sky-400', label: 'Bounty Source' },
+  READY_TO_SYNC: { bg: 'bg-slate-800/60', text: 'text-slate-300', dot: 'bg-slate-400', label: 'Ready to Sync' },
+  SYNCED: { bg: 'bg-cyan-950/60', text: 'text-cyan-300', dot: 'bg-cyan-400', label: 'Synced' },
+  DRAFTED: { bg: 'bg-amber-950/60', text: 'text-amber-300', dot: 'bg-amber-400', label: 'Drafted' },
+  REVIEWED: { bg: 'bg-blue-950/60', text: 'text-blue-300', dot: 'bg-blue-400', label: 'Reviewed' },
+  PUBLISHED: { bg: 'bg-emerald-950/60', text: 'text-emerald-300', dot: 'bg-emerald-400', label: 'Published' },
+  NOT_CONFIGURED: { bg: 'bg-zinc-800/60', text: 'text-zinc-300', dot: 'bg-zinc-400', label: 'Not Configured' },
 };
 
 function prettifyStatus(status: string) {

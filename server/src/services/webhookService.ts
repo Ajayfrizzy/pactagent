@@ -2,6 +2,8 @@ import { createHash, createHmac, randomBytes, randomUUID } from 'crypto';
 import { config } from '../config';
 import { prisma } from '../db';
 import { normalizeWalletAddress } from './authService';
+import { queueCkboostLifecycleEvent } from './ckboostIntegrationService';
+import { createLog } from './logService';
 import { enqueueJob } from './jobQueueService';
 
 type WebhookEventType =
@@ -16,7 +18,8 @@ type WebhookEventType =
   | 'dispute.updated'
   | 'settlement.pending'
   | 'settlement.confirmed'
-  | 'settlement.failed';
+  | 'settlement.failed'
+  | 'source.sync_changed';
 
 type EventSource =
   | { kind: 'log'; eventType: string; message: string; metadataJson: string | null; createdAt: Date }
@@ -157,8 +160,54 @@ function mapAuditToWebhookEvents(audit: {
       return ['dispute.updated'] as WebhookEventType[];
     case 'MILESTONE_APPROVED':
       return ['review.action_taken'] as WebhookEventType[];
+    case 'SOURCE_SYNC_COMPLETED':
+    case 'SOURCE_SYNC_FAILED':
+    case 'SOURCE_SYNC_DRAFTED':
+    case 'SOURCE_SYNC_REVIEWED':
+    case 'SOURCE_SYNC_PUBLISHED':
+      return ['source.sync_changed'] as WebhookEventType[];
     default:
       return [];
+  }
+}
+
+async function maybeNotifyCkboost(params: {
+  agreementId: string;
+  source: EventSource;
+}) {
+  if (params.source.kind === 'audit') {
+    if (params.source.action === 'PROOF_SUBMITTED') {
+      await queueCkboostLifecycleEvent({
+        agreementId: params.agreementId,
+        internalEventType: 'proof_submitted',
+        occurredAt: params.source.createdAt.toISOString(),
+        metadata: parseJson<Record<string, unknown>>(params.source.metadataJson, {}),
+      });
+      return;
+    }
+
+    if (params.source.action === 'MILESTONE_APPROVED') {
+      await queueCkboostLifecycleEvent({
+        agreementId: params.agreementId,
+        internalEventType: 'milestone_approved',
+        occurredAt: params.source.createdAt.toISOString(),
+        metadata: parseJson<Record<string, unknown>>(params.source.metadataJson, {}),
+      });
+      return;
+    }
+  }
+
+  if (params.source.kind === 'log' && params.source.eventType === 'SETTLEMENT_CONFIRMED') {
+    const metadata = parseJson<Record<string, unknown>>(params.source.metadataJson, {});
+    const direction = typeof metadata.direction === 'string' ? metadata.direction.toUpperCase() : '';
+    if (direction === 'PAYOUT') {
+      await queueCkboostLifecycleEvent({
+        agreementId: params.agreementId,
+        internalEventType: 'milestone_paid',
+        occurredAt: params.source.createdAt.toISOString(),
+        metadata,
+      });
+    }
   }
 }
 
@@ -185,6 +234,21 @@ async function queueWebhookEventsForAgreement(params: {
   if (!events.length) {
     return;
   }
+
+  await maybeNotifyCkboost(params).catch(async (error) => {
+    const message = error instanceof Error ? error.message : 'Unknown CKBoost delivery error';
+    console.error('[CKBOOST] Failed to notify CKBoost:', error);
+    await createLog({
+      agreementId: params.agreementId,
+      level: 'ERROR',
+      eventType: 'ERROR',
+      message: `CKBoost lifecycle notification failed: ${message}`,
+      metadata: {
+        sourceKind: params.source.kind,
+        sourceAction: params.source.kind === 'audit' ? params.source.action : params.source.eventType,
+      },
+    }).catch(() => {});
+  });
 
   const endpoints = await prisma.webhookEndpoint.findMany({
     where: {
@@ -226,7 +290,11 @@ async function queueWebhookEventsForAgreement(params: {
               sourceType: agreement.source.sourceType,
               sourceLabel: agreement.source.sourceLabel,
               externalUrl: agreement.source.externalUrl,
+              forumThreadUrl: agreement.source.forumThreadUrl,
               sponsorName: agreement.source.sponsorName,
+              syncStatus: agreement.source.syncStatus,
+              lastSyncedAt: agreement.source.lastSyncedAt?.toISOString() ?? null,
+              latestSummary: agreement.source.latestSummary,
             }
           : null,
       },

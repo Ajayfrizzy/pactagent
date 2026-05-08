@@ -27,6 +27,17 @@ import {
   parseJobPayload,
   releaseStaleLocks,
 } from '../services/jobQueueService';
+import {
+  completeProofReview,
+  getLatestProofCheckForMilestone,
+  startProofReview,
+} from '../services/reportReviewService';
+import { listSourceSyncCandidates, syncAgreementSource } from '../services/sourceSyncService';
+import {
+  deliverCkboostNotificationDelivery,
+  listCkboostSyncCandidates,
+  syncCkboostAgreementProfile,
+} from '../services/ckboostIntegrationService';
 import { deliverWebhookDelivery } from '../services/webhookService';
 
 let cycleInProgress = false;
@@ -47,6 +58,55 @@ function getOpenDispute(currentMilestone: any) {
 
 function isPendingSettlementStatus(status: string) {
   return ['FUNDING_PENDING', 'PAYOUT_PENDING', 'REFUND_PENDING', 'SPLIT_PENDING'].includes(status);
+}
+
+function shouldScheduleSourceSync(lastSyncedAt: Date | null | undefined, now: Date) {
+  if (!lastSyncedAt) {
+    return true;
+  }
+
+  return now.getTime() - lastSyncedAt.getTime() >= 30 * 60 * 1000;
+}
+
+function shouldScheduleCkboostSync(lastSyncedAt: Date | null | undefined, now: Date) {
+  if (!lastSyncedAt) {
+    return true;
+  }
+
+  return now.getTime() - lastSyncedAt.getTime() >= 60 * 60 * 1000;
+}
+
+async function ensureLatestProofCheckComplete(agreementId: string, milestoneId: string, proofId: string) {
+  const latestProofCheck = await getLatestProofCheckForMilestone(agreementId, milestoneId);
+  if (!latestProofCheck || latestProofCheck.proofId !== proofId) {
+    const started = await startProofReview({
+      agreementId,
+      milestoneId,
+      triggeredByType: 'SYSTEM',
+    });
+
+    const completed = await completeProofReview({
+      agreementId,
+      milestoneId,
+      proofCheckId: started.id,
+      triggeredByType: 'SYSTEM',
+    });
+
+    return completed.proofCheck;
+  }
+
+  if (latestProofCheck.status === 'CHECKING') {
+    const completed = await completeProofReview({
+      agreementId,
+      milestoneId,
+      proofCheckId: latestProofCheck.id,
+      triggeredByType: 'SYSTEM',
+    });
+
+    return completed.proofCheck;
+  }
+
+  return latestProofCheck;
 }
 
 function buildProcessKey(agreement: any, now: Date) {
@@ -230,6 +290,41 @@ async function scheduleSystemJobs() {
       }
     }
   }
+
+  const sourceSyncCandidates = await listSourceSyncCandidates(20);
+  for (const source of sourceSyncCandidates) {
+    if (!shouldScheduleSourceSync(source.lastSyncedAt, now)) {
+      continue;
+    }
+
+    await enqueueAgreementJob({
+      agreementId: source.agreementId,
+      kind: 'SYNC_SOURCE_THREAD',
+      payload: {
+        agreementId: source.agreementId,
+        forumThreadUrl: source.forumThreadUrl || undefined,
+        sourceSyncMode: 'SCHEDULED',
+      },
+      dedupeSuffix: `scheduled:${source.lastSyncedAt?.toISOString() || 'never'}`,
+    });
+  }
+
+  const ckboostCandidates = await listCkboostSyncCandidates(20);
+  for (const agreement of ckboostCandidates) {
+    if (!shouldScheduleCkboostSync(agreement.ckboostProfileSnapshot?.lastSyncedAt || null, now)) {
+      continue;
+    }
+
+    await enqueueAgreementJob({
+      agreementId: agreement.id,
+      kind: 'SYNC_CKBOOST',
+      payload: {
+        agreementId: agreement.id,
+        ckboostSyncMode: 'PROFILE_REFRESH',
+      },
+      dedupeSuffix: `scheduled:${agreement.ckboostProfileSnapshot?.lastSyncedAt?.toISOString() || 'never'}`,
+    });
+  }
 }
 
 async function processJob(job: {
@@ -279,6 +374,27 @@ async function processJob(job: {
         await deliverWebhookDelivery(payload.deliveryId);
       }
       return;
+    case 'DELIVER_CKBOOST_NOTIFICATION':
+      if (payload.ckboostNotificationId) {
+        await deliverCkboostNotificationDelivery(payload.ckboostNotificationId);
+      }
+      return;
+    case 'SYNC_SOURCE_THREAD':
+      if (job.agreementId) {
+        await syncAgreementSource({
+          agreementId: job.agreementId,
+          actorType: 'SYSTEM',
+          emitAudit: true,
+          forumThreadUrl: payload.forumThreadUrl,
+          manualSummary: payload.manualSummary,
+        });
+      }
+      return;
+    case 'SYNC_CKBOOST':
+      if (job.agreementId) {
+        await syncCkboostAgreementProfile(job.agreementId);
+      }
+      return;
     case 'AGREEMENT_CONTINUE':
     default:
       if (!job.agreementId) {
@@ -310,6 +426,7 @@ async function processJob(job: {
               evidenceEntries: { orderBy: { createdAt: 'asc' } },
             },
           },
+          source: true,
           settlements: {
             orderBy: { createdAt: 'desc' },
           },
@@ -403,19 +520,28 @@ async function processAgreement(agreement: any): Promise<void> {
         break;
       }
 
-      await createLog({
-        agreementId: agreement.id,
-        level: 'INFO',
-        eventType: 'RULE_CHECK_STARTED',
-        message: 'Agent starting rule check on submitted milestone proof',
-        metadata: {
-          milestoneId: currentMilestone.id,
-          milestoneTitle: currentMilestone.title,
-          reviewerMode: agreement.reviewerMode,
-        },
-      });
-
       const latestProof = currentMilestone.proofs[0];
+      if (!latestProof) {
+        break;
+      }
+
+      const latestProofCheck = await ensureLatestProofCheckComplete(agreement.id, currentMilestone.id, latestProof.id);
+      if (latestProofCheck.status !== 'READY_FOR_HUMAN_REVIEW') {
+        await createLog({
+          agreementId: agreement.id,
+          level: 'WARN',
+          eventType: 'RULE_CHECK_FAILED',
+          message: 'Milestone proof needs more evidence before it can move into human review',
+          metadata: {
+            milestoneId: currentMilestone.id,
+            proofId: latestProof.id,
+            proofCheckId: latestProofCheck.id,
+            proofCheckStatus: latestProofCheck.status,
+          },
+        });
+        break;
+      }
+
       const proofValid = latestProof && latestProof.content && latestProof.content.length > 0;
       const deadlineOk = now <= deadline;
 
@@ -451,11 +577,12 @@ async function processAgreement(agreement: any): Promise<void> {
         agreementId: agreement.id,
         level: 'SUCCESS',
         eventType: 'RULE_CHECK_PASSED',
-        message: `Milestone proof validated: ${currentMilestone.title}`,
+        message: `Milestone proof validated and ready for human review: ${currentMilestone.title}`,
         metadata: {
           milestoneId: currentMilestone.id,
           milestoneTitle: currentMilestone.title,
           proofId: latestProof.id,
+          proofCheckId: latestProofCheck.id,
         },
       });
       break;
@@ -463,6 +590,40 @@ async function processAgreement(agreement: any): Promise<void> {
 
     case 'UNDER_REVIEW': {
       if (!currentMilestone || currentMilestone.status !== 'UNDER_REVIEW') {
+        break;
+      }
+
+      const latestProof = currentMilestone.proofs[0];
+      if (latestProof) {
+        const latestProofCheck = await ensureLatestProofCheckComplete(agreement.id, currentMilestone.id, latestProof.id);
+        if (latestProofCheck.status !== 'READY_FOR_HUMAN_REVIEW') {
+          await createLog({
+            agreementId: agreement.id,
+            level: 'WARN',
+            eventType: 'RULE_CHECK_FAILED',
+            message: 'Milestone remains in manual review because the latest proof check still needs more information',
+            metadata: {
+              milestoneId: currentMilestone.id,
+              proofId: latestProof.id,
+              proofCheckId: latestProofCheck.id,
+              proofCheckStatus: latestProofCheck.status,
+            },
+          });
+          break;
+        }
+      }
+
+      if (agreement.source && agreement.reviewerMode !== 'MANUAL') {
+        await createLog({
+          agreementId: agreement.id,
+          level: 'WARN',
+          eventType: 'RULE_CHECK_FAILED',
+          message: 'Imported grant remains locked to manual review even though a non-manual reviewer mode was configured',
+          metadata: {
+            milestoneId: currentMilestone.id,
+            reviewerMode: agreement.reviewerMode,
+          },
+        });
         break;
       }
 
@@ -738,7 +899,7 @@ async function processAgreement(agreement: any): Promise<void> {
 
       await saveRecommendation(openDispute.id, recommendation);
 
-      if (agreement.reviewerMode === 'AUTO' && recommendation.confidence >= 75) {
+      if (!agreement.source && agreement.reviewerMode === 'AUTO' && recommendation.confidence >= 75) {
         if (recommendation.recommendation === 'APPROVE_PAYOUT') {
           await approveCurrentMilestone(agreement.id);
           await createLog({

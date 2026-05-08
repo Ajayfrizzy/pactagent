@@ -354,6 +354,18 @@ FIBER_ENABLED=false
 FIBER_NODE_URL=http://127.0.0.1:8227
 FIBER_API_KEY=
 
+FORUM_PUBLISH_ENABLED=false
+FORUM_PUBLISH_PROVIDER=DISCOURSE
+FORUM_PUBLISH_API_KEY=
+FORUM_PUBLISH_API_USERNAME=
+FORUM_PUBLISH_WEBHOOK_URL=
+FORUM_PUBLISH_TIMEOUT_MS=10000
+
+CKBOOST_SYNC_ENABLED=false
+CKBOOST_WEBHOOK_URL=
+CKBOOST_WEBHOOK_SECRET=
+CKBOOST_INBOUND_TOKEN=
+
 AI_ENABLED=false
 AI_PROVIDER=mock
 AI_TIMEOUT_MS=
@@ -371,6 +383,12 @@ Notes:
 - auth and agreement write endpoints now have in-memory rate limits; tune them with the `*_RATE_LIMIT_*` variables
 - set `ONCHAIN_ESCROW_ENABLED=true` together with `ONCHAIN_LOCK_CODE_HASH`, `ONCHAIN_LOCK_TX_HASH`, and `ONCHAIN_LOCK_INDEX` once you have a deployed lock script and want the app to expose the `ONCHAIN_LOCK` escrow model
 - enable `FIBER_ENABLED=true` only if you have a reachable Fiber node
+- set `FORUM_PUBLISH_ENABLED=true` to let Phase 4 publish approved source-thread updates directly
+- `FORUM_PUBLISH_PROVIDER=DISCOURSE` posts replies to Discourse topic URLs using `FORUM_PUBLISH_API_KEY` and `FORUM_PUBLISH_API_USERNAME`
+- `FORUM_PUBLISH_PROVIDER=WEBHOOK` sends the approved update payload to `FORUM_PUBLISH_WEBHOOK_URL` so you can bridge to other governance/forum systems
+- set `CKBOOST_SYNC_ENABLED=true` to enable outbound CKBoost lifecycle notifications for proof submission, approval, and payout
+- `CKBOOST_WEBHOOK_URL` is the outbound CKBoost endpoint PactAgent should notify for imported CKBoost agreements
+- `CKBOOST_INBOUND_TOKEN` protects the `POST /api/integrations/ckboost/webhook` receiver when CKBoost pushes reputation or campaign events back into PactAgent
 - AI can run in mock mode without external dependencies
 
 ### 4. Configure web environment

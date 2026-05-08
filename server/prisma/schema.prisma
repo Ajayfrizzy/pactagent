@@ -61,7 +61,12 @@ model Agreement {
   amendments AgreementAmendment[]
   jobs AgentJob[]
   source AgreementSource?
+  ckboostProfileSnapshot CkboostProfileSnapshot?
+  ckboostEvents CkboostEvent[]
+  ckboostNotificationDeliveries CkboostNotificationDelivery[]
   webhookDeliveries WebhookDelivery[]
+  proofChecks ProofCheck[]
+  infoRequests InfoRequest[]
 
   @@index([clientAddress, createdAt])
   @@index([workerAddress, createdAt])
@@ -132,11 +137,23 @@ model AgreementSource {
   sourceType        String   // DAO | BOUNTY
   sourceLabel       String
   externalUrl       String
+  forumThreadUrl    String?
   sourceReferenceId String?
+  externalMetadataJson String?
   sponsorName       String?
   bountyTitle       String
   bountyDescription String?
   governanceNotes   String?
+  syncStatus        String   @default("READY_TO_SYNC") // READY_TO_SYNC | SYNCED | DRAFTED | REVIEWED | PUBLISHED | FAILED | NOT_CONFIGURED
+  lastSyncedAt      DateTime?
+  latestSummary     String?
+  draftUpdate       String?
+  lastPublishedAt   DateTime?
+  lastPublishedUrl  String?
+  lastPublishedExternalId String?
+  lastPublishError  String?
+  reviewedAt        DateTime?
+  reviewedByAddress String?
   createdByAddress  String
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
@@ -145,6 +162,73 @@ model AgreementSource {
 
   @@index([sourceType, createdAt])
   @@index([createdByAddress, createdAt])
+}
+
+model CkboostProfileSnapshot {
+  id                      String   @id @default(uuid())
+  agreementId             String   @unique
+  ckboostProfileId        String?
+  contributorExternalId   String?
+  walletAddress           String?
+  handle                  String?
+  displayName             String?
+  profileUrl              String?
+  campaignParticipationCount Int   @default(0)
+  approvedSubmissionCount Int      @default(0)
+  rejectedSubmissionCount Int      @default(0)
+  approvalRate            Float    @default(0)
+  leaderboardRank         Int?
+  totalPoints             Int      @default(0)
+  totalTipsReceived       String?
+  campaignHistoryJson     String?
+  statsJson               String?
+  lastSyncedAt            DateTime?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  agreement Agreement @relation(fields: [agreementId], references: [id])
+
+  @@index([ckboostProfileId, lastSyncedAt])
+  @@index([walletAddress, lastSyncedAt])
+}
+
+model CkboostEvent {
+  id               String   @id @default(uuid())
+  agreementId      String?
+  externalEventId  String?
+  eventType        String
+  payloadJson      String?
+  sourceExternalId String?
+  contributorExternalId String?
+  occurredAt       DateTime
+  createdAt        DateTime @default(now())
+
+  agreement Agreement? @relation(fields: [agreementId], references: [id])
+
+  @@index([agreementId, occurredAt])
+  @@index([sourceExternalId, occurredAt])
+  @@index([contributorExternalId, occurredAt])
+  @@index([eventType, occurredAt])
+}
+
+model CkboostNotificationDelivery {
+  id           String    @id @default(uuid())
+  agreementId   String
+  eventType     String
+  payloadJson   String
+  status        String    @default("PENDING") // PENDING | DELIVERED | FAILED | RETRY
+  statusCode    Int?
+  attempts      Int       @default(0)
+  lastError     String?
+  nextRetryAt   DateTime?
+  deliveredAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  agreement Agreement @relation(fields: [agreementId], references: [id])
+
+  @@index([agreementId, createdAt])
+  @@index([status, nextRetryAt, createdAt])
 }
 
 model WebhookEndpoint {
@@ -207,6 +291,8 @@ model Milestone {
   proofs    Proof[]
   disputes  Dispute[]
   settlements MilestoneSettlement[]
+  proofChecks ProofCheck[]
+  infoRequests InfoRequest[]
 
   @@unique([agreementId, sortOrder])
   @@index([agreementId, status])
@@ -220,11 +306,69 @@ model Proof {
   content     String
   contentHash String
   submittedAt DateTime @default(now())
+  reviewStatus String  @default("UNREVIEWED") // UNREVIEWED | CHECKING | ISSUES_FOUND | READY_FOR_HUMAN_REVIEW | NEEDS_MORE_INFO
+  lastCheckedAt DateTime?
 
   agreement Agreement @relation(fields: [agreementId], references: [id])
   milestone Milestone @relation(fields: [milestoneId], references: [id])
+  proofChecks ProofCheck[]
+  infoRequests InfoRequest[]
 
   @@index([agreementId, milestoneId, submittedAt])
+  @@index([milestoneId, reviewStatus, submittedAt])
+}
+
+model ProofCheck {
+  id           String   @id @default(uuid())
+  agreementId   String
+  milestoneId   String
+  proofId       String
+  status        String   // CHECKING | ISSUES_FOUND | READY_FOR_HUMAN_REVIEW | NEEDS_MORE_INFO
+  issueCount    Int      @default(0)
+  warningCount  Int      @default(0)
+  summary       String
+  warningsJson  String?
+  checklistJson String?
+  triggeredByAddress String?
+  triggeredByType String  @default("USER") // USER | SYSTEM
+  asyncJobId    String?
+  completedAt   DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  agreement Agreement @relation(fields: [agreementId], references: [id])
+  milestone Milestone @relation(fields: [milestoneId], references: [id])
+  proof     Proof     @relation(fields: [proofId], references: [id])
+
+  @@index([agreementId, milestoneId, createdAt])
+  @@index([proofId, createdAt])
+  @@index([status, createdAt])
+}
+
+model InfoRequest {
+  id             String   @id @default(uuid())
+  agreementId     String
+  milestoneId     String
+  proofId         String?
+  requestType     String   @default("STRUCTURED_REVIEW_REQUEST") // STRUCTURED_REVIEW_REQUEST | MESSAGE
+  status          String   @default("OPEN") // OPEN | RESPONDED | CLOSED
+  requestedBy     String
+  note            String?
+  questionsJson   String
+  responseContent String?
+  respondedBy     String?
+  respondedAt     DateTime?
+  commentId       String?
+  responseCommentId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  agreement Agreement @relation(fields: [agreementId], references: [id])
+  milestone Milestone @relation(fields: [milestoneId], references: [id])
+  proof     Proof?    @relation(fields: [proofId], references: [id])
+
+  @@index([agreementId, milestoneId, createdAt])
+  @@index([status, createdAt])
 }
 
 model Dispute {

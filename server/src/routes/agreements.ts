@@ -15,6 +15,26 @@ import {
 import { isValidFiberPublicKey } from '../services/fiberService';
 import { normalizeWalletAddress } from '../services/authService';
 import {
+  buildInfoRequestComment,
+  buildInfoResponseComment,
+  createStructuredInfoRequest,
+  findInfoRequestRecord,
+  generateFollowUpDraftWithAI,
+  getInfoRequestRecordsForAgreement,
+  respondToStructuredInfoRequest,
+} from '../services/followUpService';
+import {
+  markProofNeedsMoreInfo,
+  reviewSubmittedProof,
+  startProofReview,
+} from '../services/reportReviewService';
+import {
+  markSourceSyncReviewed,
+  publishSourceSyncUpdate,
+  saveSourceSyncDraft,
+  syncAgreementSource,
+} from '../services/sourceSyncService';
+import {
   enqueueAgreementJob,
   listAgreementJobs,
   replayJob,
@@ -38,6 +58,15 @@ type AgreementDetailRecord = NonNullable<
 >;
 type AgreementAccessError = 'Agreement not found' | 'You are not a participant in this agreement';
 type AgreementAccessResult<T> = { agreement: T } | { error: AgreementAccessError };
+
+async function hasCreatorAccess(agreementId: string, authAddress: string) {
+  const source = await prisma.agreementSource.findUnique({
+    where: { agreementId },
+    select: { createdByAddress: true },
+  });
+
+  return source?.createdByAddress === authAddress;
+}
 
 const createAgreementSchema = z.object({
   title: z.string().min(1).max(200),
@@ -67,6 +96,7 @@ const importBountySchema = z.object({
   sourceType: z.enum(['DAO', 'BOUNTY']),
   sourceLabel: z.string().min(1).max(120),
   externalUrl: z.string().url(),
+  forumThreadUrl: z.string().url().optional(),
   sourceReferenceId: z.string().max(120).optional(),
   sponsorName: z.string().max(120).optional(),
   bountyTitle: z.string().min(1).max(200),
@@ -105,6 +135,11 @@ const submitProofSchema = z.object({
   (data) => Boolean(data.content.trim() || data.summary?.trim() || data.artifacts?.length),
   'Proof requires text, summary, or at least one artifact.'
 );
+
+const proofCheckSchema = z.object({
+  milestoneId: z.string().min(1),
+  async: z.boolean().optional(),
+});
 
 const openDisputeSchema = z.object({
   milestoneId: z.string().min(1),
@@ -154,6 +189,41 @@ const splitSettlementSchema = z.object({
 const reviewActionSchema = z.object({
   action: z.enum(['APPROVE', 'REJECT', 'ESCALATE']),
   reviewerAddress: z.string().min(1),
+  confirmation: z.object({
+    confirmed: z.literal(true),
+    summary: z.string().min(3).max(1000),
+    aiSuggestionAcknowledged: z.boolean().optional(),
+    proofCheckAcknowledged: z.boolean().optional(),
+  }).optional(),
+});
+
+const infoRequestDraftSchema = z.object({
+  milestoneId: z.string().min(1),
+});
+
+const infoRequestCreateSchema = z.object({
+  milestoneId: z.string().min(1),
+  requesterAddress: z.string().min(1),
+  questions: z.array(z.string().min(1).max(400)).min(1),
+  note: z.string().max(2000).optional(),
+});
+
+const infoRequestResponseSchema = z.object({
+  milestoneId: z.string().min(1),
+  requestId: z.string().min(1),
+  responderAddress: z.string().min(1),
+  content: z.string().min(1).max(4000),
+});
+
+const sourceSyncSchema = z.object({
+  forumThreadUrl: z.string().url().optional(),
+  manualSummary: z.string().max(4000).optional(),
+});
+
+const sourceSyncPublishSchema = z.object({
+  action: z.enum(['DRAFT', 'PUBLISH', 'REVIEW']),
+  content: z.string().max(4000).optional(),
+  reviewerApproved: z.boolean().optional(),
 });
 
 const updateDraftSchema = z.object({
@@ -242,7 +312,8 @@ async function getAgreementParticipantRecord(req: Request): Promise<AgreementAcc
   const authAddress = getAuthAddress(req);
   if (
     agreement.clientAddress !== authAddress &&
-    agreement.workerAddress !== authAddress
+    agreement.workerAddress !== authAddress &&
+    !(await hasCreatorAccess(agreement.id, authAddress))
   ) {
     return { error: 'You are not a participant in this agreement' as const };
   }
@@ -341,6 +412,7 @@ router.post('/import-bounty', actionRateLimit, async (req: Request, res: Respons
         sourceType: data.sourceType,
         sourceLabel: data.sourceLabel,
         externalUrl: data.externalUrl,
+        forumThreadUrl: data.forumThreadUrl,
         sourceReferenceId: data.sourceReferenceId,
         sponsorName: data.sponsorName,
         bountyTitle: data.bountyTitle,
@@ -688,6 +760,54 @@ router.post('/:id/submit-proof', actionRateLimit, async (req: Request, res: Resp
   }
 });
 
+router.post('/:id/proof/check', actionRateLimit, async (req: Request, res: Response) => {
+  try {
+    const result = await getAgreementParticipantRecord(req);
+    if ('error' in result) {
+      return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
+    }
+
+    const authAddress = getAuthAddress(req);
+    const data = proofCheckSchema.parse(req.body);
+    if (data.async) {
+      const started = await startProofReview({
+        agreementId: req.params.id,
+        milestoneId: data.milestoneId,
+        triggeredByAddress: authAddress,
+        triggeredByType: 'USER',
+      });
+
+      await createAuditLog({
+        agreementId: req.params.id,
+        actorAddress: authAddress,
+        action: 'PROOF_CHECK_STARTED',
+        resourceType: 'PROOF',
+        resourceId: started.proofId,
+        metadata: started,
+      });
+
+      await queueAgreementJob(req.params.id, `proof-check:${data.milestoneId}`);
+      return res.json({
+        success: true,
+        data: {
+          queued: true,
+          proofCheck: started,
+        },
+      });
+    }
+
+    const review = await reviewSubmittedProof(req.params.id, data.milestoneId, {
+      triggeredByAddress: authAddress,
+      triggeredByType: 'USER',
+    });
+
+    res.json({ success: true, data: review });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to check submitted proof';
+    res.status(400).json({ success: false, error: msg });
+  }
+});
+
 router.post('/:id/open-dispute', actionRateLimit, async (req: Request, res: Response) => {
   try {
     const result = await getAgreementParticipantRecord(req);
@@ -837,24 +957,61 @@ router.post('/:id/dispute/refund-consent', actionRateLimit, async (req: Request,
 
 router.post('/:id/review-action', actionRateLimit, async (req: Request, res: Response) => {
   try {
-    const result = await getAgreementParticipantRecord(req);
+    const result = await getAgreementDetailForParticipant(req);
     if ('error' in result) {
       return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
     }
 
     const authAddress = getAuthAddress(req);
-    const isClient = result.agreement.clientAddress === authAddress;
+    const agreement = result.agreement;
+    const isClient = agreement.clientAddress === authAddress;
 
     if (!isClient) {
       return res.status(403).json({ success: false, error: 'Only the client can approve payout from the review panel' });
     }
 
-    const { action, reviewerAddress } = reviewActionSchema.parse(req.body);
+    const { action, reviewerAddress, confirmation } = reviewActionSchema.parse(req.body);
     if (normalizeWalletAddress(reviewerAddress) !== authAddress) {
       return res.status(403).json({ success: false, error: 'Authenticated wallet must match the reviewer' });
     }
 
     if (action === 'APPROVE') {
+      const currentMilestone = agreement.milestones?.find((item: any) =>
+        ['ACTIVE', 'PROOF_SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'DISPUTED'].includes(item.status)
+      );
+      const openDispute = currentMilestone?.disputes?.find((item: any) => !item.resolvedAt) || null;
+
+      if (!confirmation?.confirmed || !confirmation.summary.trim()) {
+        return res.status(400).json({
+          success: false,
+          error: 'Human confirmation is required before approving payout.',
+        });
+      }
+
+      if (agreement.source && agreement.reviewerMode !== 'MANUAL') {
+        return res.status(409).json({
+          success: false,
+          error: 'Imported grants must stay in manual review mode before payout approval.',
+        });
+      }
+
+      if (openDispute?.aiRecommendation && !confirmation.aiSuggestionAcknowledged) {
+        return res.status(400).json({
+          success: false,
+          error: 'Acknowledge that the AI recommendation is advisory before approving payout.',
+        });
+      }
+
+      const openInfoRequests = (await getInfoRequestRecordsForAgreement(req.params.id)).filter((item: any) =>
+        item.milestoneId === currentMilestone?.id && !item.resolved
+      );
+      if (openInfoRequests.length > 0) {
+        return res.status(409).json({
+          success: false,
+          error: 'There is still an open request for more information on this milestone.',
+        });
+      }
+
       const updated = await agreementService.approveCurrentMilestone(req.params.id);
       await createAuditLog({
         agreementId: req.params.id,
@@ -862,6 +1019,13 @@ router.post('/:id/review-action', actionRateLimit, async (req: Request, res: Res
         action: 'MILESTONE_APPROVED',
         resourceType: 'AGREEMENT',
         resourceId: req.params.id,
+        metadata: {
+          milestoneId: currentMilestone?.id || null,
+          humanConfirmed: true,
+          reviewerSummary: confirmation.summary.trim(),
+          aiSuggestionAcknowledged: Boolean(confirmation.aiSuggestionAcknowledged),
+          proofCheckAcknowledged: Boolean(confirmation.proofCheckAcknowledged),
+        },
       });
       await queueAgreementJob(req.params.id, 'milestone approval');
       return res.json({ success: true, data: updated });
@@ -877,6 +1041,410 @@ router.post('/:id/review-action', actionRateLimit, async (req: Request, res: Res
     res.json({ success: true, data: { message: 'Escalated for manual review' } });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Validation error';
+    res.status(400).json({ success: false, error: msg });
+  }
+});
+
+router.post('/:id/info-request/draft', actionRateLimit, async (req: Request, res: Response) => {
+  try {
+    const result = await getAgreementDetailForParticipant(req);
+    if ('error' in result) {
+      return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
+    }
+
+    const authAddress = getAuthAddress(req);
+    if (result.agreement.clientAddress !== authAddress) {
+      return res.status(403).json({ success: false, error: 'Only the client reviewer can draft follow-up requests' });
+    }
+
+    const { milestoneId } = infoRequestDraftSchema.parse(req.body);
+    const milestone = result.agreement.milestones?.find((item: any) => item.id === milestoneId);
+    if (!milestone) {
+      return res.status(404).json({ success: false, error: 'Milestone not found' });
+    }
+
+    const proofCheck = await reviewSubmittedProof(req.params.id, milestoneId, {
+      triggeredByAddress: authAddress,
+      triggeredByType: 'USER',
+    });
+    const draft = await generateFollowUpDraftWithAI({
+      milestoneId,
+      milestoneTitle: milestone.title,
+      milestoneDescription: milestone.description,
+      proofCheck,
+    });
+
+    res.json({ success: true, data: draft });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to draft info request';
+    res.status(400).json({ success: false, error: msg });
+  }
+});
+
+router.post('/:id/info-request', actionRateLimit, async (req: Request, res: Response) => {
+  try {
+    const result = await getAgreementDetailForParticipant(req);
+    if ('error' in result) {
+      return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
+    }
+
+    const authAddress = getAuthAddress(req);
+    if (result.agreement.clientAddress !== authAddress) {
+      return res.status(403).json({ success: false, error: 'Only the client reviewer can request more information' });
+    }
+
+    const data = infoRequestCreateSchema.parse(req.body);
+    if (normalizeWalletAddress(data.requesterAddress) !== authAddress) {
+      return res.status(403).json({ success: false, error: 'Authenticated wallet must match the info requester' });
+    }
+
+    const questions = data.questions.map((question) => question.trim()).filter(Boolean);
+    if (!questions.length) {
+      return res.status(400).json({ success: false, error: 'At least one follow-up question is required' });
+    }
+
+    const milestone = result.agreement.milestones?.find((item: any) => item.id === data.milestoneId);
+    if (!milestone) {
+      return res.status(404).json({ success: false, error: 'Milestone not found' });
+    }
+
+    const response = await agreementService.createAgreementComment(
+      req.params.id,
+      authAddress,
+      buildInfoRequestComment({
+        requestId: 'pending',
+        milestoneLabel: `Milestone ${milestone.sortOrder}`,
+        milestoneTitle: milestone.title,
+        questions,
+        note: data.note,
+      })
+    );
+
+    const latestProof = milestone.proofs?.[0] || null;
+    const infoRequest = await createStructuredInfoRequest({
+      agreementId: req.params.id,
+      milestoneId: data.milestoneId,
+      proofId: latestProof?.id || null,
+      requestedBy: authAddress,
+      questions,
+      note: data.note,
+      commentId: response.comment.id,
+    });
+
+    await markProofNeedsMoreInfo({
+      agreementId: req.params.id,
+      milestoneId: data.milestoneId,
+      proofId: latestProof?.id || null,
+      summary: 'Reviewer requested more information before this proof can move forward.',
+    });
+
+    const finalizedComment = await prisma.agreementComment.update({
+      where: { id: response.comment.id },
+      data: {
+        content: buildInfoRequestComment({
+          requestId: infoRequest.requestId,
+          milestoneLabel: `Milestone ${milestone.sortOrder}`,
+          milestoneTitle: milestone.title,
+          questions,
+          note: data.note,
+        }),
+      },
+    });
+
+    await createAuditLog({
+      agreementId: req.params.id,
+      actorAddress: authAddress,
+      action: 'INFO_REQUESTED',
+      resourceType: 'MILESTONE',
+      resourceId: data.milestoneId,
+      metadata: {
+        requestId: infoRequest.requestId,
+        milestoneId: data.milestoneId,
+        proofId: latestProof?.id || null,
+        questions,
+        note: data.note?.trim() || null,
+        commentId: finalizedComment.id,
+      },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        requestId: infoRequest.requestId,
+        comment: finalizedComment,
+        agreement: await agreementService.getAgreementById(req.params.id),
+        infoRequest,
+      },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to request more information';
+    res.status(400).json({ success: false, error: msg });
+  }
+});
+
+router.post('/:id/info-request/respond', actionRateLimit, async (req: Request, res: Response) => {
+  try {
+    const result = await getAgreementDetailForParticipant(req);
+    if ('error' in result) {
+      return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
+    }
+
+    const authAddress = getAuthAddress(req);
+    if (result.agreement.workerAddress !== authAddress) {
+      return res.status(403).json({ success: false, error: 'Only the worker can send an info response' });
+    }
+
+    const data = infoRequestResponseSchema.parse(req.body);
+    if (normalizeWalletAddress(data.responderAddress) !== authAddress) {
+      return res.status(403).json({ success: false, error: 'Authenticated wallet must match the info responder' });
+    }
+
+    const milestone = result.agreement.milestones?.find((item: any) => item.id === data.milestoneId);
+    if (!milestone) {
+      return res.status(404).json({ success: false, error: 'Milestone not found' });
+    }
+
+    const infoRequest = await findInfoRequestRecord(req.params.id, data.requestId);
+    if (!infoRequest || infoRequest.milestoneId !== data.milestoneId) {
+      return res.status(404).json({ success: false, error: 'Info request not found for this milestone' });
+    }
+
+    if (infoRequest.resolved) {
+      return res.status(409).json({ success: false, error: 'This info request has already been answered' });
+    }
+
+    const response = await agreementService.createAgreementComment(
+      req.params.id,
+      authAddress,
+      buildInfoResponseComment({
+        requestId: data.requestId,
+        milestoneLabel: `Milestone ${milestone.sortOrder}`,
+        milestoneTitle: milestone.title,
+        content: data.content,
+      })
+    );
+
+    const updatedInfoRequest = await respondToStructuredInfoRequest({
+      agreementId: req.params.id,
+      requestId: data.requestId,
+      responderAddress: authAddress,
+      content: data.content,
+      responseCommentId: response.comment.id,
+    });
+
+    await queueAgreementJob(req.params.id, `proof-recheck:${data.milestoneId}`);
+
+    await createAuditLog({
+      agreementId: req.params.id,
+      actorAddress: authAddress,
+      action: 'INFO_RECEIVED',
+      resourceType: 'MILESTONE',
+      resourceId: data.milestoneId,
+      metadata: {
+        requestId: data.requestId,
+        milestoneId: data.milestoneId,
+        responsePreview: data.content.trim().slice(0, 240),
+        commentId: response.comment.id,
+      },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        ...response,
+        infoRequest: updatedInfoRequest,
+      },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to send info response';
+    res.status(400).json({ success: false, error: msg });
+  }
+});
+
+router.post('/:id/source-sync', requireAdmin, actionRateLimit, async (req: Request, res: Response) => {
+  try {
+    const agreement = await prisma.agreement.findUnique({
+      where: { id: req.params.id },
+      include: { source: true },
+    });
+
+    if (!agreement) {
+      return res.status(404).json({ success: false, error: 'Agreement not found' });
+    }
+
+    if (!agreement.source) {
+      return res.status(404).json({ success: false, error: 'This agreement does not have imported source metadata' });
+    }
+
+    const authAddress = getAuthAddress(req);
+    const data = sourceSyncSchema.parse(req.body);
+    const source = await syncAgreementSource({
+      agreementId: req.params.id,
+      actorAddress: authAddress,
+      forumThreadUrl: data.forumThreadUrl,
+      manualSummary: data.manualSummary,
+    });
+
+    await createAuditLog({
+      agreementId: req.params.id,
+      actorAddress: authAddress,
+      action: 'SOURCE_SYNC_COMPLETED',
+      resourceType: 'SOURCE',
+      resourceId: agreement.source.id,
+      metadata: {
+        forumThreadUrl: source.forumThreadUrl,
+        syncStatus: source.syncStatus,
+        lastSyncedAt: source.lastSyncedAt?.toISOString() ?? null,
+        latestSummary: source.latestSummary,
+      },
+    });
+
+    await queueAgreementJob(req.params.id, `source-sync:${source.forumThreadUrl || 'default'}`);
+
+    res.json({ success: true, data: source });
+  } catch (err) {
+    const authAddress = req.auth?.address ? getAuthAddress(req) : null;
+    const existingSource = await prisma.agreementSource.findUnique({
+      where: { agreementId: req.params.id },
+      select: { id: true },
+    }).catch(() => null);
+
+    if (existingSource) {
+      await createAuditLog({
+        agreementId: req.params.id,
+        actorAddress: authAddress,
+        action: 'SOURCE_SYNC_FAILED',
+        resourceType: 'SOURCE',
+        resourceId: existingSource.id,
+        metadata: {
+          error: err instanceof Error ? err.message : 'Unknown source sync error',
+        },
+      }).catch(() => undefined);
+    }
+
+    const msg = err instanceof Error ? err.message : 'Unable to sync source thread';
+    res.status(400).json({ success: false, error: msg });
+  }
+});
+
+router.post('/:id/source-sync/publish', requireAdmin, actionRateLimit, async (req: Request, res: Response) => {
+  try {
+    const agreement = await prisma.agreement.findUnique({
+      where: { id: req.params.id },
+      include: { source: true },
+    });
+
+    if (!agreement) {
+      return res.status(404).json({ success: false, error: 'Agreement not found' });
+    }
+
+    if (!agreement.source) {
+      return res.status(404).json({ success: false, error: 'This agreement does not have imported source metadata' });
+    }
+
+    const authAddress = getAuthAddress(req);
+    const data = sourceSyncPublishSchema.parse(req.body);
+
+    if (data.action === 'DRAFT') {
+      const content = data.content?.trim();
+      if (!content) {
+        return res.status(400).json({ success: false, error: 'Draft content is required' });
+      }
+
+      const source = await saveSourceSyncDraft({
+        agreementId: req.params.id,
+        content,
+      });
+
+      await createAuditLog({
+        agreementId: req.params.id,
+        actorAddress: authAddress,
+        action: 'SOURCE_SYNC_DRAFTED',
+        resourceType: 'SOURCE',
+        resourceId: agreement.source.id,
+        metadata: {
+          draftPreview: content.slice(0, 240),
+          syncStatus: source.syncStatus,
+        },
+      });
+
+      return res.json({ success: true, data: source });
+    }
+
+    if (data.action === 'PUBLISH') {
+      const content = data.content?.trim();
+      if (!content) {
+        return res.status(400).json({ success: false, error: 'Publish content is required' });
+      }
+
+      const source = await publishSourceSyncUpdate({
+        agreementId: req.params.id,
+        content,
+        reviewerApproved: Boolean(data.reviewerApproved),
+        reviewerAddress: authAddress,
+      });
+
+      await createAuditLog({
+        agreementId: req.params.id,
+        actorAddress: authAddress,
+        action: 'SOURCE_SYNC_PUBLISHED',
+        resourceType: 'SOURCE',
+        resourceId: agreement.source.id,
+        metadata: {
+          publishMode: 'DIRECT_POST',
+          reviewerApproved: Boolean(data.reviewerApproved),
+          publishedPreview: content.slice(0, 240),
+          syncStatus: source.syncStatus,
+          lastPublishedAt: source.lastPublishedAt?.toISOString() ?? null,
+          lastPublishedUrl: source.lastPublishedUrl || null,
+          lastPublishedExternalId: source.lastPublishedExternalId || null,
+        },
+      });
+
+      await queueAgreementJob(req.params.id, 'source-sync:post-publish');
+
+      return res.json({ success: true, data: source });
+    }
+
+    const source = await markSourceSyncReviewed({
+      agreementId: req.params.id,
+      reviewerAddress: authAddress,
+    });
+
+    await createAuditLog({
+      agreementId: req.params.id,
+      actorAddress: authAddress,
+      action: 'SOURCE_SYNC_REVIEWED',
+      resourceType: 'SOURCE',
+      resourceId: agreement.source.id,
+      metadata: {
+        syncStatus: source.syncStatus,
+        reviewedAt: source.reviewedAt?.toISOString() ?? null,
+        reviewedByAddress: source.reviewedByAddress,
+      },
+    });
+
+    res.json({ success: true, data: source });
+  } catch (err) {
+    const existingSource = await prisma.agreementSource.findUnique({
+      where: { agreementId: req.params.id },
+      select: { id: true },
+    }).catch(() => null);
+
+    if (existingSource) {
+      await createAuditLog({
+        agreementId: req.params.id,
+        actorAddress: req.auth?.address ? getAuthAddress(req) : null,
+        action: 'SOURCE_SYNC_FAILED',
+        resourceType: 'SOURCE',
+        resourceId: existingSource.id,
+        metadata: {
+          error: err instanceof Error ? err.message : 'Unable to update source publish state',
+        },
+      }).catch(() => undefined);
+    }
+
+    const msg = err instanceof Error ? err.message : 'Unable to update source publish state';
     res.status(400).json({ success: false, error: msg });
   }
 });

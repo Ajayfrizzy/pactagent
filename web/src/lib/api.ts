@@ -172,6 +172,7 @@ export async function importBountyAgreement(data: {
   sourceType: 'DAO' | 'BOUNTY';
   sourceLabel: string;
   externalUrl: string;
+  forumThreadUrl?: string;
   sourceReferenceId?: string;
   sponsorName?: string;
   bountyTitle: string;
@@ -198,6 +199,64 @@ export async function importBountyAgreement(data: {
   };
 }) {
   return request<any>('/agreements/import-bounty', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function importCkboostAgreement(data: {
+  campaign: {
+    id: string;
+    title: string;
+    url: string;
+    description?: string;
+    sponsorName?: string;
+    governanceThreadUrl?: string;
+    questBundleTitle?: string;
+    proofExternalId?: string;
+    approvedProofSummary?: string;
+    approvedProofUrl?: string;
+  };
+  sponsor?: {
+    walletAddress?: string;
+    displayName?: string;
+  };
+  contributor: {
+    profileId?: string;
+    contributorExternalId?: string;
+    walletAddress: string;
+    handle?: string;
+    displayName?: string;
+    profileUrl?: string;
+    campaignParticipationCount?: number;
+    approvedSubmissionCount?: number;
+    rejectedSubmissionCount?: number;
+    approvalRate?: number;
+    leaderboardRank?: number;
+    totalPoints?: number;
+    totalTipsReceived?: string;
+    campaignHistory?: string[];
+    stats?: Record<string, unknown>;
+  };
+  agreement: {
+    title: string;
+    description: string;
+    clientAddress: string;
+    createdByAddress?: string;
+    deadlineAt: string;
+    disputeWindowSecs: number;
+    proofType: 'URL' | 'TEXT' | 'FILE_HASH';
+    payoutNetwork: 'CKB' | 'FIBER';
+    escrowModel?: 'TREASURY_BRIDGE' | 'ONCHAIN_LOCK';
+    workerFiberPubkey?: string;
+    milestones: Array<{
+      title: string;
+      description: string;
+      amount: string;
+    }>;
+  };
+}) {
+  return request<any>('/integrations/ckboost/import', {
     method: 'POST',
     body: JSON.stringify(data),
   });
@@ -287,6 +346,16 @@ export async function submitProof(id: string, data: {
   });
 }
 
+export async function checkSubmittedProof(id: string, data: {
+  milestoneId: string;
+  async?: boolean;
+}) {
+  return request<any>(`/agreements/${id}/proof/check`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
 export async function openDispute(id: string, data: {
   milestoneId: string;
   openedBy: string;
@@ -309,10 +378,73 @@ export async function openDispute(id: string, data: {
   });
 }
 
-export async function reviewAction(id: string, action: string, reviewerAddress: string) {
+export async function reviewAction(id: string, data: {
+  action: string;
+  reviewerAddress: string;
+  confirmation?: {
+    confirmed: true;
+    summary: string;
+    aiSuggestionAcknowledged?: boolean;
+    proofCheckAcknowledged?: boolean;
+  };
+}) {
   return request<any>(`/agreements/${id}/review-action`, {
     method: 'POST',
-    body: JSON.stringify({ action, reviewerAddress }),
+    body: JSON.stringify(data),
+  });
+}
+
+export async function draftInfoRequest(id: string, data: {
+  milestoneId: string;
+}) {
+  return request<any>(`/agreements/${id}/info-request/draft`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function sendInfoRequest(id: string, data: {
+  milestoneId: string;
+  requesterAddress: string;
+  questions: string[];
+  note?: string;
+}) {
+  return request<any>(`/agreements/${id}/info-request`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function sendInfoResponse(id: string, data: {
+  milestoneId: string;
+  requestId: string;
+  responderAddress: string;
+  content: string;
+}) {
+  return request<any>(`/agreements/${id}/info-request/respond`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function syncAgreementSource(id: string, data?: {
+  forumThreadUrl?: string;
+  manualSummary?: string;
+}) {
+  return request<any>(`/agreements/${id}/source-sync`, {
+    method: 'POST',
+    body: JSON.stringify(data || {}),
+  });
+}
+
+export async function updateAgreementSourcePublishState(id: string, data: {
+  action: 'DRAFT' | 'PUBLISH' | 'REVIEW';
+  content?: string;
+  reviewerApproved?: boolean;
+}) {
+  return request<any>(`/agreements/${id}/source-sync/publish`, {
+    method: 'POST',
+    body: JSON.stringify(data),
   });
 }
 

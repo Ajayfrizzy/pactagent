@@ -254,6 +254,10 @@ export default function NewAgreementPage() {
         })),
       });
 
+      window.sessionStorage.setItem(
+        'pactagent-ui-flash',
+        `Agreement created successfully. Review the draft, then lock ${totalCkb || 0} CKB to activate the first milestone.`,
+      );
       router.push(`/agreement/${agreement.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create agreement');
@@ -329,7 +333,7 @@ export default function NewAgreementPage() {
         </div>
       </nav>
 
-      <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+      <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
         <Link
           href="/dashboard"
           className="mb-5 inline-flex items-center gap-2 text-sm text-gray-300 transition-colors hover:text-white"
@@ -338,10 +342,37 @@ export default function NewAgreementPage() {
           Back to Dashboard
         </Link>
 
-        <h1 className="mb-2 text-2xl font-bold text-white">Create Milestone Agreement</h1>
-        <p className="mb-8 text-sm text-gray-400">
-          Define the overall job, then break payout into real deliverable milestones.
-        </p>
+        <section className="mb-8 overflow-hidden rounded-3xl border border-agent-border bg-agent-card/80 shadow-[0_24px_60px_rgba(15,23,42,0.28)]">
+          <div className="bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.18),transparent_40%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.14),transparent_32%)] p-6 sm:p-7">
+            <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-sky-200">
+              <DocumentTextIcon className="h-4 w-4" />
+              Direct Agreement Mode
+            </div>
+            <h1 className="mb-2 text-2xl font-bold text-white sm:text-3xl">Create Milestone Agreement</h1>
+            <p className="max-w-3xl text-sm text-gray-300">
+              Use this flow when the client and worker already know each other. Define the scope, lock the full amount once, then move milestone-by-milestone through proof, review, and settlement.
+            </p>
+
+            <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-2xl border border-agent-border bg-agent-bg/60 p-4">
+                <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Client Operator</div>
+                <p className="mt-2 text-sm text-gray-300">Creates the agreement, funds it once, and decides when each milestone should pay out or move into dispute.</p>
+              </div>
+              <div className="rounded-2xl border border-agent-border bg-agent-bg/60 p-4">
+                <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Worker Role</div>
+                <p className="mt-2 text-sm text-gray-300">Delivers each checkpoint, submits proof, and stays aligned with the agreement description and milestone acceptance criteria.</p>
+              </div>
+              <div className="rounded-2xl border border-agent-border bg-agent-bg/60 p-4">
+                <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Lifecycle</div>
+                <p className="mt-2 text-sm text-gray-300">Create → fund → deliver → review → settle. PactAgent keeps that sequence visible on the agreement detail page after creation.</p>
+              </div>
+              <div className="rounded-2xl border border-agent-border bg-agent-bg/60 p-4">
+                <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">When to Use Grant Mode Instead</div>
+                <p className="mt-2 text-sm text-gray-300">If the work came from a DAO program or ecosystem bounty, use the import flow so source attribution and treasury context stay attached.</p>
+              </div>
+            </div>
+          </div>
+        </section>
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <section className="rounded-2xl border border-agent-border bg-agent-card/60 p-5 sm:p-6">

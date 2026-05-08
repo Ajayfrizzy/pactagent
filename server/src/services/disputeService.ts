@@ -2,6 +2,7 @@ import { prisma } from '../db';
 import { createLog } from './logService';
 import { config } from '../config';
 import { broadcastAgreementUpdateById } from './agreementService';
+import { canUseOpenAI, generateStructuredAiOutput } from './aiStructuredService';
 
 /**
  * AI Dispute Recommendation Service
@@ -78,13 +79,6 @@ export function evaluateRecommendationReadiness(input: RecommendationReadinessIn
   };
 }
 
-type OpenAIResponse = {
-  output_text?: string;
-  error?: {
-    message?: string;
-  };
-};
-
 /**
  * Generate dispute recommendation using the configured provider.
  */
@@ -102,11 +96,7 @@ export async function generateRecommendation(
 
   let result: RecommendationOutput;
 
-  if (
-    config.aiEnabled
-    && config.aiProvider === 'openai'
-    && config.openaiApiKey
-  ) {
+  if (canUseOpenAI()) {
     result = await callAIProvider(input);
   } else {
     // Deterministic mock engine
@@ -192,9 +182,6 @@ function runMockEngine(input: RecommendationInput): RecommendationOutput {
  * Implements the same interface as the mock engine.
  */
 async function callAIProvider(input: RecommendationInput): Promise<RecommendationOutput> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), config.aiTimeoutMs);
-
   const schema = {
     type: 'object',
     additionalProperties: false,
@@ -238,48 +225,12 @@ async function callAIProvider(input: RecommendationInput): Promise<Recommendatio
   });
 
   try {
-    const response = await fetch('https://api.openai.com/v1/responses', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.openaiApiKey}`,
-      },
-      body: JSON.stringify({
-        model: config.openaiModel,
-        input: [
-          {
-            role: 'system',
-            content: [{ type: 'input_text', text: systemPrompt }],
-          },
-          {
-            role: 'user',
-            content: [{ type: 'input_text', text: userPrompt }],
-          },
-        ],
-        text: {
-          format: {
-            type: 'json_schema',
-            name: 'dispute_recommendation',
-            strict: true,
-            schema,
-          },
-        },
-      }),
-      signal: controller.signal,
+    const parsed = await generateStructuredAiOutput<RecommendationOutput>({
+      schemaName: 'dispute_recommendation',
+      schema,
+      systemPrompt,
+      userPayload: JSON.parse(userPrompt) as Record<string, unknown>,
     });
-
-    if (!response.ok) {
-      const rawError = await response.text();
-      throw new Error(`OpenAI API error ${response.status}: ${rawError}`);
-    }
-
-    const data = await response.json() as OpenAIResponse;
-    const rawOutput = data.output_text?.trim();
-    if (!rawOutput) {
-      throw new Error(data.error?.message || 'OpenAI response did not include structured output');
-    }
-
-    const parsed = JSON.parse(rawOutput) as RecommendationOutput;
     return {
       summary: parsed.summary,
       recommendation: parsed.recommendation,
@@ -291,8 +242,6 @@ async function callAIProvider(input: RecommendationInput): Promise<Recommendatio
       `[AI] Falling back to mock dispute engine: ${error instanceof Error ? error.message : String(error)}`
     );
     return runMockEngine(input);
-  } finally {
-    clearTimeout(timeout);
   }
 }
 

@@ -120,6 +120,32 @@ export default function DashboardPage() {
   const agreementsNeedingAttention = agreements.filter((agreement) =>
     ['UNDER_REVIEW', 'DISPUTED', 'PROOF_SUBMITTED', 'FAILED'].includes(agreement.status)
   ).length;
+  const grantAgreements = agreements.filter((agreement) => Boolean(agreement.source)).length;
+  const lifecycleLanes = useMemo(
+    () => [
+      {
+        label: 'Draft & Funding',
+        value: agreements.filter((agreement) => agreement.status === 'DRAFT' || agreement.settlementStatus === 'FUNDING_PENDING').length,
+        hint: 'Still being finalized or funded',
+      },
+      {
+        label: 'Delivery',
+        value: agreements.filter((agreement) => ['FUNDED', 'PROOF_SUBMITTED'].includes(agreement.status)).length,
+        hint: 'Work is underway or proof just landed',
+      },
+      {
+        label: 'Review & Dispute',
+        value: agreements.filter((agreement) => ['UNDER_REVIEW', 'DISPUTED'].includes(agreement.status)).length,
+        hint: 'A human decision is required',
+      },
+      {
+        label: 'Settlement & Done',
+        value: agreements.filter((agreement) => ['PAID', 'REFUNDED', 'EXPIRED'].includes(agreement.status) || ['PAYOUT_PENDING', 'REFUND_PENDING', 'SPLIT_PENDING'].includes(agreement.settlementStatus || '')).length,
+        hint: 'Payout, refund, or closure in progress',
+      },
+    ],
+    [agreements],
+  );
 
   async function handleCreateInvite(event: React.MouseEvent, agreement: any) {
     event.preventDefault();
@@ -205,7 +231,7 @@ export default function DashboardPage() {
           </Link>
         </section>
 
-        <section className="rounded-3xl border border-agent-border bg-agent-card/80 p-5 sm:p-6 md:p-8">
+        <section className="rounded-3xl border border-agent-border bg-agent-card/80 p-5 shadow-[0_24px_60px_rgba(15,23,42,0.28)] sm:p-6 md:p-8">
           <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
             <div className="max-w-2xl">
               <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-agent-border bg-agent-bg/70 px-3 py-1 text-xs uppercase tracking-[0.2em] text-agent-accent">
@@ -216,6 +242,26 @@ export default function DashboardPage() {
               <p className="text-sm text-gray-400 md:text-base">
                 Track funding, proof review, disputes, and settlement activity from one place while the agent keeps each agreement moving.
               </p>
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-agent-border bg-agent-bg/60 p-4">
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Direct Agreement Mode</div>
+                  <p className="mt-2 text-sm text-gray-300">
+                    Create bilateral agreements directly in PactAgent when you already know the client and worker.
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-agent-border bg-agent-bg/60 p-4">
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-fuchsia-300">Grant / Bounty Mode</div>
+                  <p className="mt-2 text-sm text-gray-300">
+                    Import ecosystem work, lock treasury funds once, and release each approved milestone with source attribution intact.
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-agent-border bg-agent-bg/60 p-4 sm:col-span-2">
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-orange-300">CKBoost Handoff</div>
+                  <p className="mt-2 text-sm text-gray-300">
+                    Convert CKBoost campaigns into formal PactAgent grants while preserving contributor reputation, campaign history, and syncable external IDs.
+                  </p>
+                </div>
+              </div>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:min-w-[470px] xl:max-w-[520px] xl:flex-1">
               {glanceCards.map((card) => {
@@ -239,6 +285,32 @@ export default function DashboardPage() {
                 );
               })}
             </div>
+          </div>
+        </section>
+
+        <section className="rounded-3xl border border-agent-border bg-agent-card/70 p-5 sm:p-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-2xl">
+              <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Lifecycle Lanes</div>
+              <h2 className="mt-2 text-xl font-semibold text-white">See where agreements are clustered right now</h2>
+              <p className="mt-1 text-sm text-gray-400">
+                PactAgent now reads as an operating system for agreement progression. These lanes show whether your work is still being drafted, delivered, reviewed, or settled.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-agent-border bg-agent-bg/60 px-4 py-3 text-sm text-gray-300">
+              <div className="text-[11px] uppercase tracking-[0.16em] text-gray-500">Imported grants / bounties</div>
+              <div className="mt-2 text-xl font-semibold text-white">{grantAgreements}</div>
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {lifecycleLanes.map((lane) => (
+              <div key={lane.label} className="rounded-2xl border border-agent-border bg-agent-bg/55 p-4">
+                <div className="text-[11px] uppercase tracking-[0.16em] text-gray-500">{lane.label}</div>
+                <div className="mt-2 text-2xl font-semibold text-white">{lane.value}</div>
+                <p className="mt-2 text-sm text-gray-400">{lane.hint}</p>
+              </div>
+            ))}
           </div>
         </section>
 
@@ -273,6 +345,12 @@ export default function DashboardPage() {
                       {walletAddress || 'Connect to unlock agreement actions'}
                     </div>
                   </div>
+                  <Link
+                    href="/agreement/import-ckboost"
+                    className="inline-flex min-w-[180px] items-center justify-center rounded-xl border border-orange-500/30 bg-orange-500/10 px-4 py-3 text-sm font-medium text-orange-200 transition-colors hover:bg-orange-500/20"
+                  >
+                    Create from CKBoost
+                  </Link>
                 </div>
               </div>
             </section>
@@ -318,18 +396,24 @@ export default function DashboardPage() {
                     <span className="rounded-full border border-agent-border px-3 py-1">3. Review and release</span>
                   </div>
                   <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
-                  <Link
-                    href="/agreement/new"
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-agent-accent px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-600"
-                  >
-                    <PlusIcon className="h-4 w-4" />
-                    Create Agreement
-                  </Link>
+                    <Link
+                      href="/agreement/new"
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-agent-accent px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-600"
+                    >
+                      <PlusIcon className="h-4 w-4" />
+                      Create Agreement
+                    </Link>
                     <Link
                       href="/agreement/import-bounty"
                       className="inline-flex items-center gap-1.5 rounded-lg border border-agent-border px-6 py-2.5 text-sm font-medium text-gray-200 transition-colors hover:bg-agent-bg"
                     >
                       Import DAO / Bounty
+                    </Link>
+                    <Link
+                      href="/agreement/import-ckboost"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-orange-500/30 px-6 py-2.5 text-sm font-medium text-orange-200 transition-colors hover:bg-orange-500/10"
+                    >
+                      Create from CKBoost
                     </Link>
                   </div>
                 </div>
@@ -347,6 +431,8 @@ export default function DashboardPage() {
                     const milestoneProgress = totalMilestones ? Math.round((paidMilestones / totalMilestones) * 100) : 0;
                     const primaryStatus = getStatusMeta(ag.status);
                     const settlementStatus = getStatusMeta(ag.settlementStatus || 'UNFUNDED');
+                    const viewerRole = walletAddress === ag.clientAddress ? 'Client Operator' : walletAddress === ag.workerAddress ? 'Worker / Builder' : 'Observer';
+                    const modeLabel = ag.source ? `${ag.source.sourceType} Grant Mode` : 'Direct Agreement Mode';
 
                     return (
                       <Link
@@ -356,6 +442,18 @@ export default function DashboardPage() {
                       >
                         <div className="mb-3 flex items-start justify-between gap-4">
                           <div>
+                            <div className="mb-2 flex flex-wrap items-center gap-2">
+                              <span className={`rounded-full border px-2.5 py-1 text-[11px] uppercase tracking-[0.16em] ${
+                                ag.source
+                                  ? 'border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-200'
+                                  : 'border-sky-500/30 bg-sky-500/10 text-sky-200'
+                              }`}>
+                                {modeLabel}
+                              </span>
+                              <span className="rounded-full border border-agent-border bg-agent-bg/70 px-2.5 py-1 text-[11px] uppercase tracking-[0.16em] text-gray-300">
+                                {viewerRole}
+                              </span>
+                            </div>
                             <h3 className="font-semibold text-white transition-colors group-hover:text-agent-accent">
                               {ag.title}
                             </h3>
@@ -400,6 +498,12 @@ export default function DashboardPage() {
                           <span>{ag.reviewerMode} review</span>
                           <span>{new Date(ag.deadlineAt).toLocaleDateString()}</span>
                         </div>
+                        {ag.source ? (
+                          <div className="mt-4 rounded-xl border border-agent-border bg-agent-bg/50 px-4 py-3 text-xs text-gray-400">
+                            Imported from <span className="font-medium text-white">{ag.source.sourceLabel}</span>
+                            {ag.source.sponsorName ? ` · sponsored by ${ag.source.sponsorName}` : ''}.
+                          </div>
+                        ) : null}
                         {ag.status === 'DRAFT' ? (
                           <div className="mt-4 flex flex-wrap gap-3">
                             <button

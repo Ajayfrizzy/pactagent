@@ -4,7 +4,18 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { NavbarMenu } from '@/components/NavbarMenu';
-import { AgentIcon, ArrowLeftIcon, DocumentTextIcon, PlusIcon, XCircleIcon } from '@/components/Icons';
+import {
+  AgentIcon,
+  ArrowLeftIcon,
+  CheckCircleIcon,
+  ChevronDownIcon,
+  ClockIcon,
+  DocumentTextIcon,
+  LinkIcon,
+  PlusIcon,
+  ShieldCheckIcon,
+  XCircleIcon,
+} from '@/components/Icons';
 import { ckbToShannons, MIN_CELL_CAPACITY, shannonsToCKB } from '@/lib/ckb';
 import { fetchConfig, importBountyAgreement } from '@/lib/api';
 import { useStore } from '@/lib/store';
@@ -73,6 +84,7 @@ export default function ImportBountyPage() {
     sourceType: 'BOUNTY',
     sourceLabel: '',
     externalUrl: '',
+    forumThreadUrl: '',
     sourceReferenceId: '',
     sponsorName: '',
     bountyTitle: '',
@@ -157,6 +169,11 @@ export default function ImportBountyPage() {
       return;
     }
 
+    if (form.forumThreadUrl.trim() && !isValidHttpUrl(form.forumThreadUrl)) {
+      setError('Enter a valid forum or governance thread URL that starts with https:// or http://.');
+      return;
+    }
+
     if (!form.bountyTitle.trim()) {
       setError('Add the bounty or grant title from the original source.');
       return;
@@ -214,6 +231,7 @@ export default function ImportBountyPage() {
         sourceType: form.sourceType as 'DAO' | 'BOUNTY',
         sourceLabel: form.sourceLabel,
         externalUrl: form.externalUrl,
+        forumThreadUrl: form.forumThreadUrl.trim() || undefined,
         sourceReferenceId: form.sourceReferenceId || undefined,
         sponsorName: form.sponsorName || undefined,
         bountyTitle: form.bountyTitle,
@@ -243,6 +261,10 @@ export default function ImportBountyPage() {
         },
       });
 
+      window.sessionStorage.setItem(
+        'pactagent-ui-flash',
+        `Imported grant agreement created successfully. Lock the total ${totalGrantCkb || 0} CKB once funding is ready, then review and release each milestone manually.`,
+      );
       router.push(`/agreement/${agreement.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to import bounty');
@@ -252,14 +274,21 @@ export default function ImportBountyPage() {
   }
 
   const inputClass =
-    'w-full rounded-lg border border-agent-border bg-agent-bg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:border-agent-accent focus:outline-none';
+    'w-full rounded-xl border border-agent-border bg-agent-bg px-5 py-3 text-sm text-white placeholder-gray-500 focus:border-agent-accent focus:outline-none';
+  const selectClass =
+    `${inputClass} appearance-none pr-14`;
   const errorInputClass = 'border-red-500/70 focus:border-red-400';
   const helperClass = 'mt-1 text-xs text-gray-500';
   const fieldErrorClass = 'mt-1 text-xs text-red-300';
+  const sectionClass = 'rounded-[28px] border border-agent-border/80 bg-agent-card/60 p-5 shadow-[0_18px_50px_rgba(15,23,42,0.18)]';
   const totalGrantCkb = milestones.reduce((sum, milestone) => sum + (Number(milestone.amountCkb) || 0), 0);
   const fieldErrors = {
     sourceLabel: !form.sourceLabel.trim() ? 'Choose a short name like "Nervos Grants Round 2" or "XYZ DAO Bounty Board".' : null,
     externalUrl: form.externalUrl.trim() && !isValidHttpUrl(form.externalUrl) ? 'Use a full URL like https://dao.example.com/proposals/42.' : null,
+    forumThreadUrl:
+      form.forumThreadUrl.trim() && !isValidHttpUrl(form.forumThreadUrl)
+        ? 'Use a full forum or governance URL like https://forum.example.com/t/grant-42.'
+        : null,
     bountyTitle: !form.bountyTitle.trim() ? 'Copy the original grant or bounty title here.' : null,
     agreementDescription:
       !(form.agreementDescription.trim() || form.bountyDescription.trim())
@@ -292,6 +321,25 @@ export default function ImportBountyPage() {
     return Boolean(message && (submitAttempted || value.trim()));
   }
 
+  function SelectField({
+    value,
+    onChange,
+    children,
+  }: {
+    value: string;
+    onChange: (value: string) => void;
+    children: React.ReactNode;
+  }) {
+    return (
+      <div className="relative">
+        <select className={selectClass} value={value} onChange={(e) => onChange(e.target.value)}>
+          {children}
+        </select>
+        <ChevronDownIcon className="pointer-events-none absolute right-5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen">
       <nav className="sticky top-0 z-50 border-b border-agent-border bg-agent-card/50 backdrop-blur-sm">
@@ -308,31 +356,99 @@ export default function ImportBountyPage() {
         </div>
       </nav>
 
-      <div className="mx-auto max-w-4xl space-y-6 px-4 py-8 sm:px-6">
+      <div className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6">
         <Link href="/dashboard" className="inline-flex items-center gap-2 text-sm text-gray-400 hover:text-white">
           <ArrowLeftIcon className="h-4 w-4" />
           Back to dashboard
         </Link>
 
-        <section className="rounded-3xl border border-agent-border bg-agent-card/80 p-6">
-          <div className="mb-6">
-            <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-agent-border bg-agent-bg/60 px-3 py-1 text-xs uppercase tracking-[0.16em] text-agent-accent">
-              <DocumentTextIcon className="h-4 w-4" />
-              DAO / Bounty Import
+        <section className="overflow-hidden rounded-[32px] border border-agent-border bg-agent-card/80 shadow-[0_24px_60px_rgba(15,23,42,0.28)]">
+          <div className="border-b border-agent-border/70 bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.16),transparent_34%),radial-gradient(circle_at_top_right,rgba(14,165,233,0.12),transparent_30%),linear-gradient(135deg,rgba(120,53,15,0.22),rgba(15,23,42,0.12))] p-6 sm:p-7">
+            <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_340px]">
+              <div>
+                <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-amber-400/30 bg-amber-500/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.2em] text-amber-100">
+                  <DocumentTextIcon className="h-4 w-4" />
+                  Grant / Bounty Mode
+                </div>
+                <h1 className="max-w-3xl text-3xl font-bold tracking-tight text-white sm:text-[2.2rem]">
+                  Bring ecosystem grants into a manual milestone contract
+                </h1>
+                <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-300 sm:text-[15px]">
+                  Keep the original source context, lock the full treasury once, and release each milestone only after explicit human review. This flow is built for grants that need attribution, governance memory, and careful payout control.
+                </p>
+                <div className="mt-5 flex flex-wrap gap-3 text-xs text-slate-200">
+                  <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2">
+                    <LinkIcon className="h-4 w-4 text-amber-300" />
+                    Source attribution stays attached
+                  </div>
+                  <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2">
+                    <ClockIcon className="h-4 w-4 text-sky-300" />
+                    Fund once, release milestone by milestone
+                  </div>
+                  <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2">
+                    <ShieldCheckIcon className="h-4 w-4 text-emerald-300" />
+                    Manual review before every payout
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-[26px] border border-white/10 bg-slate-950/30 p-5 backdrop-blur-sm">
+                <div className="text-[11px] uppercase tracking-[0.2em] text-amber-100/80">How It Flows</div>
+                <div className="mt-4 space-y-3">
+                  {[
+                    'Import the original grant or bounty source',
+                    'Define milestones and the total treasury amount',
+                    'Fund the full amount once after creation',
+                    'Review and release each milestone manually',
+                  ].map((step) => (
+                    <div key={step} className="flex items-start gap-3 rounded-2xl border border-white/8 bg-white/[0.03] px-3 py-3">
+                      <CheckCircleIcon className="mt-0.5 h-4 w-4 text-amber-300" />
+                      <span className="text-sm leading-6 text-slate-200">{step}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
-            <h1 className="text-2xl font-bold text-white">Import a Bounty into PactAgent</h1>
-            <p className="mt-2 text-sm text-gray-400">
-              Attach source metadata, define the full milestone grant, lock the total once, and release each milestone only after manual reviewer approval.
-            </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
+          <form onSubmit={handleSubmit} className="space-y-5 p-5 sm:p-6">
+            <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_360px]">
+              <div className="space-y-5">
+                <section className={sectionClass}>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-amber-200">Source Intake</div>
+                      <h2 className="mt-2 text-xl font-semibold text-white">Anchor the original grant context</h2>
+                      <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
+                        Capture where this work came from so reviewers can evaluate milestone proof against the original treasury intent, not just the rewritten contract.
+                      </p>
+                    </div>
+                    <div className="rounded-2xl border border-amber-400/20 bg-amber-500/5 px-3 py-2 text-[11px] uppercase tracking-[0.16em] text-amber-100">
+                      Attribution first
+                    </div>
+                  </div>
+
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-2xl border border-agent-border/70 bg-agent-bg/50 p-4">
+                      <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Operator</div>
+                      <p className="mt-2 text-sm leading-6 text-slate-300">
+                        Imports the source, defines milestones, and prepares the full grant for one treasury funding action.
+                      </p>
+                    </div>
+                    <div className="rounded-2xl border border-agent-border/70 bg-agent-bg/50 p-4">
+                      <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Builder / Grantee</div>
+                      <p className="mt-2 text-sm leading-6 text-slate-300">
+                        Delivers each checkpoint and submits proof against the imported scope, notes, and review expectations.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 grid gap-5 md:grid-cols-2">
               <div>
-                <select className={inputClass} value={form.sourceType} onChange={(e) => updateField('sourceType', e.target.value)}>
+                <SelectField value={form.sourceType} onChange={(value) => updateField('sourceType', value)}>
                   <option value="BOUNTY">Bounty</option>
                   <option value="DAO">DAO</option>
-                </select>
+                </SelectField>
                 <p className={helperClass}>Choose where the work originated so the attribution reads correctly.</p>
               </div>
               <div>
@@ -348,8 +464,8 @@ export default function ImportBountyPage() {
                   <p className={helperClass}>A human-friendly source name, not the full URL.</p>
                 )}
               </div>
-            </div>
-            <div>
+                  </div>
+                  <div className="mt-4">
               <input
                 type="url"
                 className={`${inputClass} ${shouldShowFieldError(form.externalUrl, fieldErrors.externalUrl) ? errorInputClass : ''}`}
@@ -365,8 +481,25 @@ export default function ImportBountyPage() {
               ) : (
                 <p className={helperClass}>Paste the original DAO proposal, forum post, or bounty page link.</p>
               )}
-            </div>
-            <div className="grid gap-4 md:grid-cols-2">
+                  </div>
+                  <div className="mt-4">
+              <input
+                type="url"
+                className={`${inputClass} ${shouldShowFieldError(form.forumThreadUrl, fieldErrors.forumThreadUrl) ? errorInputClass : ''}`}
+                value={form.forumThreadUrl}
+                onChange={(e) => updateField('forumThreadUrl', e.target.value)}
+                placeholder="https://forum.example.com/t/grant-progress-thread"
+                inputMode="url"
+                autoCapitalize="none"
+                spellCheck={false}
+              />
+              {shouldShowFieldError(form.forumThreadUrl, fieldErrors.forumThreadUrl) ? (
+                <p className={fieldErrorClass}>{fieldErrors.forumThreadUrl}</p>
+              ) : (
+                <p className={helperClass}>Optional but recommended: the discussion thread PactAgent should keep synced over time.</p>
+              )}
+                  </div>
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
               <div>
                 <input className={inputClass} value={form.sourceReferenceId} onChange={(e) => updateField('sourceReferenceId', e.target.value)} placeholder="Proposal-42 or Bounty-17" />
                 <p className={helperClass}>Optional external ID from the source system.</p>
@@ -375,8 +508,8 @@ export default function ImportBountyPage() {
                 <input className={inputClass} value={form.sponsorName} onChange={(e) => updateField('sponsorName', e.target.value)} placeholder="Nervos Foundation" />
                 <p className={helperClass}>Optional sponsor, program, or DAO treasury name.</p>
               </div>
-            </div>
-            <div>
+                  </div>
+                  <div className="mt-4">
               <input
                 className={`${inputClass} ${shouldShowFieldError(form.bountyTitle, fieldErrors.bountyTitle) ? errorInputClass : ''}`}
                 value={form.bountyTitle}
@@ -388,24 +521,32 @@ export default function ImportBountyPage() {
               ) : (
                 <p className={helperClass}>Use the title exactly as the community or DAO published it.</p>
               )}
-            </div>
-            <div>
+                  </div>
+                  <div className="mt-4">
               <textarea className={`${inputClass} min-h-24`} value={form.bountyDescription} onChange={(e) => updateField('bountyDescription', e.target.value)} placeholder="Summarize the original scope, expected deliverables, and review context." />
               <p className={helperClass}>Recommended: copy the original scope so reviewers can compare what was promised.</p>
-            </div>
-            <div>
+                  </div>
+                  <div className="mt-4">
               <textarea className={`${inputClass} min-h-20`} value={form.governanceNotes} onChange={(e) => updateField('governanceNotes', e.target.value)} placeholder="Optional governance notes, treasury conditions, or reviewer instructions." />
               <p className={helperClass}>Optional: use this for proposal conditions, quorum notes, or reviewer instructions.</p>
-            </div>
+                  </div>
+                </section>
 
-            <div className="rounded-2xl border border-agent-border bg-agent-bg/40 p-5">
-              <h2 className="text-lg font-semibold text-white">Imported Agreement Terms</h2>
-              <p className="mt-2 text-sm text-gray-400">
-                This section defines the real PactAgent grant contract. The sponsor funds the full total after creation, then each milestone is reviewed manually and paid individually.
-              </p>
-            </div>
+                <section className={sectionClass}>
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-sky-200">Agreement Terms</div>
+                      <h2 className="mt-2 text-xl font-semibold text-white">Define the formal milestone contract</h2>
+                      <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
+                        This is the live PactAgent agreement. The sponsor funds the full total after creation, and each payout only moves after manual reviewer approval.
+                      </p>
+                    </div>
+                    <div className="rounded-2xl border border-sky-400/20 bg-sky-500/5 px-3 py-2 text-[11px] uppercase tracking-[0.16em] text-sky-100">
+                      Manual release only
+                    </div>
+                  </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
+                  <div className="mt-6 grid gap-5 md:grid-cols-2">
               <div>
                 <input className={inputClass} value={form.agreementTitle} onChange={(e) => updateField('agreementTitle', e.target.value)} placeholder="Grant Milestone Delivery Agreement" />
                 <p className={helperClass}>Optional: leave blank to reuse the bounty title.</p>
@@ -425,8 +566,8 @@ export default function ImportBountyPage() {
                   <p className={helperClass}>Paste the builder payout address exactly. Testnet addresses usually start with `ckt1`.</p>
                 )}
               </div>
-            </div>
-            <div>
+                  </div>
+                  <div className="mt-4">
               <textarea
                 className={`${inputClass} min-h-20 ${shouldShowFieldError(form.agreementDescription, fieldErrors.agreementDescription) ? errorInputClass : ''}`}
                 value={form.agreementDescription}
@@ -438,8 +579,8 @@ export default function ImportBountyPage() {
               ) : (
                 <p className={helperClass}>Optional only if the bounty description above already explains the work clearly.</p>
               )}
-            </div>
-            <div>
+                  </div>
+                  <div className="mt-4">
               <input
                 className={`${inputClass} ${shouldShowFieldError(form.workerFiberPubkey, fieldErrors.workerFiberPubkey) ? errorInputClass : ''}`}
                 value={form.workerFiberPubkey}
@@ -453,41 +594,47 @@ export default function ImportBountyPage() {
               ) : (
                 <p className={helperClass}>Needed only for Fiber payouts. Leave blank for standard CKB settlement.</p>
               )}
-            </div>
+                  </div>
 
-            <div className="rounded-2xl border border-agent-border bg-agent-bg/40 p-5">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="mt-6 rounded-[26px] border border-agent-border bg-agent-bg/40 p-6">
+              <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
                 <div>
-                  <h2 className="text-lg font-semibold text-white">Grant Milestones</h2>
-                  <p className="mt-1 text-sm text-gray-400">
+                  <h2 className="text-xl font-semibold text-white">Grant Milestones</h2>
+                  <p className="mt-2 max-w-xl text-sm leading-7 text-gray-400">
                     Define every deliverable the builder must complete. The total below is what the sponsor will fund once after the agreement is created.
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={addMilestone}
-                  className="inline-flex items-center gap-2 rounded-xl border border-agent-accent/40 bg-agent-accent/10 px-4 py-2 text-sm font-medium text-agent-accent hover:bg-agent-accent/20"
+                  className="inline-flex items-center gap-2 self-start rounded-xl border border-agent-accent/40 bg-agent-accent/10 px-5 py-3 text-sm font-medium text-agent-accent hover:bg-agent-accent/20"
                 >
                   <PlusIcon className="h-4 w-4" />
                   Add Milestone
                 </button>
               </div>
 
-              <div className="mt-4 rounded-xl border border-agent-border bg-agent-card/50 p-4">
-                <div className="text-xs uppercase tracking-[0.16em] text-gray-500">Total Grant Amount To Lock Upfront</div>
-                <div className="mt-2 text-2xl font-bold text-white">{totalGrantCkb || 0} CKB</div>
-                <p className="mt-1 text-sm text-gray-400">
-                  PactAgent will release this total progressively, one approved milestone at a time.
-                </p>
-              </div>
+                    <div className="mt-6 grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
+                      <div className="rounded-2xl border border-agent-border bg-agent-card/50 p-5">
+                        <div className="text-xs uppercase tracking-[0.16em] text-gray-500">Milestone Funding Pattern</div>
+                        <p className="mt-3 max-w-xl text-sm leading-7 text-slate-300">
+                          The treasury funds the full amount once. PactAgent then unlocks value milestone-by-milestone as human review clears each deliverable.
+                        </p>
+                      </div>
+                      <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-5">
+                        <div className="text-xs uppercase tracking-[0.16em] text-emerald-200">Total To Lock Upfront</div>
+                        <div className="mt-3 text-4xl font-bold text-white">{totalGrantCkb || 0} CKB</div>
+                        <p className="mt-2 text-sm leading-7 text-slate-300">Released progressively, never all at once.</p>
+                      </div>
+                    </div>
 
-              <div className="mt-4 space-y-4">
+              <div className="mt-6 space-y-5">
                 {milestones.map((milestone, index) => (
-                  <div key={`${milestone.title}-${index}`} className="rounded-2xl border border-agent-border bg-agent-card/50 p-4">
-                    <div className="mb-4 flex items-center justify-between gap-3">
+                  <div key={`${milestone.title}-${index}`} className="rounded-[24px] border border-agent-border bg-agent-card/50 p-5">
+                    <div className="mb-5 flex items-center justify-between gap-3">
                       <div>
-                        <h3 className="text-base font-semibold text-white">Milestone {index + 1}</h3>
-                        <p className="text-xs text-gray-500">Reviewer-approved payout checkpoint</p>
+                        <h3 className="text-lg font-semibold text-white">Milestone {index + 1}</h3>
+                        <p className="mt-1 text-xs text-gray-500">Reviewer-approved payout checkpoint</p>
                       </div>
                       {milestones.length > 1 ? (
                         <button
@@ -501,7 +648,7 @@ export default function ImportBountyPage() {
                       ) : null}
                     </div>
 
-                    <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
+                    <div className="grid gap-5 md:grid-cols-[1.2fr_0.8fr]">
                       <input
                         className={`${inputClass} ${milestoneErrors[index]?.title && (submitAttempted || milestone.title.trim()) ? errorInputClass : ''}`}
                         value={milestone.title}
@@ -519,7 +666,7 @@ export default function ImportBountyPage() {
                         placeholder={`Milestone amount (min ${MIN_MILESTONE_CKB} CKB)`}
                       />
                     </div>
-                    <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
+                    <div className="mt-2 grid gap-5 md:grid-cols-[1.2fr_0.8fr]">
                       <div>
                         {milestoneErrors[index]?.title && (submitAttempted || milestone.title.trim()) ? (
                           <p className={fieldErrorClass}>{milestoneErrors[index]?.title}</p>
@@ -537,7 +684,7 @@ export default function ImportBountyPage() {
                     </div>
 
                     <textarea
-                      className={`${inputClass} mt-4 min-h-24 ${milestoneErrors[index]?.description && (submitAttempted || milestone.description.trim()) ? errorInputClass : ''}`}
+                      className={`${inputClass} mt-5 min-h-28 ${milestoneErrors[index]?.description && (submitAttempted || milestone.description.trim()) ? errorInputClass : ''}`}
                       value={milestone.description}
                       onChange={(e) => updateMilestone(index, 'description', e.target.value)}
                       placeholder="Describe exactly what the builder must ship and what the reviewer should verify."
@@ -550,9 +697,60 @@ export default function ImportBountyPage() {
                   </div>
                 ))}
               </div>
+                  </div>
+                </section>
+              </div>
+
+              <aside className="space-y-5">
+                <section className={sectionClass}>
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-emerald-200">Why This Mode Exists</div>
+                  <h2 className="mt-2 text-lg font-semibold text-white">Not the same as direct freelance work</h2>
+                  <p className="mt-2 text-sm leading-6 text-slate-400">
+                    Ecosystem grants need provenance, treasury context, and a stronger paper trail. This mode keeps those signals visible from import through final payout.
+                  </p>
+                  <div className="mt-4 space-y-3">
+                    {[
+                      'Source links and governance notes stay attached to the agreement.',
+                      'Review stays intentionally human-controlled for every milestone.',
+                      'The full grant is funded once, but released gradually as work clears review.',
+                    ].map((point) => (
+                      <div key={point} className="flex items-start gap-3 rounded-2xl border border-agent-border/70 bg-agent-bg/50 px-3 py-3">
+                        <CheckCircleIcon className="mt-0.5 h-4 w-4 text-emerald-300" />
+                        <span className="text-sm leading-6 text-slate-300">{point}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section className={sectionClass}>
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-sky-200">Lifecycle Rules</div>
+                  <div className="mt-4 space-y-3">
+                    {[
+                      ['1', 'Import and rewrite the source into explicit milestones.'],
+                      ['2', 'Fund the total grant once the agreement is created.'],
+                      ['3', 'Review proof manually before every release.'],
+                      ['4', 'Repeat until the grant closes cleanly.'],
+                    ].map(([step, label]) => (
+                      <div key={step} className="flex items-start gap-3">
+                        <div className="flex h-7 w-7 items-center justify-center rounded-full border border-sky-400/30 bg-sky-500/10 text-xs font-semibold text-sky-100">
+                          {step}
+                        </div>
+                        <p className="pt-0.5 text-sm leading-6 text-slate-300">{label}</p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="rounded-[28px] border border-amber-800/40 bg-amber-950/20 p-5">
+                  <div className="text-sm font-medium text-amber-200">Review Mode: Manual only</div>
+                  <p className="mt-2 text-sm leading-6 text-amber-100/80">
+                    Imported DAO and bounty agreements always require human review before each milestone payout. Auto and hybrid review are intentionally disabled for grant-style funding.
+                  </p>
+                </section>
+              </aside>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-[0.9fr_0.9fr_1.1fr_1.1fr]">
+            <div className="grid gap-5 md:grid-cols-[0.95fr_0.95fr_1.1fr_1.1fr]">
               <div>
                 <input
                   type="number"
@@ -571,42 +769,40 @@ export default function ImportBountyPage() {
                 )}
               </div>
               <div>
-                <select className={inputClass} value={form.disputeWindowHours} onChange={(e) => updateField('disputeWindowHours', e.target.value)}>
+                <SelectField value={form.disputeWindowHours} onChange={(value) => updateField('disputeWindowHours', value)}>
                   <option value="24">24h dispute</option>
                   <option value="48">48h dispute</option>
                   <option value="72">72h dispute</option>
-                </select>
+                </SelectField>
                 <p className={helperClass}>How long reviewers or counterparties have to challenge a decision.</p>
               </div>
               <div>
-                <select className={inputClass} value={form.proofType} onChange={(e) => updateField('proofType', e.target.value)}>
+                <SelectField value={form.proofType} onChange={(value) => updateField('proofType', value)}>
                   <option value="URL">URL proof</option>
                   <option value="TEXT">Text proof</option>
                   <option value="FILE_HASH">File hash</option>
-                </select>
+                </SelectField>
                 <p className={helperClass}>Pick the proof format reviewers should expect from the builder.</p>
               </div>
               <div>
-                <select className={inputClass} value={form.payoutNetwork} onChange={(e) => updateField('payoutNetwork', e.target.value)}>
+                <SelectField value={form.payoutNetwork} onChange={(value) => updateField('payoutNetwork', value)}>
                   <option value="CKB">CKB</option>
                   <option value="FIBER">Fiber</option>
-                </select>
+                </SelectField>
                 <p className={helperClass}>Choose `Fiber` only if the worker can provide a valid Fiber public key.</p>
               </div>
             </div>
 
-            <div className="rounded-2xl border border-amber-800/40 bg-amber-950/20 p-4">
-              <div className="text-sm font-medium text-amber-200">Review Mode: Manual only</div>
-              <p className="mt-1 text-sm text-amber-100/80">
-                Imported DAO and bounty agreements always require human review before each milestone payout. Auto and hybrid review are intentionally disabled for grant-style funding.
-              </p>
-            </div>
-
             {error ? <div className="rounded-xl border border-red-800 bg-red-900/30 p-4 text-sm text-red-200">{error}</div> : null}
 
-            <button type="submit" disabled={saving} className="rounded-xl bg-agent-accent px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-70">
-              {saving ? 'Importing...' : 'Create Imported Agreement'}
-            </button>
+            <div className="flex flex-col gap-3 border-t border-agent-border/70 pt-5 sm:flex-row sm:items-center sm:justify-between">
+              <p className="max-w-2xl text-sm leading-6 text-slate-400">
+                This creates a manual PactAgent grant that keeps the source attribution visible while converting the work into milestone-based treasury releases.
+              </p>
+              <button type="submit" disabled={saving} className="rounded-xl bg-agent-accent px-6 py-3 text-sm font-medium text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-70">
+                {saving ? 'Importing...' : 'Create Imported Agreement'}
+              </button>
+            </div>
           </form>
         </section>
       </div>

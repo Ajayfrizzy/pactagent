@@ -9,13 +9,21 @@ export type AgentJobKind =
   | 'DISPUTE_RECOMMENDATION'
   | 'REMINDER_DEADLINE'
   | 'REMINDER_DISPUTE_RESPONSE'
-  | 'DELIVER_WEBHOOK';
+  | 'DELIVER_WEBHOOK'
+  | 'SYNC_SOURCE_THREAD'
+  | 'SYNC_CKBOOST'
+  | 'DELIVER_CKBOOST_NOTIFICATION';
 
 export type AgentJobPayload = {
   agreementId?: string;
   milestoneId?: string;
   disputeId?: string;
   deliveryId?: string;
+  ckboostNotificationId?: string;
+  forumThreadUrl?: string;
+  manualSummary?: string;
+  sourceSyncMode?: 'MANUAL' | 'SCHEDULED';
+  ckboostSyncMode?: 'PROFILE_REFRESH' | 'EVENT_REPLAY';
   note?: string;
 };
 

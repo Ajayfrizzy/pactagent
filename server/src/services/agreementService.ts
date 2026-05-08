@@ -33,7 +33,7 @@ const AGREEMENT_VALID_TRANSITIONS: Record<string, string[]> = {
   DRAFT: ['FUNDED', 'EXPIRED', 'CANCELLED'],
   CANCELLED: [],
   FUNDED: ['PROOF_SUBMITTED', 'DISPUTED', 'EXPIRED', 'REFUNDED'],
-  PROOF_SUBMITTED: ['UNDER_REVIEW', 'DISPUTED', 'EXPIRED'],
+  PROOF_SUBMITTED: ['PROOF_SUBMITTED', 'UNDER_REVIEW', 'DISPUTED', 'EXPIRED'],
   UNDER_REVIEW: ['APPROVED', 'DISPUTED', 'EXPIRED', 'REFUNDED'],
   APPROVED: ['FUNDED', 'PAID'],
   PAID: [],
@@ -46,7 +46,7 @@ const MILESTONE_VALID_TRANSITIONS: Record<string, string[]> = {
   PENDING: ['ACTIVE', 'CANCELLED'],
   CANCELLED: [],
   ACTIVE: ['PROOF_SUBMITTED', 'DISPUTED', 'EXPIRED', 'REFUNDED'],
-  PROOF_SUBMITTED: ['UNDER_REVIEW', 'DISPUTED', 'EXPIRED'],
+  PROOF_SUBMITTED: ['PROOF_SUBMITTED', 'UNDER_REVIEW', 'DISPUTED', 'EXPIRED'],
   UNDER_REVIEW: ['APPROVED', 'DISPUTED', 'EXPIRED', 'REFUNDED'],
   APPROVED: ['PAID'],
   PAID: [],
@@ -80,6 +80,7 @@ const agreementListInclude = {
     take: 2,
   },
   source: true,
+  ckboostProfileSnapshot: true,
 } as const;
 
 const agreementDetailInclude = {
@@ -111,6 +112,19 @@ const agreementDetailInclude = {
     orderBy: { createdAt: 'desc' },
   },
   source: true,
+  ckboostProfileSnapshot: true,
+  proofChecks: {
+    orderBy: { createdAt: 'desc' },
+    take: 20,
+  },
+  infoRequests: {
+    orderBy: { createdAt: 'desc' },
+    take: 50,
+  },
+  ckboostEvents: {
+    orderBy: { occurredAt: 'desc' },
+    take: 25,
+  },
   jobs: {
     orderBy: { createdAt: 'desc' },
     take: 40,
@@ -1477,7 +1491,9 @@ export async function createAgreement(data: {
     sourceType: string;
     sourceLabel: string;
     externalUrl: string;
+    forumThreadUrl?: string;
     sourceReferenceId?: string;
+    externalMetadataJson?: string;
     sponsorName?: string;
     bountyTitle: string;
     bountyDescription?: string;
@@ -1591,11 +1607,14 @@ export async function createAgreement(data: {
         sourceType: data.sourceMetadata.sourceType,
         sourceLabel: data.sourceMetadata.sourceLabel,
         externalUrl: data.sourceMetadata.externalUrl,
+        forumThreadUrl: data.sourceMetadata.forumThreadUrl || null,
         sourceReferenceId: data.sourceMetadata.sourceReferenceId || null,
+        externalMetadataJson: data.sourceMetadata.externalMetadataJson || null,
         sponsorName: data.sourceMetadata.sponsorName || null,
         bountyTitle: data.sourceMetadata.bountyTitle,
         bountyDescription: data.sourceMetadata.bountyDescription || null,
         governanceNotes: data.sourceMetadata.governanceNotes || null,
+        syncStatus: data.sourceMetadata.forumThreadUrl || data.sourceMetadata.externalUrl ? 'READY_TO_SYNC' : 'NOT_CONFIGURED',
         createdByAddress: normalizeAddress(data.sourceMetadata.createdByAddress),
       },
     });
@@ -1946,8 +1965,8 @@ export async function submitProof(
     throw new Error('Milestone not found');
   }
 
-  if (milestone.status !== 'ACTIVE') {
-    throw new Error('Proof can only be submitted for the active milestone');
+  if (!['ACTIVE', 'PROOF_SUBMITTED'].includes(milestone.status)) {
+    throw new Error('Proof can only be submitted for the active milestone or to revise a requested update');
   }
 
   const revision = (milestone.proofs?.length || 0) + 1;
@@ -2915,6 +2934,13 @@ export async function getAgreements(address?: string) {
           OR: [
             { clientAddress: address },
             { workerAddress: address },
+            {
+              source: {
+                is: {
+                  createdByAddress: address,
+                },
+              },
+            },
           ],
         }
       : undefined,

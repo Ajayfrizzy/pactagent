@@ -6,6 +6,7 @@ import agreementRoutes from './routes/agreements';
 import authRoutes from './routes/auth';
 import fiberRoutes from './routes/fiber';
 import inviteRoutes from './routes/invites';
+import integrationRoutes from './routes/integrations';
 import logRoutes from './routes/logs';
 import meRoutes from './routes/me';
 import profileRoutes from './routes/profiles';
@@ -38,6 +39,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/me', meRoutes);
 app.use('/api/profiles', profileRoutes);
 app.use('/api/invites', inviteRoutes);
+app.use('/api/integrations', integrationRoutes);
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/agreements', agreementRoutes);
 app.use('/api/logs', logRoutes);
@@ -50,6 +52,15 @@ app.get('/api/health', (_req, res) => {
 app.get('/api/config', async (_req, res) => {
   const fiberHealthy = await checkFiberHealth();
   const treasuryAddress = await getTreasuryAddress().catch(() => null);
+  const forumPublishReady =
+    config.forumPublishEnabled
+    && (
+      (config.forumPublishProvider === 'DISCOURSE'
+        && Boolean(config.forumPublishApiKey)
+        && Boolean(config.forumPublishApiUsername))
+      || (config.forumPublishProvider === 'WEBHOOK'
+        && Boolean(config.forumPublishWebhookUrl))
+    );
 
   res.json({
     success: true,
@@ -60,6 +71,11 @@ app.get('/api/config', async (_req, res) => {
       fiberHealthy,
       aiEnabled: config.aiEnabled,
       agentIntervalMs: config.agentIntervalMs,
+      forumPublishEnabled: config.forumPublishEnabled,
+      forumPublishProvider: config.forumPublishProvider,
+      forumPublishReady,
+      ckboostSyncEnabled: config.ckboostSyncEnabled,
+      ckboostWebhookConfigured: Boolean(config.ckboostWebhookUrl),
       treasuryAddress,
       onchainEscrowEnabled: config.onchainEscrowEnabled,
       onchainEscrowReady: isOnchainEscrowReady(),

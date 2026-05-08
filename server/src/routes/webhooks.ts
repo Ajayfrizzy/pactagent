@@ -21,6 +21,7 @@ const createWebhookSchema = z.object({
     'settlement.pending',
     'settlement.confirmed',
     'settlement.failed',
+    'source.sync_changed',
   ])).min(1),
 });
 

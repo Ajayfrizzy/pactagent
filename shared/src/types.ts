@@ -71,6 +71,8 @@ export interface Agreement {
   comments?: AgreementComment[];
   amendments?: AgreementAmendment[];
   jobs?: AgentJob[];
+  proofChecks?: ProofCheck[];
+  infoRequests?: InfoRequest[];
 }
 
 export interface MilestoneSettlement {
@@ -123,6 +125,54 @@ export interface Proof {
   content: string;
   contentHash: string;
   submittedAt: string;
+  reviewStatus?: 'UNREVIEWED' | 'CHECKING' | 'ISSUES_FOUND' | 'READY_FOR_HUMAN_REVIEW' | 'NEEDS_MORE_INFO';
+  lastCheckedAt?: string | null;
+}
+
+export interface ProofCheckChecklistItem {
+  key: 'links' | 'tx_hash' | 'screenshots' | 'scope';
+  label: string;
+  status: 'PRESENT' | 'MISSING' | 'PARTIAL' | 'NOT_APPLICABLE';
+  detail: string;
+  warning: string | null;
+}
+
+export interface ProofCheck {
+  id: string;
+  agreementId: string;
+  milestoneId: string;
+  proofId: string;
+  status: 'CHECKING' | 'ISSUES_FOUND' | 'READY_FOR_HUMAN_REVIEW' | 'NEEDS_MORE_INFO';
+  issueCount: number;
+  warningCount: number;
+  summary: string;
+  warningsJson: string | null;
+  checklistJson: string | null;
+  triggeredByAddress: string | null;
+  triggeredByType: 'USER' | 'SYSTEM';
+  asyncJobId: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface InfoRequest {
+  id: string;
+  agreementId: string;
+  milestoneId: string;
+  proofId: string | null;
+  requestType: 'STRUCTURED_REVIEW_REQUEST' | 'MESSAGE';
+  status: 'OPEN' | 'RESPONDED' | 'CLOSED';
+  requestedBy: string;
+  note: string | null;
+  questionsJson: string;
+  responseContent: string | null;
+  respondedBy: string | null;
+  respondedAt: string | null;
+  commentId: string | null;
+  responseCommentId: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface RichArtifact {
