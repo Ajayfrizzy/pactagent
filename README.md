@@ -43,6 +43,15 @@ PactAgent allows two participants to coordinate work and payment through a miles
 7. Settlement is attempted over Fiber when configured, otherwise on CKB L1.
 8. After a milestone is paid, the next one becomes active until the agreement is complete.
 
+PactAgent also supports imported grant and bounty workflows:
+
+1. An operator imports a DAO, bounty, or CKBoost campaign into PactAgent.
+2. Source metadata, governance context, sponsor identity, and campaign history are attached to the agreement.
+3. The imported work is converted into manually reviewed milestones with partial release behavior.
+4. Proof is checked for completeness before human review, and missing information can trigger structured follow-up requests.
+5. Source-thread updates can be drafted, reviewed, published, and synced over time.
+6. CKBoost imports can keep contributor reputation, external IDs, event history, and sync-back notifications attached to the agreement.
+
 ## Current Product Scope
 
 What is already implemented:
@@ -56,7 +65,19 @@ What is already implemented:
 - live agent logs and agreement updates via WebSocket
 - dispute creation and follow-up evidence submission
 - advisory AI dispute recommendation flow
+- proof completeness checking with structured checklists, persisted proof review records, and async worker execution
+- AI-drafted follow-up question generation for missing proof information
+- structured milestone-linked info requests and responses with audit history
+- human confirmation checkpoints that keep AI output advisory before payout approval
+- DAO and bounty import with source attribution, manual review enforcement, and milestone-based release planning
+- source-thread sync, review, and publish controls for imported grants
+- CKBoost import, contributor snapshots, event history, webhook ingestion, and outbound lifecycle notifications
 - Prisma + PostgreSQL persistence, ready for Supabase
+
+What is intentionally not implemented yet:
+- Phase 7 premium automation packaging
+- workspace/DAO/sponsor feature gating
+- automation usage metering and billing-oriented event packaging
 
 Important architecture note:
 
@@ -79,8 +100,35 @@ PactAgent currently uses real CKB transfers for funding and settlement, but the 
 1. Open an agreement where their wallet is the worker address.
 2. Wait for the client to fund it.
 3. Submit proof for the active milestone.
-4. Add more context if a dispute is opened.
-5. Receive payout through Fiber when available, otherwise on CKB.
+4. Review any structured info request if the proof checker or reviewer needs more context.
+5. Submit revised proof when follow-up is requested.
+6. Add more context if a dispute is opened.
+7. Receive payout through Fiber when available, otherwise on CKB.
+
+### Imported Grant / Bounty Flow
+
+1. Import a DAO or bounty source into PactAgent with source links, source title, sponsor context, and governance notes.
+2. Convert the work into formal milestones and fund the total grant once.
+3. Require manual review for every payout step.
+4. Run a proof completeness check before approval.
+5. Request more info through structured reviewer questions when needed.
+6. Optionally sync or publish source-thread updates for governance visibility.
+
+### CKBoost Handoff Flow
+
+1. Create an agreement from CKBoost using the dedicated import flow.
+2. Map the sponsor to the agreement client and the contributor to the worker role.
+3. Carry campaign, quest bundle, approved proof, contributor reputation, and external IDs into PactAgent.
+4. Ingest CKBoost webhook events and refresh contributor snapshots over time.
+5. Notify CKBoost when proof is submitted, approved, or paid.
+
+### Proof Review Flow
+
+1. Worker submits a proof bundle for the active milestone.
+2. PactAgent runs a completeness check synchronously or through the worker loop.
+3. The proof is marked `CHECKING`, `ISSUES_FOUND`, `READY_FOR_HUMAN_REVIEW`, or `NEEDS_MORE_INFO`.
+4. Reviewers can draft and send AI-generated follow-up questions when evidence is incomplete.
+5. Approval stays blocked until the human reviewer confirms the decision and any open info requests are resolved.
 
 ### Dispute Flow
 
@@ -97,12 +145,15 @@ PactAgent includes a background worker that continuously scans active agreements
 The agent currently handles:
 - expiring unfunded agreements after deadline
 - activating the first or next milestone
-- validating submitted proof presence
-- moving agreements into review
+- starting and completing proof completeness checks
+- validating submitted proof presence and completeness
+- moving agreements into review only when the latest proof is ready
 - auto-approving milestones in `AUTO` mode
 - waiting for user confirmation in `HYBRID` and `MANUAL` paths
+- scheduling info-request follow-up and proof re-check work
 - generating dispute recommendations
 - initiating payout or refund settlement
+- polling imported source threads and scheduling CKBoost sync work
 - unlocking the next milestone after settlement
 - broadcasting logs and agreement changes in real time
 
@@ -148,8 +199,9 @@ The frontend is built with Next.js and provides three main surfaces:
 
 - displays agreement metadata and milestone timeline
 - shows funding, settlement, and Fiber references
-- allows funding, proof submission, review actions, dispute actions, and evidence submission
+- allows funding, proof submission, proof checking, review actions, info requests, dispute actions, and evidence submission
 - displays submitted proofs and agreement-specific logs
+- surfaces imported source metadata, source sync controls, CKBoost contributor context, and operational history
 
 ## Backend Architecture
 
@@ -218,9 +270,9 @@ This is the core system behavior today.
 
 ### 2. AI Recommendation Layer
 
-This is used only for dispute recommendation, not autonomous fund release.
+This is used for dispute recommendation, proof completeness review, and follow-up drafting, not autonomous fund release.
 
-- default mode is a deterministic mock engine
+- default mode can fall back to deterministic behavior when AI is unavailable
 - optional OpenAI integration is supported through configuration
 - the OpenAI path uses the Responses API with structured JSON schema output
 - recommendations include:
@@ -228,10 +280,103 @@ This is used only for dispute recommendation, not autonomous fund release.
   - recommendation type
   - confidence
   - rationale
+- proof review output can include:
+  - readiness status
+  - structured checklist items
+  - warnings
+  - follow-up prompts for missing information
 
 Important safety property:
 
 AI output is advisory only. It does not directly move funds without the normal agreement review path.
+
+## Implemented Phase Summary
+
+### Phase 1: AI Report Completeness Checker
+
+Implemented:
+- AI-backed proof/report completeness checking with deterministic fallback
+- `Check report` step on the agreement page
+- structured proof completeness checklist
+- persisted proof review states:
+  - `CHECKING`
+  - `ISSUES_FOUND`
+  - `READY_FOR_HUMAN_REVIEW`
+  - `NEEDS_MORE_INFO`
+- missing-item warnings near proof submission and reviewer approval areas
+- `POST /api/agreements/:id/proof/check`
+- `reportReviewService.ts` milestone-vs-proof comparison logic
+- proof bundle parsing reuse from the rich payload service
+- proof check audit/history logging
+- optional async execution through the worker loop
+
+### Phase 2: Follow-Up Generator
+
+Implemented:
+- AI follow-up question drafting for missing proof information
+- `Request more info` panel on the agreement page
+- editable AI-drafted reviewer questions
+- structured follow-up requests and participant responses
+- outstanding info requests in the milestone timeline and review surfaces
+- service layer that turns checker output into follow-up prompts
+- milestone-linked structured info request persistence
+- audit events for `INFO_REQUESTED` and `INFO_RECEIVED`
+- reuse of existing agreement comment/message flows
+
+### Phase 3: Human-In-The-Loop Review Controls
+
+Implemented:
+- reviewer controls that separate AI suggestion from final human action
+- AI output labeled and acknowledged as suggested, not self-approving
+- human confirmation checkpoints before payout/status transitions
+- imported-grant policy rules that prevent AI-driven payout approval
+- manual review lock for imported grants
+- permission checks for who can confirm payout actions
+
+### Phase 4: Forum Bot And Grant Status Sync
+
+Implemented:
+- forum/governance thread capture during import
+- source-thread card on agreement detail
+- admin and agreement-page source update controls
+- source sync service for ingesting and summarizing source-thread updates
+- DB fields for thread URL, sync status, last synced at, latest summary, review and publish metadata
+- `POST /api/agreements/:id/source-sync`
+- `POST /api/agreements/:id/source-sync/publish`
+- explicit reviewer approval before direct posting
+- webhook events for source sync state changes
+- scheduled background source polling in the worker loop
+
+### Phase 5: CKBoost Handoff
+
+Implemented:
+- `Create from CKBoost` entry point
+- CKBoost campaign/contributor import form
+- CKBoost import service and route
+- mapping from sponsor to client, contributor to worker, and campaign/quest/proof data into agreement metadata
+- imported contributor reputation and campaign history during creation
+- manual import and webhook-driven ingestion
+- `POST /api/integrations/ckboost/import`
+- persistence of CKBoost external IDs for future sync-back
+
+### Phase 6: CKBoost Identity, Reputation, And Event Sync
+
+Implemented:
+- contributor reputation panels on import and agreement pages
+- linked CKBoost profile, approval rate, campaign participation, and leaderboard context
+- periodic sync jobs and webhook receivers for CKBoost events
+- stored external profile snapshots and event history
+- CKBoost notifications for proof submitted, approved, and paid
+- durable retryable outbound CKBoost notification delivery records
+
+### Phase 7: Premium Automation Package
+
+Not implemented yet:
+- plan / feature gating in admin and settings pages
+- enabled automation views by workspace, DAO, or sponsor
+- workspace-level feature flags for automation modules
+- usage metering by agreement, milestone, sync job, or AI run
+- billing-oriented premium automation event packaging
 
 ## Tech Stack
 
@@ -456,9 +601,10 @@ The app will be available at:
 
 - agreement logic is off-chain even though settlement uses real CKB transfers
 - treasury custody is still a trust assumption in the current architecture
-- proof validation is lightweight and based on workflow/state rather than deep verification
+- proof validation is still operationally focused rather than cryptographic or oracle-backed verification
 - dispute AI is advisory, not a replacement for arbitration
 - there is no role-separated admin or arbitrator interface yet
+- premium automation packaging and billing controls from Phase 7 are still not implemented
 
 ## Future Directions
 
@@ -474,6 +620,7 @@ Potential next steps:
 - improve Fiber channel management and routing strategies
 - add notifications, audit exports, and compliance-friendly reporting
 - expose PactAgent as infrastructure for third-party apps
+- add Phase 7 premium automation controls, feature gating, and usage metering
 
 ## Recommended Improvements And High-Impact Features
 
@@ -564,7 +711,6 @@ A strong workflow experience is what turns technical infrastructure into a produ
 - add public worker/client profiles with lightweight reputation history
 - support invite links for new agreements
 - expose embeddable API and webhook integrations for third-party platforms
-- integrate with DAO contributor tooling, grants systems, and bounty platforms
 - support multi-party agreements for agencies, teams, or milestone committees
 - add optional stablecoin or multi-asset settlement paths if the chain stack allows it
 
@@ -580,6 +726,11 @@ This is where PactAgent starts becoming not just an app, but a reusable agreemen
 - add export formats for finance, operations, and legal review
 - include treasury balance health checks and payout runway visibility
 - add agreement lifecycle metrics for marketplaces or enterprise teams
+
+Not implemented from the current roadmap:
+- premium automation packaging and billing controls from Phase 7
+- workspace, DAO, or sponsor-level automation gating
+- usage metering for AI runs, sync jobs, or premium automation actions
 
 Why this matters:
 

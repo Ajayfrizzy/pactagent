@@ -63,6 +63,23 @@ function getParticipantLabel(
   return 'Participant';
 }
 
+function formatAuditActionTitle(action: string) {
+  switch (action) {
+    case 'AGREEMENT_IMPORTED_FROM_BOUNTY':
+      return 'Agreement imported from bounty';
+    case 'INFO_REQUESTED':
+      return 'More information requested';
+    case 'INFO_RECEIVED':
+      return 'Information received';
+    case 'PROOF_CHECK_STARTED':
+      return 'Proof review started';
+    case 'PROOF_CHECK_COMPLETED':
+      return 'Proof review completed';
+    default:
+      return action.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+}
+
 function getRecommendationAvailability(dispute: any, agreement: any) {
   if (!dispute) {
     return null;
@@ -2276,6 +2293,12 @@ export default function AgreementDetailPage() {
 
     auditLogs.forEach((entry: any) => {
       const metadata = safeParseJson<Record<string, unknown>>(entry.metadataJson);
+      const sourceLabel = typeof metadata?.sourceLabel === 'string' ? metadata.sourceLabel : null;
+      const sourceType = typeof metadata?.sourceType === 'string' ? metadata.sourceType : null;
+      const importedBountyDetail =
+        entry.action === 'AGREEMENT_IMPORTED_FROM_BOUNTY'
+          ? `Imported from ${sourceLabel || 'the source record'}${sourceType ? ` · ${sourceType.toLowerCase()} workflow attached` : ''}.`
+          : null;
       const infoRequestDetail =
         entry.action === 'INFO_REQUESTED' && Array.isArray(metadata?.questions)
           ? `Requested more info: ${(metadata.questions as string[]).slice(0, 2).join(' ')}`
@@ -2285,8 +2308,11 @@ export default function AgreementDetailPage() {
       items.push({
         id: `audit-${entry.id}`,
         kind: 'Audit',
-        title: entry.action.replace(/_/g, ' '),
-        detail: infoRequestDetail || `${entry.actorAddress ? `${getParticipantLabel(entry.actorAddress, agreement)} acted` : 'System action'} on ${entry.resourceType.toLowerCase()} ${entry.resourceId}`,
+        title: formatAuditActionTitle(entry.action),
+        detail:
+          importedBountyDetail
+          || infoRequestDetail
+          || `${entry.actorAddress ? `${getParticipantLabel(entry.actorAddress, agreement)} acted` : 'System action'} on ${entry.resourceType.toLowerCase()} ${entry.resourceId}`,
         timestamp: new Date(entry.createdAt).getTime(),
         tone: 'border-violet-900/50 bg-violet-950/20 text-violet-200',
       });
@@ -2718,30 +2744,30 @@ export default function AgreementDetailPage() {
 
             <div className="overflow-hidden rounded-2xl border border-agent-border bg-agent-card shadow-[0_18px_50px_rgba(15,23,42,0.18)]">
               <div className="border-b border-agent-border bg-gradient-to-r from-agent-bg/95 via-agent-card to-agent-bg/90 p-6">
-                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                  <div>
+                <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="max-w-2xl">
                     <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Operational History</div>
                     <h2 className="mt-2 text-xl font-semibold text-white">Unified lifecycle timeline</h2>
                     <p className="mt-1 text-sm text-gray-400">
                       Funding attempts, audit actions, participant messages, amendments, and dispute activity are merged here so the agreement reads like one continuous operating record.
                     </p>
                   </div>
-                  <div className="grid grid-cols-2 gap-3 text-xs text-gray-400 sm:grid-cols-4">
-                    <div className="rounded-xl border border-agent-border bg-agent-bg/60 px-3 py-2">
-                      <div className="uppercase tracking-wide text-gray-500">Timeline items</div>
-                      <div className="mt-1 text-base font-semibold text-white">{operationalTimeline.length}</div>
+                  <div className="grid grid-cols-2 gap-3 text-xs text-gray-400 sm:grid-cols-4 xl:min-w-[520px]">
+                    <div className="rounded-2xl border border-agent-border bg-agent-bg/60 px-4 py-4 sm:px-5">
+                      <div className="text-[10px] uppercase tracking-[0.16em] text-gray-500">Timeline items</div>
+                      <div className="mt-3 text-2xl font-semibold leading-none text-white">{operationalTimeline.length}</div>
                     </div>
-                    <div className="rounded-xl border border-agent-border bg-agent-bg/60 px-3 py-2">
-                      <div className="uppercase tracking-wide text-gray-500">Settlements</div>
-                      <div className="mt-1 text-base font-semibold text-white">{settlementHistory.length}</div>
+                    <div className="rounded-2xl border border-agent-border bg-agent-bg/60 px-4 py-4 sm:px-5">
+                      <div className="text-[10px] uppercase tracking-[0.16em] text-gray-500">Settlements</div>
+                      <div className="mt-3 text-2xl font-semibold leading-none text-white">{settlementHistory.length}</div>
                     </div>
-                    <div className="rounded-xl border border-agent-border bg-agent-bg/60 px-3 py-2">
-                      <div className="uppercase tracking-wide text-gray-500">Messages</div>
-                      <div className="mt-1 text-base font-semibold text-white">{agreement.comments?.length || 0}</div>
+                    <div className="rounded-2xl border border-agent-border bg-agent-bg/60 px-4 py-4 sm:px-5">
+                      <div className="text-[10px] uppercase tracking-[0.16em] text-gray-500">Messages</div>
+                      <div className="mt-3 text-2xl font-semibold leading-none text-white">{agreement.comments?.length || 0}</div>
                     </div>
-                    <div className="rounded-xl border border-agent-border bg-agent-bg/60 px-3 py-2">
-                      <div className="uppercase tracking-wide text-gray-500">Amendments</div>
-                      <div className="mt-1 text-base font-semibold text-white">{agreement.amendments?.length || 0}</div>
+                    <div className="rounded-2xl border border-agent-border bg-agent-bg/60 px-4 py-4 sm:px-5">
+                      <div className="text-[10px] uppercase tracking-[0.16em] text-gray-500">Amendments</div>
+                      <div className="mt-3 text-2xl font-semibold leading-none text-white">{agreement.amendments?.length || 0}</div>
                     </div>
                   </div>
                 </div>
