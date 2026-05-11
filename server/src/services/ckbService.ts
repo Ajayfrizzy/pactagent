@@ -24,6 +24,10 @@ type CkbTxStatus = 'pending' | 'proposed' | 'committed' | 'rejected' | 'unknown'
 
 type CkbTransactionResponse = {
   transaction?: {
+    inputs?: Array<{
+      previous_output?: Record<string, string | undefined>;
+      previousOutput?: Record<string, string | undefined>;
+    }>;
     outputs?: Array<{
       capacity?: string;
       lock?: unknown;
@@ -217,6 +221,78 @@ export async function inspectTransactionOutputsToAddress(params: {
     blockHash: tx?.tx_status?.block_hash ?? null,
     matchingOutputs,
     totalMatchedCapacity: matchingOutputs.reduce((sum, item) => sum + item.capacity, BigInt(0)),
+  };
+}
+
+export async function findSpendingTransactionForOutPoint(params: {
+  txHash: string;
+  index: number;
+}) {
+  const tx = await rpcCall<CkbTransactionResponse>('get_transaction', [params.txHash]);
+  if (!tx?.transaction?.outputs?.length) {
+    return {
+      foundTransaction: false,
+      spendingTxHash: null,
+    };
+  }
+
+  const output = tx.transaction.outputs[params.index];
+  if (!output?.lock) {
+    return {
+      foundTransaction: true,
+      spendingTxHash: null,
+    };
+  }
+
+  const searchKey = {
+    script: output.lock,
+    script_type: 'lock',
+  };
+
+  const matches = await rpcCall<{
+    objects?: Array<{
+      tx_hash?: string;
+      txHash?: string;
+      io_type?: string;
+      ioType?: string;
+    }>;
+  }>('get_transactions', [searchKey, 'desc', '0x40', null]);
+
+  const spendingHashes = new Set(
+    (matches.objects || [])
+      .filter((entry) => (entry.io_type ?? entry.ioType) === 'input')
+      .map((entry) => entry.tx_hash ?? entry.txHash)
+      .filter((value): value is string => Boolean(value) && value !== params.txHash)
+  );
+
+  for (const candidateHash of spendingHashes) {
+    const candidateTx = await rpcCall<CkbTransactionResponse>('get_transaction', [candidateHash]);
+    const inputs = candidateTx?.transaction?.inputs ?? [];
+    const spendsOutPoint = inputs.some((input) => {
+      const previousOutput = (input.previous_output ?? input.previousOutput) as Record<string, string | undefined> | undefined;
+      const previousTxHash = previousOutput?.tx_hash ?? previousOutput?.txHash;
+      const previousIndex = previousOutput?.index;
+      if (!previousTxHash || previousIndex == null) {
+        return false;
+      }
+
+      return (
+        normalizeHex(previousTxHash) === normalizeHex(params.txHash)
+        && parseCapacity(previousIndex) === BigInt(params.index)
+      );
+    });
+
+    if (spendsOutPoint) {
+      return {
+        foundTransaction: true,
+        spendingTxHash: candidateHash,
+      };
+    }
+  }
+
+  return {
+    foundTransaction: true,
+    spendingTxHash: null,
   };
 }
 

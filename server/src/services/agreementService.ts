@@ -3,6 +3,7 @@ import { v4 as uuid } from 'uuid';
 import { prisma } from '../db';
 import { broadcast } from '../ws';
 import {
+  findSpendingTransactionForOutPoint,
   getTreasuryAddress,
   inspectTransactionOutputsToAddress,
   sendTreasuryTransfer,
@@ -918,6 +919,14 @@ function getCurrentMilestoneFromAgreement(agreement: any) {
   );
 }
 
+function isImportedBountyAgreement(agreement: {
+  source?: {
+    sourceType?: string | null;
+  } | null;
+}) {
+  return agreement.source?.sourceType === 'BOUNTY';
+}
+
 function getLatestSettlementRecord(
   settlements: Array<{
     id: string;
@@ -989,6 +998,221 @@ export function matchOnchainFundingOutputsToMilestones(
   });
 
   return assignments;
+}
+
+async function inferOnchainSettlementDirection(params: {
+  txHash: string;
+  workerAddress: string;
+  clientAddress: string;
+  expectedAmount: string;
+}) {
+  const [workerVerification, clientVerification] = await Promise.all([
+    verifyFundingTransaction({
+      txHash: params.txHash,
+      toAddress: params.workerAddress,
+      expectedAmount: params.expectedAmount,
+    }),
+    verifyFundingTransaction({
+      txHash: params.txHash,
+      toAddress: params.clientAddress,
+      expectedAmount: params.expectedAmount,
+    }),
+  ]);
+
+  const isCommitted = workerVerification.status === 'committed' || clientVerification.status === 'committed';
+  if (!isCommitted) {
+    return {
+      direction: null as 'PAYOUT' | 'REFUND' | null,
+      blockHash: workerVerification.blockHash || clientVerification.blockHash || null,
+    };
+  }
+
+  if (workerVerification.status === 'committed' && workerVerification.foundMatchingOutput) {
+    return {
+      direction: 'PAYOUT' as const,
+      blockHash: workerVerification.blockHash,
+    };
+  }
+
+  if (clientVerification.status === 'committed' && clientVerification.foundMatchingOutput) {
+    return {
+      direction: 'REFUND' as const,
+      blockHash: clientVerification.blockHash,
+    };
+  }
+
+  return {
+    direction: null as 'PAYOUT' | 'REFUND' | null,
+    blockHash: workerVerification.blockHash || clientVerification.blockHash || null,
+  };
+}
+
+async function reconcileSpentOnchainMilestoneCell(
+  agreementId: string,
+  agreement: Awaited<ReturnType<typeof ensureAgreementMilestones>>,
+) {
+  if (agreement.escrowModel !== 'ONCHAIN_LOCK') {
+    return null;
+  }
+
+  const unsettledMilestone = agreement.milestones.find((milestone: any) =>
+    !['PAID', 'REFUNDED', 'CANCELLED', 'EXPIRED'].includes(milestone.status)
+    && milestone.escrowFundingTxHash
+    && milestone.escrowOutputIndex != null
+  );
+
+  if (!unsettledMilestone) {
+    return null;
+  }
+
+  const spending = await findSpendingTransactionForOutPoint({
+    txHash: unsettledMilestone.escrowFundingTxHash,
+    index: unsettledMilestone.escrowOutputIndex,
+  });
+
+  if (!spending.foundTransaction || !spending.spendingTxHash) {
+    return null;
+  }
+
+  const inferred = await inferOnchainSettlementDirection({
+    txHash: spending.spendingTxHash,
+    workerAddress: agreement.workerAddress,
+    clientAddress: agreement.clientAddress,
+    expectedAmount: unsettledMilestone.amount,
+  });
+
+  if (!inferred.direction) {
+    return null;
+  }
+
+  const existingSettlement = agreement.settlements.find((settlement: any) =>
+    settlement.milestoneId === unsettledMilestone.id
+    && settlement.txHash === spending.spendingTxHash
+    && settlement.direction === inferred.direction
+  );
+
+  if (existingSettlement) {
+    if (existingSettlement.status !== 'CONFIRMED') {
+      await markSettlementRecordStatus(existingSettlement.id, {
+        status: 'CONFIRMED',
+        confirmedAt: new Date(),
+        errorMessage: null,
+      });
+    }
+  } else {
+    await createSettlementRecord({
+      agreementId,
+      milestoneId: unsettledMilestone.id,
+      direction: inferred.direction,
+      network: 'CKB',
+      amount: unsettledMilestone.amount,
+      txHash: spending.spendingTxHash,
+      status: 'CONFIRMED',
+      confirmedAt: new Date(),
+    });
+  }
+
+  await setAgreementSettlementState(agreementId, {
+    settlementStatus: confirmedSettlementStatus(inferred.direction),
+    ckbTxHashRelease: spending.spendingTxHash,
+    lastSettlementError: null,
+  });
+
+  if (inferred.direction === 'PAYOUT') {
+    await prisma.milestone.update({
+      where: { id: unsettledMilestone.id },
+      data: { status: 'PAID' },
+    });
+    await resolveOpenMilestoneDisputes(unsettledMilestone.id);
+
+    const remainingMilestones = agreement.milestones.filter((item: any) => item.sortOrder > unsettledMilestone.sortOrder);
+    const nextPendingMilestone = remainingMilestones.find((item: any) => item.status === 'PENDING');
+
+    if (nextPendingMilestone) {
+      await prisma.$transaction([
+        prisma.agreement.update({
+          where: { id: agreementId },
+          data: {
+            status: 'FUNDED',
+            settlementStatus: 'FUNDED',
+            lastSettlementError: null,
+          },
+        }),
+        prisma.milestone.update({
+          where: { id: nextPendingMilestone.id },
+          data: { status: 'ACTIVE' },
+        }),
+      ]);
+
+      await createLog({
+        agreementId,
+        level: 'INFO',
+        eventType: 'MILESTONE_ACTIVATED',
+        message: `Milestone ${nextPendingMilestone.sortOrder} is now active: ${nextPendingMilestone.title}`,
+        metadata: {
+          milestoneId: nextPendingMilestone.id,
+          milestoneTitle: nextPendingMilestone.title,
+          milestoneAmount: nextPendingMilestone.amount,
+          sortOrder: nextPendingMilestone.sortOrder,
+          recoveredFromTxHash: spending.spendingTxHash,
+        },
+      });
+    } else {
+      await prisma.agreement.update({
+        where: { id: agreementId },
+        data: {
+          status: 'PAID',
+          settlementStatus: 'PAYOUT_CONFIRMED',
+          lastSettlementError: null,
+        },
+      });
+    }
+
+    const updatedAgreement = await getAgreementById(agreementId);
+    await createLog({
+      agreementId,
+      level: 'SUCCESS',
+      eventType: 'SETTLEMENT_CONFIRMED',
+      message: 'Recovered a previously missed on-chain payout settlement',
+      metadata: {
+        milestoneId: unsettledMilestone.id,
+        milestoneTitle: unsettledMilestone.title,
+        txHash: spending.spendingTxHash,
+        blockHash: inferred.blockHash,
+      },
+    });
+    return updatedAgreement;
+  }
+
+  await resolveOpenMilestoneDisputes(unsettledMilestone.id);
+  await prisma.$transaction([
+    prisma.milestone.update({
+      where: { id: unsettledMilestone.id },
+      data: { status: 'REFUNDED' },
+    }),
+    prisma.agreement.update({
+      where: { id: agreementId },
+      data: {
+        status: 'REFUNDED',
+        settlementStatus: 'REFUND_CONFIRMED',
+        lastSettlementError: null,
+      },
+    }),
+  ]);
+  await createLog({
+    agreementId,
+    level: 'SUCCESS',
+    eventType: 'SETTLEMENT_CONFIRMED',
+    message: 'Recovered a previously missed on-chain refund settlement',
+    metadata: {
+      milestoneId: unsettledMilestone.id,
+      milestoneTitle: unsettledMilestone.title,
+      txHash: spending.spendingTxHash,
+      blockHash: inferred.blockHash,
+    },
+  });
+
+  return getAgreementById(agreementId);
 }
 
 async function resolveOpenMilestoneDisputes(milestoneId: string) {
@@ -2031,8 +2255,12 @@ export async function recordOnchainResolutionIntent(params: {
     throw new Error('This agreement is not configured for on-chain lock settlement');
   }
 
+  if (params.direction === 'REFUND' && isImportedBountyAgreement(agreement)) {
+    throw new Error('Imported bounty milestones cannot be refunded through the worker settlement path.');
+  }
+
   if (params.direction === 'PAYOUT') {
-    if (!['UNDER_REVIEW', 'DISPUTED'].includes(milestone.status)) {
+    if (!['PROOF_SUBMITTED', 'UNDER_REVIEW', 'DISPUTED'].includes(milestone.status)) {
       throw new Error('Milestone is not ready for payout settlement');
     }
 
@@ -2083,6 +2311,9 @@ export async function openDispute(
   }
 ) {
   const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
+  if (isImportedBountyAgreement(agreement)) {
+    throw new Error('Imported bounty milestones use reviewer follow-up requests instead of disputes.');
+  }
   const milestone = agreement.milestones.find((item: any) => item.id === milestoneId);
 
   if (!milestone) {
@@ -2153,6 +2384,9 @@ export async function recordMutualRefundConsent(
   actorAddress: string
 ) {
   const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
+  if (isImportedBountyAgreement(agreement)) {
+    throw new Error('Imported bounty milestones do not support mutual refund settlement.');
+  }
   const milestone = getCurrentMilestoneFromAgreement(agreement);
 
   if (!milestone || milestone.status !== 'DISPUTED') {
@@ -2260,6 +2494,9 @@ export async function addDisputeEvidence(
   }
 ) {
   const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
+  if (isImportedBountyAgreement(agreement)) {
+    throw new Error('Imported bounty milestones do not use the dispute evidence workspace.');
+  }
   const dispute = agreement.disputes.find((item: any) => item.id === disputeId);
 
   if (!dispute) {
@@ -2323,7 +2560,7 @@ export async function approveCurrentMilestone(agreementId: string) {
     throw new Error('No active milestone available to approve');
   }
 
-  if (!['UNDER_REVIEW', 'DISPUTED'].includes(milestone.status)) {
+  if (!['PROOF_SUBMITTED', 'UNDER_REVIEW', 'DISPUTED'].includes(milestone.status)) {
     throw new Error('Current milestone is not ready for approval');
   }
 
@@ -2380,6 +2617,9 @@ export async function recordSplitSettlementConsent(
   workerAmount: string
 ) {
   const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
+  if (isImportedBountyAgreement(agreement)) {
+    throw new Error('Imported bounty milestones do not support split dispute settlement.');
+  }
   const milestone = getCurrentMilestoneFromAgreement(agreement);
 
   if (!milestone || milestone.status !== 'DISPUTED') {
@@ -2481,6 +2721,9 @@ export async function settleCurrentMilestoneSplit(
   workerAmount: string
 ) {
   const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
+  if (isImportedBountyAgreement(agreement)) {
+    throw new Error('Imported bounty milestones do not support split dispute settlement.');
+  }
   const milestone = getCurrentMilestoneFromAgreement(agreement);
 
   if (!milestone) {
@@ -2551,6 +2794,9 @@ export async function settleCurrentMilestoneSplit(
 
 export async function refundCurrentMilestone(agreementId: string) {
   const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
+  if (isImportedBountyAgreement(agreement)) {
+    throw new Error('Imported bounty milestones cannot be refunded.');
+  }
   const milestone = getCurrentMilestoneFromAgreement(agreement);
 
   if (!milestone) {
@@ -2815,6 +3061,14 @@ export async function reconcileAgreementSettlement(agreementId: string) {
     return confirmPendingSettlementIfReady(agreementId);
   }
 
+  if (agreement.escrowModel === 'ONCHAIN_LOCK') {
+    const hydrated = await ensureAgreementMilestones(agreement);
+    const recovered = await reconcileSpentOnchainMilestoneCell(agreementId, hydrated);
+    if (recovered) {
+      return recovered;
+    }
+  }
+
   return getAgreementById(agreementId);
 }
 
@@ -2975,6 +3229,11 @@ export async function getAgreementParticipantById(id: string) {
       clientAddress: true,
       workerAddress: true,
       arbitratorAddress: true,
+      source: {
+        select: {
+          sourceType: true,
+        },
+      },
     },
   });
 }

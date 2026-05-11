@@ -317,42 +317,44 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 gap-8 xl:grid-cols-3">
           <div className="space-y-6 xl:col-span-2">
             <section className="rounded-2xl border border-agent-border bg-agent-card/70 p-5">
-              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <h2 className="text-lg font-bold text-white sm:text-xl">Dashboard</h2>
-                  <p className="mt-1 text-sm text-gray-400">
-                    Your current operating snapshot for every active agreement.
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-3 text-sm">
-                  <div className="min-w-[180px] rounded-xl border border-agent-border bg-agent-bg/60 px-4 py-3">
-                    <div className="mb-1 text-xs uppercase tracking-wide text-gray-500">Completed payouts</div>
-                    <div className="flex items-center gap-2 font-medium text-white">
-                      <CheckCircleIcon className="h-4 w-4 text-green-400" />
-                      {stats.completedCount} settled agreements
-                    </div>
-                  </div>
-                  <div className="min-w-[180px] rounded-xl border border-agent-border bg-agent-bg/60 px-4 py-3">
-                    <div className="mb-1 text-xs uppercase tracking-wide text-gray-500">Needs attention</div>
-                    <div className="flex items-center gap-2 font-medium text-white">
-                      <ShieldCheckIcon className="h-4 w-4 text-amber-300" />
-                      {agreementsNeedingAttention} agreements
-                    </div>
-                  </div>
-                  <div className="min-w-[180px] rounded-xl border border-agent-border bg-agent-bg/60 px-4 py-3">
-                    <div className="mb-1 text-xs uppercase tracking-wide text-gray-500">Connected wallet</div>
-                    <div className="break-all font-mono text-xs text-white">
-                      {walletAddress || 'Connect to unlock agreement actions'}
-                    </div>
-                  </div>
-                  <Link
-                    href="/agreement/import-ckboost"
-                    className="inline-flex min-w-[180px] items-center justify-center rounded-xl border border-orange-500/30 bg-orange-500/10 px-4 py-3 text-sm font-medium text-orange-200 transition-colors hover:bg-orange-500/20"
-                  >
-                    Create from CKBoost
-                  </Link>
-                </div>
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <h2 className="text-lg font-bold text-white sm:text-xl">Dashboard</h2>
               </div>
+                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <p className="mt-1 text-sm text-gray-400">
+                      Your current operating snapshot for every active agreement.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-3 text-sm">
+                    <div className="min-w-[180px] rounded-xl border border-agent-border bg-agent-bg/60 px-4 py-3">
+                      <div className="mb-1 text-xs uppercase tracking-wide text-gray-500">Completed payouts</div>
+                      <div className="flex items-center gap-2 font-medium text-white">
+                        <CheckCircleIcon className="h-4 w-4 text-green-400" />
+                        {stats.completedCount} settled agreements
+                      </div>
+                    </div>
+                    <div className="min-w-[180px] rounded-xl border border-agent-border bg-agent-bg/60 px-4 py-3">
+                      <div className="mb-1 text-xs uppercase tracking-wide text-gray-500">Needs attention</div>
+                      <div className="flex items-center gap-2 font-medium text-white">
+                        <ShieldCheckIcon className="h-4 w-4 text-amber-300" />
+                        {agreementsNeedingAttention} agreements
+                      </div>
+                    </div>
+                    <div className="min-w-[180px] rounded-xl border border-agent-border bg-agent-bg/60 px-4 py-3">
+                      <div className="mb-1 text-xs uppercase tracking-wide text-gray-500">Connected wallet</div>
+                      <div className="break-all font-mono text-xs text-white">
+                        {walletAddress || 'Connect to unlock agreement actions'}
+                      </div>
+                    </div>
+                    <Link
+                      href="/agreement/import-ckboost"
+                      className="inline-flex min-w-[180px] items-center justify-center rounded-xl border border-orange-500/30 bg-orange-500/10 px-4 py-3 text-sm font-medium text-orange-200 transition-colors hover:bg-orange-500/20"
+                    >
+                      Create from CKBoost
+                    </Link>
+                  </div>
+                </div>
             </section>
 
             <section>
@@ -528,31 +530,34 @@ export default function DashboardPage() {
 
           <div className="space-y-6">
             <section className="rounded-2xl border border-agent-border bg-agent-card/70 p-4 sm:p-5">
-              <div className="mb-4 rounded-xl border border-agent-border bg-agent-bg/50 p-4">
-                <h3 className="text-sm font-semibold text-white">Marketplace Setup</h3>
-                <p className="mt-2 text-xs text-gray-400">
-                  Configure the surfaces that help people discover, trust, and integrate your agreements.
-                </p>
-                <div className="mt-3 flex flex-wrap gap-3 text-sm">
-                  <Link href="/settings/profile" className="text-agent-accent hover:text-blue-300">
-                    Edit public profile
-                  </Link>
-                  <Link href="/settings/webhooks" className="text-agent-accent hover:text-blue-300">
-                    Manage webhooks
-                  </Link>
-                  <Link href="/agreement/import-bounty" className="text-agent-accent hover:text-blue-300">
-                    Import DAO / bounty
-                  </Link>
-                </div>
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <h2 className="text-lg font-bold text-white sm:text-xl">Operations</h2>
               </div>
-              <h2 className="mb-3 flex items-center gap-2 text-base font-semibold text-white sm:text-lg">
-                <span className="h-2 w-2 animate-pulse rounded-full bg-green-400" />
-                Agent Activity
-              </h2>
-              <p className="mb-4 text-sm text-gray-400">
-                Live operational logs from the agreement watcher, reviewer, and settlement routines.
-              </p>
-              <AgentLogPanel allowedAgreementIds={agreements.map((agreement) => agreement.id)} />
+                <div className="mb-4 rounded-xl border border-agent-border bg-agent-bg/50 p-4">
+                  <h3 className="text-sm font-semibold text-white">Marketplace Setup</h3>
+                  <p className="mt-2 text-xs text-gray-400">
+                    Configure the surfaces that help people discover, trust, and integrate your agreements.
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-3 text-sm">
+                    <Link href="/settings/profile" className="text-agent-accent hover:text-blue-300">
+                      Edit public profile
+                    </Link>
+                    <Link href="/settings/webhooks" className="text-agent-accent hover:text-blue-300">
+                      Manage webhooks
+                    </Link>
+                    <Link href="/agreement/import-bounty" className="text-agent-accent hover:text-blue-300">
+                      Import DAO / bounty
+                    </Link>
+                  </div>
+                </div>
+                <h2 className="mb-3 flex items-center gap-2 text-base font-semibold text-white sm:text-lg">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-green-400" />
+                  Agent Activity
+                </h2>
+                <p className="mb-4 text-sm text-gray-400">
+                  Live operational logs from the agreement watcher, reviewer, and settlement routines.
+                </p>
+                <AgentLogPanel allowedAgreementIds={agreements.map((agreement) => agreement.id)} />
             </section>
           </div>
         </div>

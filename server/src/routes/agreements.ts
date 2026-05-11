@@ -50,6 +50,9 @@ const actionRateLimit = createRateLimit({
   max: config.actionRateLimitMax,
 });
 
+const MAX_ARTIFACT_SIZE_BYTES = 1024 * 1024;
+const MAX_ARTIFACT_SIZE_LABEL = '1 MB';
+
 type AgreementParticipantRecord = NonNullable<
   Awaited<ReturnType<typeof agreementService.getAgreementParticipantById>>
 >;
@@ -225,6 +228,33 @@ const sourceSyncPublishSchema = z.object({
   content: z.string().max(4000).optional(),
   reviewerApproved: z.boolean().optional(),
 });
+
+function artifactExceedsLimit(artifact: {
+  sizeBytes?: number;
+  content: string;
+}) {
+  if (typeof artifact.sizeBytes === 'number') {
+    return artifact.sizeBytes > MAX_ARTIFACT_SIZE_BYTES;
+  }
+
+  return artifact.content.length > MAX_ARTIFACT_SIZE_BYTES * 2;
+}
+
+function findOversizedArtifact(
+  artifacts:
+    | Array<{
+        kind: ArtifactKind;
+        content: string;
+        sizeBytes?: number;
+      }>
+    | undefined
+) {
+  return artifacts?.find((artifact) => artifactExceedsLimit(artifact)) || null;
+}
+
+function getOversizedArtifactMessage(kind: ArtifactKind) {
+  return `${kind === 'IMAGE' ? 'Image' : 'Attachment'} uploads must be ${MAX_ARTIFACT_SIZE_LABEL} or smaller.`;
+}
 
 const updateDraftSchema = z.object({
   title: z.string().min(1).max(200),
@@ -676,6 +706,7 @@ router.post('/:id/onchain-resolution', actionRateLimit, async (req: Request, res
     const agreement = result.agreement;
     const isClient = agreement.clientAddress === authAddress;
     const isWorker = agreement.workerAddress === authAddress;
+    const isImportedBounty = agreement.source?.sourceType === 'BOUNTY';
 
     if (agreement.escrowModel !== 'ONCHAIN_LOCK') {
       return res.status(400).json({ success: false, error: 'This agreement does not use the on-chain lock settlement path' });
@@ -687,6 +718,10 @@ router.post('/:id/onchain-resolution', actionRateLimit, async (req: Request, res
 
     if (direction === 'REFUND' && !isWorker && !isClient) {
       return res.status(403).json({ success: false, error: 'Only the worker or client timeout path can submit an on-chain refund resolution.' });
+    }
+
+    if (direction === 'REFUND' && isImportedBounty) {
+      return res.status(409).json({ success: false, error: 'Imported bounty milestones do not support worker refund settlement.' });
     }
 
     const updated = await agreementService.recordOnchainResolutionIntent({
@@ -723,6 +758,18 @@ router.post('/:id/submit-proof', actionRateLimit, async (req: Request, res: Resp
     }
 
     const data = submitProofSchema.parse(req.body);
+    const oversizedArtifact = findOversizedArtifact(data.artifacts as Array<{
+      kind: ArtifactKind;
+      content: string;
+      sizeBytes?: number;
+    }> | undefined);
+    if (oversizedArtifact) {
+      return res.status(400).json({
+        success: false,
+        error: getOversizedArtifactMessage(oversizedArtifact.kind),
+      });
+    }
+
     const response = await agreementService.submitProof(
       req.params.id,
       data.milestoneId,
@@ -821,6 +868,25 @@ router.post('/:id/open-dispute', actionRateLimit, async (req: Request, res: Resp
       return res.status(403).json({ success: false, error: 'Authenticated wallet must match the dispute opener' });
     }
 
+    if (result.agreement.source?.sourceType === 'BOUNTY') {
+      return res.status(409).json({
+        success: false,
+        error: 'Imported bounty milestones do not use disputes. Use reviewer follow-up messages instead.',
+      });
+    }
+
+    const oversizedArtifact = findOversizedArtifact(data.artifacts as Array<{
+      kind: ArtifactKind;
+      content: string;
+      sizeBytes?: number;
+    }> | undefined);
+    if (oversizedArtifact) {
+      return res.status(400).json({
+        success: false,
+        error: getOversizedArtifactMessage(oversizedArtifact.kind),
+      });
+    }
+
     const response = await agreementService.openDispute(
       req.params.id,
       data.milestoneId,
@@ -869,6 +935,25 @@ router.post('/:id/dispute/evidence', actionRateLimit, async (req: Request, res: 
     const data = addDisputeEvidenceSchema.parse(req.body);
     if (normalizeWalletAddress(data.submittedBy) !== authAddress) {
       return res.status(403).json({ success: false, error: 'Authenticated wallet must match the evidence submitter' });
+    }
+
+    if (result.agreement.source?.sourceType === 'BOUNTY') {
+      return res.status(409).json({
+        success: false,
+        error: 'Imported bounty milestones do not use the dispute evidence workspace.',
+      });
+    }
+
+    const oversizedArtifact = findOversizedArtifact(data.artifacts as Array<{
+      kind: ArtifactKind;
+      content: string;
+      sizeBytes?: number;
+    }> | undefined);
+    if (oversizedArtifact) {
+      return res.status(400).json({
+        success: false,
+        error: getOversizedArtifactMessage(oversizedArtifact.kind),
+      });
     }
 
     const response = await agreementService.addDisputeEvidence(
@@ -920,6 +1005,13 @@ router.post('/:id/dispute/split-offer', actionRateLimit, async (req: Request, re
       return res.status(403).json({ success: false, error: 'Authenticated wallet must match the split settlement actor' });
     }
 
+    if (result.agreement.source?.sourceType === 'BOUNTY') {
+      return res.status(409).json({
+        success: false,
+        error: 'Imported bounty milestones do not support split settlement disputes.',
+      });
+    }
+
     const response = await agreementService.recordSplitSettlementConsent(
       req.params.id,
       data.actorAddress,
@@ -944,6 +1036,13 @@ router.post('/:id/dispute/refund-consent', actionRateLimit, async (req: Request,
     const data = mutualRefundConsentSchema.parse(req.body);
     if (normalizeWalletAddress(data.actorAddress) !== authAddress) {
       return res.status(403).json({ success: false, error: 'Authenticated wallet must match the refund approver' });
+    }
+
+    if (result.agreement.source?.sourceType === 'BOUNTY') {
+      return res.status(409).json({
+        success: false,
+        error: 'Imported bounty milestones do not support refund settlement.',
+      });
     }
 
     const response = await agreementService.recordMutualRefundConsent(req.params.id, data.actorAddress);
@@ -980,11 +1079,19 @@ router.post('/:id/review-action', actionRateLimit, async (req: Request, res: Res
         ['ACTIVE', 'PROOF_SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'DISPUTED'].includes(item.status)
       );
       const openDispute = currentMilestone?.disputes?.find((item: any) => !item.resolvedAt) || null;
+      const milestoneReviewable = currentMilestone && ['PROOF_SUBMITTED', 'UNDER_REVIEW', 'DISPUTED'].includes(currentMilestone.status);
 
       if (!confirmation?.confirmed || !confirmation.summary.trim()) {
         return res.status(400).json({
           success: false,
           error: 'Human confirmation is required before approving payout.',
+        });
+      }
+
+      if (!milestoneReviewable) {
+        return res.status(409).json({
+          success: false,
+          error: 'Current milestone is not ready for payout approval.',
         });
       }
 
@@ -999,16 +1106,6 @@ router.post('/:id/review-action', actionRateLimit, async (req: Request, res: Res
         return res.status(400).json({
           success: false,
           error: 'Acknowledge that the AI recommendation is advisory before approving payout.',
-        });
-      }
-
-      const openInfoRequests = (await getInfoRequestRecordsForAgreement(req.params.id)).filter((item: any) =>
-        item.milestoneId === currentMilestone?.id && !item.resolved
-      );
-      if (openInfoRequests.length > 0) {
-        return res.status(409).json({
-          success: false,
-          error: 'There is still an open request for more information on this milestone.',
         });
       }
 
@@ -1108,18 +1205,6 @@ router.post('/:id/info-request', actionRateLimit, async (req: Request, res: Resp
       return res.status(404).json({ success: false, error: 'Milestone not found' });
     }
 
-    const response = await agreementService.createAgreementComment(
-      req.params.id,
-      authAddress,
-      buildInfoRequestComment({
-        requestId: 'pending',
-        milestoneLabel: `Milestone ${milestone.sortOrder}`,
-        milestoneTitle: milestone.title,
-        questions,
-        note: data.note,
-      })
-    );
-
     const latestProof = milestone.proofs?.[0] || null;
     const infoRequest = await createStructuredInfoRequest({
       agreementId: req.params.id,
@@ -1128,7 +1213,7 @@ router.post('/:id/info-request', actionRateLimit, async (req: Request, res: Resp
       requestedBy: authAddress,
       questions,
       note: data.note,
-      commentId: response.comment.id,
+      commentId: null,
     });
 
     await markProofNeedsMoreInfo({
@@ -1136,19 +1221,6 @@ router.post('/:id/info-request', actionRateLimit, async (req: Request, res: Resp
       milestoneId: data.milestoneId,
       proofId: latestProof?.id || null,
       summary: 'Reviewer requested more information before this proof can move forward.',
-    });
-
-    const finalizedComment = await prisma.agreementComment.update({
-      where: { id: response.comment.id },
-      data: {
-        content: buildInfoRequestComment({
-          requestId: infoRequest.requestId,
-          milestoneLabel: `Milestone ${milestone.sortOrder}`,
-          milestoneTitle: milestone.title,
-          questions,
-          note: data.note,
-        }),
-      },
     });
 
     await createAuditLog({
@@ -1163,7 +1235,7 @@ router.post('/:id/info-request', actionRateLimit, async (req: Request, res: Resp
         proofId: latestProof?.id || null,
         questions,
         note: data.note?.trim() || null,
-        commentId: finalizedComment.id,
+        commentId: null,
       },
     });
 
@@ -1171,7 +1243,6 @@ router.post('/:id/info-request', actionRateLimit, async (req: Request, res: Resp
       success: true,
       data: {
         requestId: infoRequest.requestId,
-        comment: finalizedComment,
         agreement: await agreementService.getAgreementById(req.params.id),
         infoRequest,
       },
@@ -1213,23 +1284,12 @@ router.post('/:id/info-request/respond', actionRateLimit, async (req: Request, r
       return res.status(409).json({ success: false, error: 'This info request has already been answered' });
     }
 
-    const response = await agreementService.createAgreementComment(
-      req.params.id,
-      authAddress,
-      buildInfoResponseComment({
-        requestId: data.requestId,
-        milestoneLabel: `Milestone ${milestone.sortOrder}`,
-        milestoneTitle: milestone.title,
-        content: data.content,
-      })
-    );
-
     const updatedInfoRequest = await respondToStructuredInfoRequest({
       agreementId: req.params.id,
       requestId: data.requestId,
       responderAddress: authAddress,
       content: data.content,
-      responseCommentId: response.comment.id,
+      responseCommentId: null,
     });
 
     await queueAgreementJob(req.params.id, `proof-recheck:${data.milestoneId}`);
@@ -1244,14 +1304,14 @@ router.post('/:id/info-request/respond', actionRateLimit, async (req: Request, r
         requestId: data.requestId,
         milestoneId: data.milestoneId,
         responsePreview: data.content.trim().slice(0, 240),
-        commentId: response.comment.id,
+        commentId: null,
       },
     });
 
     res.json({
       success: true,
       data: {
-        ...response,
+        agreement: await agreementService.getAgreementById(req.params.id),
         infoRequest: updatedInfoRequest,
       },
     });

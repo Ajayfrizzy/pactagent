@@ -520,12 +520,22 @@ async function processAgreement(agreement: any): Promise<void> {
         break;
       }
 
-      const latestProof = currentMilestone.proofs[0];
+      const refreshedMilestone = await prisma.milestone.findUnique({
+        where: { id: currentMilestone.id },
+        include: {
+          proofs: true,
+        },
+      });
+      if (!refreshedMilestone || refreshedMilestone.status !== 'PROOF_SUBMITTED') {
+        break;
+      }
+
+      const latestProof = refreshedMilestone.proofs[0];
       if (!latestProof) {
         break;
       }
 
-      const latestProofCheck = await ensureLatestProofCheckComplete(agreement.id, currentMilestone.id, latestProof.id);
+      const latestProofCheck = await ensureLatestProofCheckComplete(agreement.id, refreshedMilestone.id, latestProof.id);
       if (latestProofCheck.status !== 'READY_FOR_HUMAN_REVIEW') {
         await createLog({
           agreementId: agreement.id,
@@ -533,7 +543,7 @@ async function processAgreement(agreement: any): Promise<void> {
           eventType: 'RULE_CHECK_FAILED',
           message: 'Milestone proof needs more evidence before it can move into human review',
           metadata: {
-            milestoneId: currentMilestone.id,
+            milestoneId: refreshedMilestone.id,
             proofId: latestProof.id,
             proofCheckId: latestProofCheck.id,
             proofCheckStatus: latestProofCheck.status,
@@ -551,7 +561,7 @@ async function processAgreement(agreement: any): Promise<void> {
           level: 'WARN',
           eventType: 'RULE_CHECK_FAILED',
           message: 'Milestone proof validation failed because the content is empty or missing',
-          metadata: { milestoneId: currentMilestone.id },
+          metadata: { milestoneId: refreshedMilestone.id },
         });
         break;
       }
@@ -563,27 +573,27 @@ async function processAgreement(agreement: any): Promise<void> {
           eventType: 'RULE_CHECK_FAILED',
           message: 'Milestone proof was submitted after the agreement deadline',
           metadata: {
-            milestoneId: currentMilestone.id,
+            milestoneId: refreshedMilestone.id,
             deadline: deadline.toISOString(),
           },
         });
         break;
       }
 
-      await transitionMilestoneStatus(currentMilestone.id, 'UNDER_REVIEW');
+      await transitionMilestoneStatus(refreshedMilestone.id, 'UNDER_REVIEW');
       await transitionStatus(agreement.id, 'UNDER_REVIEW');
 
       await createLog({
         agreementId: agreement.id,
-        level: 'SUCCESS',
-        eventType: 'RULE_CHECK_PASSED',
-        message: `Milestone proof validated and ready for human review: ${currentMilestone.title}`,
-        metadata: {
-          milestoneId: currentMilestone.id,
-          milestoneTitle: currentMilestone.title,
-          proofId: latestProof.id,
-          proofCheckId: latestProofCheck.id,
-        },
+          level: 'SUCCESS',
+          eventType: 'RULE_CHECK_PASSED',
+          message: `Milestone proof validated and ready for human review: ${refreshedMilestone.title}`,
+          metadata: {
+            milestoneId: refreshedMilestone.id,
+            milestoneTitle: refreshedMilestone.title,
+            proofId: latestProof.id,
+            proofCheckId: latestProofCheck.id,
+          },
       });
       break;
     }

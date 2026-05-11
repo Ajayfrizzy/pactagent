@@ -91,10 +91,10 @@ export const useStore = create<AppState>()(
             return;
           }
 
-          agreementUpdateTimer = setTimeout(() => {
-            agreementUpdateTimer = null;
-            set((state) => ({ agreementUpdateCount: state.agreementUpdateCount + 1 }));
-          }, 120);
+        agreementUpdateTimer = setTimeout(() => {
+          agreementUpdateTimer = null;
+          set((state) => ({ agreementUpdateCount: state.agreementUpdateCount + 1 }));
+        }, 40);
         },
     }),
     {

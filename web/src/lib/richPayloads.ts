@@ -10,6 +10,9 @@ export type DraftArtifact = {
   sizeBytes?: number;
 };
 
+export const MAX_ARTIFACT_SIZE_BYTES = 1024 * 1024;
+export const MAX_ARTIFACT_SIZE_LABEL = '1 MB';
+
 type RichProofPayload = {
   version: 1;
   kind: 'proof_bundle';
@@ -117,6 +120,14 @@ export function isDownloadableArtifact(artifact: DraftArtifact) {
 
 export async function readFilesAsArtifacts(files: FileList | File[]) {
   const list = Array.from(files);
+
+  const oversizedFile = list.find((file) => file.size > MAX_ARTIFACT_SIZE_BYTES);
+  if (oversizedFile) {
+    throw new Error(
+      `${oversizedFile.type.startsWith('image/') ? 'Image' : 'Attachment'} uploads must be ${MAX_ARTIFACT_SIZE_LABEL} or smaller.`
+    );
+  }
+
   return Promise.all(
     list.map(async (file, index) => {
       const content = await new Promise<string>((resolve, reject) => {

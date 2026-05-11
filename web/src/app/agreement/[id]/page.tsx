@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { ccc } from '@ckb-ccc/connector-react';
@@ -23,6 +23,7 @@ import {
   type DraftArtifact,
   isDownloadableArtifact,
   isImageArtifact,
+  MAX_ARTIFACT_SIZE_LABEL,
   parseDisputeEvidenceBundle,
   parseProofBundle,
   readFilesAsArtifacts,
@@ -48,6 +49,8 @@ const currentMilestoneStatuses = ['ACTIVE', 'PROOF_SUBMITTED', 'UNDER_REVIEW', '
 function canSignerFundAgreement(signer: ccc.Signer | undefined) {
   return signer?.type === ccc.SignerType.CKB || signer?.type === ccc.SignerType.EVM;
 }
+
+const TX_HASH_PATTERN = /^0x[a-fA-F0-9]{64}$/;
 
 function getParticipantLabel(
   address: string,
@@ -78,6 +81,15 @@ function formatAuditActionTitle(action: string) {
     default:
       return action.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase());
   }
+}
+
+function isLikelySpentOutPointError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes('TransactionFailedToResolve')
+    || message.includes('Unknown(OutPoint(')
+    || message.includes('Could not find the escrow cell on-chain for this milestone.')
+  );
 }
 
 function getRecommendationAvailability(dispute: any, agreement: any) {
@@ -204,6 +216,91 @@ function getAgreementUnavailableState(error: string | null) {
     body: 'This agreement could not be loaded right now. It may be temporarily unavailable or the current wallet may not have access to it.',
     hint: 'Try again shortly, or return to the dashboard and reopen the agreement from your list.',
   };
+}
+
+function ReviewerDecisionDraftPanel({
+  reviewerDecisionNote,
+  setReviewerDecisionNote,
+  humanApprovalConfirmed,
+  setHumanApprovalConfirmed,
+  acknowledgeProofCheck,
+  setAcknowledgeProofCheck,
+  acknowledgeAiSuggestion,
+  setAcknowledgeAiSuggestion,
+  displayedRecommendation,
+  currentOpenInfoRequestsCount,
+  waitingForReview = false,
+}: {
+  reviewerDecisionNote: string;
+  setReviewerDecisionNote: (value: string) => void;
+  humanApprovalConfirmed: boolean;
+  setHumanApprovalConfirmed: (value: boolean) => void;
+  acknowledgeProofCheck: boolean;
+  setAcknowledgeProofCheck: (value: boolean) => void;
+  acknowledgeAiSuggestion: boolean;
+  setAcknowledgeAiSuggestion: (value: boolean) => void;
+  displayedRecommendation: any;
+  currentOpenInfoRequestsCount: number;
+  waitingForReview?: boolean;
+}) {
+  return (
+    <div className="mb-4 rounded-xl border border-emerald-800/40 bg-emerald-950/20 p-4">
+      <div className="text-[11px] uppercase tracking-[0.16em] text-emerald-300">Final Reviewer Action</div>
+      <h4 className="mt-2 text-sm font-semibold text-white">
+        {waitingForReview ? 'Reviewer note draft' : 'Human confirmation checkpoint'}
+      </h4>
+      <p className="mt-1 text-xs text-gray-300">
+        {waitingForReview
+          ? 'You can draft the payout decision note while the background review is still running. Human approval is still available immediately if you already verified the work yourself.'
+          : 'AI signals are suggestions only. A person still needs to review the evidence and explicitly confirm the payout decision.'}
+      </p>
+      <textarea
+        className="mt-3 min-h-[88px] w-full rounded-lg border border-agent-border bg-agent-bg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500"
+        placeholder="Reviewer decision note..."
+        value={reviewerDecisionNote}
+        onChange={(e) => setReviewerDecisionNote(e.target.value)}
+      />
+      <label className="mt-3 flex items-start gap-3 text-sm text-gray-200">
+        <input
+          type="checkbox"
+          className="mt-1"
+          checked={humanApprovalConfirmed}
+          onChange={(e) => setHumanApprovalConfirmed(e.target.checked)}
+        />
+        <span>I reviewed the submitted proof myself and I want to approve this milestone.</span>
+      </label>
+      <label className="mt-3 flex items-start gap-3 text-sm text-gray-200">
+        <input
+          type="checkbox"
+          className="mt-1"
+          checked={acknowledgeProofCheck}
+          onChange={(e) => setAcknowledgeProofCheck(e.target.checked)}
+        />
+        <span>I used the proof checker as a suggested pre-review aid, not as the final decision maker.</span>
+      </label>
+      {displayedRecommendation ? (
+        <label className="mt-3 flex items-start gap-3 text-sm text-gray-200">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={acknowledgeAiSuggestion}
+            onChange={(e) => setAcknowledgeAiSuggestion(e.target.checked)}
+          />
+          <span>I understand the AI recommendation is suggested only and does not approve payout by itself.</span>
+        </label>
+      ) : null}
+      {waitingForReview ? (
+        <div className="mt-3 rounded-lg border border-yellow-800/40 bg-yellow-950/20 px-3 py-2 text-xs text-yellow-100">
+          PactAgent is still reviewing in the background, but you can approve payout now if your manual review is complete.
+        </div>
+      ) : null}
+      {currentOpenInfoRequestsCount > 0 ? (
+        <div className="mt-3 rounded-lg border border-amber-800/40 bg-amber-950/20 px-3 py-2 text-xs text-amber-100">
+          There {currentOpenInfoRequestsCount === 1 ? 'is still 1 open info request' : `are still ${currentOpenInfoRequestsCount} open info requests`} on this milestone, but they no longer lock manual payout approval.
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function ArtifactPreviewList({
@@ -458,10 +555,12 @@ function ProofCheckPanel({
   result,
   checking,
   onCheck,
+  showCheckAction = true,
 }: {
   result: ProofCheckResult | null;
   checking: boolean;
   onCheck: () => void;
+  showCheckAction?: boolean;
 }) {
   const lifecycleStatus = checking ? 'CHECKING' : (result?.lifecycleStatus || null);
   const title = checking
@@ -519,14 +618,16 @@ function ProofCheckPanel({
             </p>
           ) : null}
         </div>
-        <button
-          type="button"
-          onClick={onCheck}
-          disabled={checking}
-          className="inline-flex items-center justify-center rounded-lg border border-agent-accent/40 px-3 py-2 text-xs font-medium text-agent-accent transition-colors hover:bg-agent-accent/10 disabled:opacity-60"
-        >
-          {checking ? 'Checking...' : result ? 'Re-check Report' : 'Check Report'}
-        </button>
+        {showCheckAction ? (
+          <button
+            type="button"
+            onClick={onCheck}
+            disabled={checking}
+            className="inline-flex items-center justify-center rounded-lg border border-agent-accent/40 px-3 py-2 text-xs font-medium text-agent-accent transition-colors hover:bg-agent-accent/10 disabled:opacity-60"
+          >
+            {checking ? 'Checking...' : result ? 'Re-check Report' : 'Check Report'}
+          </button>
+        ) : null}
       </div>
 
       {result?.checklist?.length ? (
@@ -706,6 +807,79 @@ type PendingDisputeReply = {
   optimistic: true;
 };
 
+type PendingAgreementComment = {
+  id: string;
+  authorAddress: string;
+  content: string;
+  createdAt: string;
+  optimistic: true;
+};
+
+function CollapsibleSection({
+  title,
+  description,
+  countLabel,
+  storageKey,
+  defaultExpanded = false,
+  children,
+}: {
+  title: string;
+  description: string;
+  countLabel?: string;
+  storageKey: string;
+  defaultExpanded?: boolean;
+  children: ReactNode;
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const saved = window.localStorage.getItem(storageKey);
+    if (saved === 'expanded') {
+      setExpanded(true);
+    } else if (saved === 'collapsed') {
+      setExpanded(false);
+    } else {
+      setExpanded(defaultExpanded);
+    }
+  }, [defaultExpanded, storageKey]);
+
+  function toggle() {
+    setExpanded((current) => {
+      const next = !current;
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(storageKey, next ? 'expanded' : 'collapsed');
+      }
+      return next;
+    });
+  }
+
+  return (
+    <div className="bg-agent-card border border-agent-border rounded-xl p-6">
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-white font-semibold">{title}</h2>
+          <p className="text-xs text-gray-400 mt-1">{description}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-4">
+          {countLabel ? <div className="text-right text-xs leading-relaxed text-gray-500">{countLabel}</div> : null}
+          <button
+            type="button"
+            onClick={toggle}
+            className="shrink-0 whitespace-nowrap rounded-lg border border-agent-border px-4 py-2 text-sm font-medium tracking-[0.01em] text-gray-200 transition-colors hover:bg-agent-bg"
+          >
+            {expanded ? 'Show Less' : 'Show More'}
+          </button>
+        </div>
+      </div>
+      {expanded ? children : null}
+    </div>
+  );
+}
+
 async function addressesMatchOnSignerNetwork(
   signer: ccc.Signer,
   leftAddress: string,
@@ -749,6 +923,7 @@ export default function AgreementDetailPage() {
   const [proofSummary, setProofSummary] = useState('');
   const [proofContent, setProofContent] = useState('');
   const [proofUrlDraft, setProofUrlDraft] = useState('');
+  const [proofTxHashDraft, setProofTxHashDraft] = useState('');
   const [proofArtifacts, setProofArtifacts] = useState<DraftArtifact[]>([]);
   const [followUpDraft, setFollowUpDraft] = useState<FollowUpDraft | null>(null);
   const [followUpDraftText, setFollowUpDraftText] = useState('');
@@ -768,6 +943,7 @@ export default function AgreementDetailPage() {
   const [replyUrlDraft, setReplyUrlDraft] = useState('');
   const [replyArtifacts, setReplyArtifacts] = useState<DraftArtifact[]>([]);
   const [pendingDisputeReplies, setPendingDisputeReplies] = useState<PendingDisputeReply[]>([]);
+  const [pendingAgreementComments, setPendingAgreementComments] = useState<PendingAgreementComment[]>([]);
   const [commentContent, setCommentContent] = useState('');
   const [sourceThreadUrl, setSourceThreadUrl] = useState('');
   const [sourceSummaryOverride, setSourceSummaryOverride] = useState('');
@@ -1244,6 +1420,48 @@ export default function AgreementDetailPage() {
     clear();
   }
 
+  function appendTxHashArtifact(
+    value: string,
+    setter: (next: DraftArtifact[] | ((prev: DraftArtifact[]) => DraftArtifact[])) => void,
+    clear: () => void,
+  ) {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    if (!TX_HASH_PATTERN.test(trimmed)) {
+      setError('Transaction hash must use the full 0x-prefixed 64-byte format.');
+      return;
+    }
+
+    setter((prev) => {
+      const alreadyAdded = prev.some((artifact) =>
+        artifact.kind === 'TEXT'
+        && artifact.label.startsWith('Transaction Hash')
+        && artifact.content.trim().toLowerCase() === trimmed.toLowerCase()
+      );
+
+      if (alreadyAdded) {
+        return prev;
+      }
+
+      const nextTxHashCount = prev.filter((artifact) => artifact.label.startsWith('Transaction Hash')).length + 1;
+      return [
+        ...prev,
+        {
+          id: `${Date.now()}-${prev.length}`,
+          kind: 'TEXT',
+          label: `Transaction Hash ${nextTxHashCount}`,
+          content: trimmed,
+        },
+      ];
+    });
+
+    setError(null);
+    clear();
+  }
+
   async function appendFileArtifacts(
     files: FileList | null,
     setter: (next: DraftArtifact[] | ((prev: DraftArtifact[]) => DraftArtifact[])) => void,
@@ -1252,8 +1470,12 @@ export default function AgreementDetailPage() {
       return;
     }
 
-    const artifacts = await readFilesAsArtifacts(files);
-    setter((prev) => [...prev, ...artifacts]);
+    try {
+      const artifacts = await readFilesAsArtifacts(files);
+      setter((prev) => [...prev, ...artifacts]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to read selected files');
+    }
   }
 
   function removeArtifact(
@@ -1393,6 +1615,7 @@ export default function AgreementDetailPage() {
       setProofSummary('');
       setProofContent('');
       setProofUrlDraft('');
+      setProofTxHashDraft('');
       setProofArtifacts([]);
       applyAgreementPayload(response);
       void handleCheckProof(milestoneId, { silent: true });
@@ -1586,6 +1809,26 @@ export default function AgreementDetailPage() {
       }
       await refreshAgreement();
     } catch (err) {
+      if (agreement.escrowModel === 'ONCHAIN_LOCK' && currentMilestone && isLikelySpentOutPointError(err)) {
+        try {
+          const updated = await api.reconcileAgreement(id);
+          setAgreement(updated);
+
+          const refreshedMilestone = updated?.milestones?.find((item: any) => item.id === currentMilestone.id);
+          if (refreshedMilestone?.status === 'PAID') {
+            setError('This milestone was already paid on-chain earlier. The agreement state has been refreshed.');
+            return;
+          }
+
+          if (refreshedMilestone?.status === 'REFUNDED') {
+            setError('This milestone was already refunded on-chain earlier. The agreement state has been refreshed.');
+            return;
+          }
+        } catch {
+          // Fall through to the original wallet error if reconciliation fails.
+        }
+      }
+
       setError(err instanceof Error ? err.message : 'Review action failed');
     } finally {
       setActionLoading(null);
@@ -1772,17 +2015,30 @@ export default function AgreementDetailPage() {
       return;
     }
 
+    const optimisticContent = commentContent.trim();
+    const optimisticComment: PendingAgreementComment = {
+      id: `pending-comment-${Date.now()}`,
+      authorAddress: walletAddress,
+      content: optimisticContent,
+      createdAt: new Date().toISOString(),
+      optimistic: true,
+    };
+
     setActionLoading('comment');
     setError(null);
+    setPendingAgreementComments((prev) => [...prev, optimisticComment]);
+    setCommentContent('');
 
     try {
       const response = await api.addAgreementComment(id, {
         authorAddress: walletAddress,
-        content: commentContent,
+        content: optimisticContent,
       });
-      setCommentContent('');
+      setPendingAgreementComments((prev) => prev.filter((comment) => comment.id !== optimisticComment.id));
       applyAgreementPayload(response);
     } catch (err) {
+      setPendingAgreementComments((prev) => prev.filter((comment) => comment.id !== optimisticComment.id));
+      setCommentContent((current) => current || optimisticContent);
       setError(err instanceof Error ? err.message : 'Failed to send comment');
     } finally {
       setActionLoading(null);
@@ -1942,13 +2198,11 @@ export default function AgreementDetailPage() {
         rationale: currentOpenDispute.aiRationale,
       }
     : null;
-  const awaitingHybridReview =
-    agreement.reviewerMode === 'HYBRID' && currentMilestone?.status === 'PROOF_SUBMITTED';
   const canClientReview =
     isClient &&
     (agreement.reviewerMode !== 'AUTO' || agreement.status === 'DISPUTED') &&
     currentMilestone != null &&
-    ['UNDER_REVIEW', 'DISPUTED'].includes(currentMilestone.status);
+    ['PROOF_SUBMITTED', 'UNDER_REVIEW', 'DISPUTED'].includes(currentMilestone.status);
   const canSendInfoRequest =
     isClient &&
     currentMilestone != null &&
@@ -1961,10 +2215,12 @@ export default function AgreementDetailPage() {
     currentMilestone != null &&
     currentMilestone.status === 'PROOF_SUBMITTED' &&
     currentOpenInfoRequests.length > 0;
+  const isImportedBounty = agreement.source?.sourceType === 'BOUNTY';
   const canOnchainRefundReview =
     agreement.escrowModel === 'ONCHAIN_LOCK' &&
     currentMilestone != null &&
     isWorker &&
+    !isImportedBounty &&
     ['PROOF_SUBMITTED', 'UNDER_REVIEW', 'DISPUTED'].includes(currentMilestone.status);
   const fundingPending = agreement.settlementStatus === 'FUNDING_PENDING';
   const payoutPending = agreement.settlementStatus === 'PAYOUT_PENDING';
@@ -2131,7 +2387,9 @@ export default function AgreementDetailPage() {
       : canClientReview && currentMilestone
         ? {
             title: 'Review decision needed now',
-            body: `The worker has delivered ${currentMilestone.title}. Approve the payout, reject it, or open a dispute based on the submitted proof.`,
+            body: isImportedBounty
+              ? `The worker has delivered ${currentMilestone.title}. Review the proof, ask for more information if needed, and approve the milestone when you are satisfied.`
+              : `The worker has delivered ${currentMilestone.title}. Approve the payout, reject it, or open a dispute based on the submitted proof.`,
           }
         : agreement.status === 'DISPUTED' && currentMilestone
           ? {
@@ -2181,6 +2439,13 @@ export default function AgreementDetailPage() {
   const grantModeSummary = isGrantMode
     ? `Imported from ${agreement.source.sourceType === 'DAO' ? 'a DAO workflow' : 'a bounty source'} so the external context, treasury sponsor, and governance notes stay attached to every milestone.`
     : 'Created directly inside PactAgent as a standard milestone agreement between client and worker.';
+  const displayedAgreementComments = [
+    ...(agreement.comments || []),
+    ...pendingAgreementComments,
+  ].sort(
+    (left: any, right: any) =>
+      new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime()
+  );
   const ckboostCampaignHistory = safeParseJson<string[]>(agreement.ckboostProfileSnapshot?.campaignHistoryJson) || [];
   const ckboostStats = safeParseJson<Record<string, unknown>>(agreement.ckboostProfileSnapshot?.statsJson) || null;
   const latestSourceSyncActivity = buildLatestSourceSyncActivity(auditLogs);
@@ -2742,6 +3007,12 @@ export default function AgreementDetailPage() {
               </div>
             </div>
 
+            <CollapsibleSection
+              title="Unified Lifecycle Timeline"
+              description="Funding attempts, audit actions, participant messages, amendments, and dispute activity are merged here so the agreement reads like one continuous operating record."
+              countLabel={`${operationalTimeline.length} items`}
+              storageKey={`agreement:${id}:section:timeline`}
+            >
             <div className="overflow-hidden rounded-2xl border border-agent-border bg-agent-card shadow-[0_18px_50px_rgba(15,23,42,0.18)]">
               <div className="border-b border-agent-border bg-gradient-to-r from-agent-bg/95 via-agent-card to-agent-bg/90 p-6">
                 <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
@@ -2804,16 +3075,14 @@ export default function AgreementDetailPage() {
                 )}
               </div>
             </div>
+            </CollapsibleSection>
 
-            <div className="bg-agent-card border border-agent-border rounded-xl p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h2 className="text-white font-semibold">Settlement History</h2>
-                  <p className="text-xs text-gray-400 mt-1">On-chain funding, payout, and refund attempts are tracked separately from workflow.</p>
-                </div>
-                <div className="text-xs text-gray-500">{settlementHistory.length} records</div>
-              </div>
-
+            <CollapsibleSection
+              title="Settlement History"
+              description="On-chain funding, payout, and refund attempts are tracked separately from workflow."
+              countLabel={`${settlementHistory.length} records`}
+              storageKey={`agreement:${id}:section:settlement-history`}
+            >
               {settlementHistory.length ? (
                 <div className="space-y-3">
                   {settlementHistory.map((settlement: any) => (
@@ -2848,9 +3117,14 @@ export default function AgreementDetailPage() {
                   No settlement records yet. Funding, payout, refund, and split attempts will appear here as the agreement moves forward.
                 </div>
               )}
-            </div>
+            </CollapsibleSection>
 
             {agreement.ckboostProfileSnapshot ? (
+              <CollapsibleSection
+                title="CKBoost Contributor Snapshot"
+                description="Imported contributor reputation and campaign history captured at handoff."
+                storageKey={`agreement:${id}:section:ckboost`}
+              >
               <div className="overflow-hidden rounded-2xl border border-agent-border bg-agent-card shadow-[0_18px_50px_rgba(15,23,42,0.18)]">
                 <div className="border-b border-agent-border bg-gradient-to-r from-agent-bg/95 via-agent-card to-agent-bg/90 p-6">
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -2963,9 +3237,17 @@ export default function AgreementDetailPage() {
                   </div>
                 </div>
               </div>
+              </CollapsibleSection>
             ) : null}
 
             {agreement.source ? (
+              <div className="bg-agent-card border border-agent-border rounded-xl p-6">
+                <div className="mb-4">
+                  <h2 className="text-white font-semibold">Imported Source</h2>
+                  <p className="mt-1 text-xs text-gray-400">
+                    External DAO or bounty attribution and sync controls attached to this agreement.
+                  </p>
+                </div>
               <div className="overflow-hidden rounded-2xl border border-agent-border bg-agent-card shadow-[0_18px_50px_rgba(15,23,42,0.18)]">
                 <div className="border-b border-agent-border bg-gradient-to-r from-agent-bg/95 via-agent-card to-agent-bg/90 p-6">
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -3178,17 +3460,15 @@ export default function AgreementDetailPage() {
                   </div>
                 </div>
               </div>
+              </div>
             ) : null}
 
-            <div className="bg-agent-card border border-agent-border rounded-xl p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h2 className="text-white font-semibold">Audit Trail</h2>
-                  <p className="text-xs text-gray-400 mt-1">Participant and operator actions recorded for this agreement.</p>
-                </div>
-                <div className="text-xs text-gray-500">{auditLogs.length} entries</div>
-              </div>
-
+            <CollapsibleSection
+              title="Audit Trail"
+              description="Participant and operator actions recorded for this agreement."
+              countLabel={`${auditLogs.length} entries`}
+              storageKey={`agreement:${id}:section:audit-trail`}
+            >
               {auditLogs.length ? (
                 <div className="space-y-3">
                   {auditLogs.map((entry: any) => (
@@ -3216,33 +3496,40 @@ export default function AgreementDetailPage() {
                   No audit entries yet. Agreement edits, funding confirmations, approvals, disputes, and amendments will be recorded here.
                 </div>
               )}
-            </div>
+            </CollapsibleSection>
 
-            <div className="bg-agent-card border border-agent-border rounded-xl p-6">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-white font-semibold">Agreement Thread</h2>
-                  <p className="text-xs text-gray-400 mt-1">Participant comments and coordination outside the dispute workspace.</p>
-                </div>
-                <div className="text-xs text-gray-500">{agreement.comments?.length || 0} messages</div>
-              </div>
-
+            <CollapsibleSection
+              title={isImportedBounty ? 'Reviewer Thread' : 'Agreement Thread'}
+              description={
+                isImportedBounty
+                  ? 'Use this shared thread for direct reviewer and worker conversation about the imported bounty.'
+                  : 'Participant comments and coordination outside the dispute workspace.'
+              }
+              countLabel={`${displayedAgreementComments.length} messages`}
+              storageKey={`agreement:${id}:section:agreement-thread`}
+              defaultExpanded={isImportedBounty}
+            >
               <div className="space-y-3">
-                {(agreement.comments || []).length ? (
-                  (agreement.comments || []).map((comment: any) => (
+                {displayedAgreementComments.length ? (
+                  displayedAgreementComments.map((comment: any) => (
                     <div key={comment.id} className="rounded-lg border border-agent-border bg-agent-bg/60 p-4">
                       <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-gray-500">
                         <span className="rounded-full bg-slate-900/60 px-2 py-1 text-gray-300">
                           {getParticipantLabel(comment.authorAddress, agreement)}
                         </span>
                         <span>{new Date(comment.createdAt).toLocaleString()}</span>
+                        {comment.optimistic ? (
+                          <span className="text-emerald-300">Sending...</span>
+                        ) : null}
                       </div>
                       <p className="whitespace-pre-wrap text-sm text-gray-300">{comment.content}</p>
                     </div>
                   ))
                 ) : (
                   <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4 text-sm text-gray-400">
-                    No messages yet. Use this thread for normal coordination that does not belong in the formal dispute workspace.
+                    {isImportedBounty
+                      ? 'No reviewer-worker messages yet. Use this thread for direct conversation about the milestone work.'
+                      : 'No messages yet. Use this thread for normal coordination that does not belong in the formal dispute workspace.'}
                   </div>
                 )}
               </div>
@@ -3251,7 +3538,7 @@ export default function AgreementDetailPage() {
                 <div className="mt-4">
                   <textarea
                     className="w-full bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-agent-accent min-h-[96px]"
-                    placeholder="Message the other participant..."
+                    placeholder={isImportedBounty ? 'Send a reviewer / worker message...' : 'Message the other participant...'}
                     value={commentContent}
                     onChange={(e) => setCommentContent(e.target.value)}
                   />
@@ -3264,18 +3551,15 @@ export default function AgreementDetailPage() {
                   </button>
                 </div>
               )}
-            </div>
+            </CollapsibleSection>
 
             {agreement.status !== 'DRAFT' && agreement.status !== 'CANCELLED' && (
-              <div className="bg-agent-card border border-agent-border rounded-xl p-6">
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-white font-semibold">Amendment Proposals</h2>
-                    <p className="text-xs text-gray-400 mt-1">Propose post-funding changes and have the counterparty accept or reject them.</p>
-                  </div>
-                  <div className="text-xs text-gray-500">{agreement.amendments?.length || 0} proposals</div>
-                </div>
-
+              <CollapsibleSection
+                title="Amendment Proposals"
+                description="Propose post-funding changes and have the counterparty accept or reject them."
+                countLabel={`${agreement.amendments?.length || 0} proposals`}
+                storageKey={`agreement:${id}:section:amendments`}
+              >
                 {(isClient || isWorker) && (
                   <div className="mb-5 rounded-lg border border-agent-border bg-agent-bg/60 p-4">
                     <div className="grid gap-3 md:grid-cols-2">
@@ -3370,7 +3654,7 @@ export default function AgreementDetailPage() {
                     );
                   })}
                 </div>
-              </div>
+              </CollapsibleSection>
             )}
 
             {error && (
@@ -3683,6 +3967,25 @@ export default function AgreementDetailPage() {
                     Add Link
                   </button>
                 </div>
+                <div className="mb-3 flex gap-2">
+                  <input
+                    type="text"
+                    className="flex-1 bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-agent-accent"
+                    placeholder="0x transaction hash..."
+                    value={proofTxHashDraft}
+                    onChange={(e) => setProofTxHashDraft(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => appendTxHashArtifact(proofTxHashDraft, setProofArtifacts, () => setProofTxHashDraft(''))}
+                    className="rounded-lg border border-agent-border px-4 py-2 text-sm text-white hover:bg-agent-bg"
+                  >
+                    Add Tx Hash
+                  </button>
+                </div>
+                <p className="mb-3 text-xs text-gray-500">
+                  Add the on-chain transaction hash here when the milestone includes deploys, transfers, or payout-related proof.
+                </p>
                 <input
                   type="file"
                   multiple
@@ -3692,6 +3995,7 @@ export default function AgreementDetailPage() {
                     e.target.value = '';
                   }}
                 />
+                <p className="mb-3 text-xs text-gray-500">Each uploaded image or attachment must be {MAX_ARTIFACT_SIZE_LABEL} or smaller.</p>
                 <ArtifactPreviewList
                   artifacts={proofArtifacts}
                   onRemove={(artifactId) => removeArtifact(artifactId, setProofArtifacts)}
@@ -3775,103 +4079,21 @@ export default function AgreementDetailPage() {
               </div>
             )}
 
-            {awaitingHybridReview && currentMilestone && (
-              <div className="bg-agent-card border border-yellow-800/40 rounded-xl p-6">
-                <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
-                  <ClockIcon className="w-5 h-5 text-yellow-400" />
-                  Awaiting Agent Review
-                </h3>
-                <p className="text-sm text-gray-400 mb-4">
-                  {isClient
-                    ? `The worker has submitted proof for ${currentMilestone.title}. In HYBRID mode, the agent checks the proof first and then your payout approval controls will appear here.`
-                    : isWorker
-                      ? `Your proof for ${currentMilestone.title} has been submitted. The agent is reviewing it before the client can approve payout or open a dispute.`
-                      : `Proof has been submitted for ${currentMilestone.title}. The agent needs to review it before the client can take action.`}
-                </p>
-                <ProofCheckPanel
-                  result={currentProofCheck}
-                  checking={currentProofCheckLoading}
-                  onCheck={() => {
-                    void handleCheckProof(currentMilestone.id);
-                  }}
-                />
-                {canSendInfoRequest ? (
-                  <div className="mt-4 rounded-xl border border-agent-border bg-agent-bg/60 p-4">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div>
-                        <h4 className="text-sm font-semibold text-white">Request More Info</h4>
-                        <p className="mt-1 text-xs text-gray-400">
-                          Draft specific follow-up questions from the proof checker, then send them as a structured participant request.
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void handleDraftInfoRequest(currentMilestone.id);
-                        }}
-                        disabled={draftInfoRequestLoading}
-                        className="rounded-lg border border-agent-accent/40 px-3 py-2 text-xs font-medium text-agent-accent hover:bg-agent-accent/10 disabled:opacity-60"
-                      >
-                        {draftInfoRequestLoading ? 'Drafting...' : 'Draft Questions'}
-                      </button>
-                    </div>
-                    <textarea
-                      className="mt-3 min-h-[110px] w-full rounded-lg border border-agent-border bg-agent-bg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-agent-accent"
-                      placeholder="One follow-up request per line..."
-                      value={followUpDraftText}
-                      onChange={(e) => setFollowUpDraftText(e.target.value)}
-                    />
-                    <textarea
-                      className="mt-3 min-h-[84px] w-full rounded-lg border border-agent-border bg-agent-bg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-agent-accent"
-                      placeholder="Optional reviewer note..."
-                      value={followUpNote}
-                      onChange={(e) => setFollowUpNote(e.target.value)}
-                    />
-                    {latestCurrentInfoRequest && !latestCurrentInfoRequest.resolved ? (
-                      <div className="mt-3 rounded-lg border border-amber-800/40 bg-amber-950/20 px-3 py-2 text-xs text-amber-100">
-                        There is already an open info request for this milestone. Wait for a response before approving payout.
-                      </div>
-                    ) : null}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleSendInfoRequest(currentMilestone.id);
-                      }}
-                      disabled={sendInfoRequestLoading || !followUpDraftText.trim()}
-                      className="mt-3 rounded-lg border border-agent-border px-4 py-2 text-sm font-medium text-white hover:bg-agent-bg disabled:opacity-50"
-                    >
-                      {sendInfoRequestLoading ? 'Sending Request...' : 'Send Request More Info'}
-                    </button>
-                  </div>
-                ) : null}
-                <button
-                  onClick={() => void refreshAgreement('refresh')}
-                  disabled={refreshingStatus}
-                  className="mt-4 rounded-lg border border-yellow-600/40 px-4 py-2 text-sm font-medium text-yellow-300 transition-colors hover:bg-yellow-900/20 disabled:opacity-60 flex items-center gap-2"
-                >
-                  {refreshingStatus ? (
-                    <>
-                      <div className="animate-spin w-4 h-4 border-2 border-yellow-300 border-t-transparent rounded-full" />
-                      Refreshing...
-                    </>
-                  ) : (
-                    'Refresh Status'
-                  )}
-                </button>
-              </div>
-            )}
-
             {canClientReview && currentMilestone && (
                 <div className="bg-agent-card border border-emerald-800/50 rounded-xl p-6">
-                  <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
-                    <ScaleIcon className="w-5 h-5 text-emerald-400" />
-                    Review Current Milestone
-                  </h3>
-                  <p className="text-sm text-gray-400 mb-4">
-                    {agreement.escrowModel === 'ONCHAIN_LOCK'
+                <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
+                  <ScaleIcon className="w-5 h-5 text-emerald-400" />
+                  Review Current Milestone
+                </h3>
+                <p className="text-sm text-gray-400 mb-4">
+                  {agreement.escrowModel === 'ONCHAIN_LOCK'
                       ? `Sign the on-chain payout resolution for ${currentMilestone.title}.`
-                      : `Approve payout for ${currentMilestone.title}, or open a dispute below. Refunds only happen after both client and worker agree inside the dispute thread.`}
-                  </p>
+                      : currentMilestone.status === 'PROOF_SUBMITTED'
+                        ? `The worker has submitted proof for ${currentMilestone.title}. Payout is already available while PactAgent continues the background review.`
+                        : isImportedBounty
+                        ? `Review ${currentMilestone.title}, message the worker for missing context when needed, and approve the payout only after manual review is complete.`
+                        : `Approve payout for ${currentMilestone.title}, or open a dispute below. Refunds only happen after both client and worker agree inside the dispute thread.`}
+                </p>
                   <div className="mb-4">
                     <ProofCheckPanel
                       result={currentProofCheck}
@@ -3881,38 +4103,71 @@ export default function AgreementDetailPage() {
                       }}
                     />
                   </div>
-                  <div className="mb-4 rounded-xl border border-agent-border bg-agent-bg/60 p-4">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div>
-                        <h4 className="text-sm font-semibold text-white">Request More Info</h4>
-                        <p className="mt-1 text-xs text-gray-400">
-                          Ask only for the missing evidence. Drafted questions are editable before you send them to the worker.
-                        </p>
+                  {!isImportedBounty ? (
+                    <div className="mb-4 rounded-xl border border-agent-border bg-agent-bg/60 p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <h4 className="text-sm font-semibold text-white">Request More Info</h4>
+                          <p className="mt-1 text-xs text-gray-400">
+                            Ask only for the missing evidence. Send a structured request here, then continue the conversation in the reviewer thread below.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handleDraftInfoRequest(currentMilestone.id);
+                          }}
+                          disabled={draftInfoRequestLoading}
+                          className="rounded-lg border border-agent-accent/40 px-3 py-2 text-xs font-medium text-agent-accent hover:bg-agent-accent/10 disabled:opacity-60"
+                        >
+                          {draftInfoRequestLoading ? 'Drafting...' : 'Suggest Questions'}
+                        </button>
                       </div>
+                      <textarea
+                        className="mt-3 min-h-[110px] w-full rounded-lg border border-agent-border bg-agent-bg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-agent-accent"
+                        placeholder="One follow-up request per line..."
+                        value={followUpDraftText}
+                        onChange={(e) => setFollowUpDraftText(e.target.value)}
+                      />
+                      {currentMilestoneInfoRequests.length ? (
+                        <div className="mt-3 space-y-2">
+                          {currentMilestoneInfoRequests.map((request) => (
+                            <div key={request.requestId} className={`rounded-lg border px-3 py-2 ${getInfoRequestTone(request)}`}>
+                              <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] uppercase tracking-[0.16em]">
+                                <span>{request.requestId}</span>
+                                <span>{request.resolved ? 'Answered' : 'Open'}</span>
+                              </div>
+                              <div className="mt-2 space-y-1">
+                                {request.questions.map((question, index) => (
+                                  <p key={`${request.requestId}-${index}`} className="text-sm">
+                                    {index + 1}. {question}
+                                  </p>
+                                ))}
+                              </div>
+                              {request.responsePreview ? (
+                                <p className="mt-2 text-xs text-gray-300">Latest response: {request.responsePreview}</p>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
                       <button
                         type="button"
                         onClick={() => {
-                          void handleDraftInfoRequest(currentMilestone.id);
+                          void handleSendInfoRequest(currentMilestone.id);
                         }}
-                        disabled={draftInfoRequestLoading}
-                        className="rounded-lg border border-agent-accent/40 px-3 py-2 text-xs font-medium text-agent-accent hover:bg-agent-accent/10 disabled:opacity-60"
+                        disabled={sendInfoRequestLoading || !followUpDraftText.trim()}
+                        className="mt-3 rounded-lg border border-agent-border px-4 py-2 text-sm font-medium text-white hover:bg-agent-bg disabled:opacity-50"
                       >
-                        {draftInfoRequestLoading ? 'Drafting...' : 'Draft Questions'}
+                        {sendInfoRequestLoading ? 'Sending Request...' : 'Send Structured Request'}
                       </button>
                     </div>
-                    <textarea
-                      className="mt-3 min-h-[110px] w-full rounded-lg border border-agent-border bg-agent-bg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-agent-accent"
-                      placeholder="One follow-up request per line..."
-                      value={followUpDraftText}
-                      onChange={(e) => setFollowUpDraftText(e.target.value)}
-                    />
-                    <textarea
-                      className="mt-3 min-h-[84px] w-full rounded-lg border border-agent-border bg-agent-bg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-agent-accent"
-                      placeholder="Optional reviewer note..."
-                      value={followUpNote}
-                      onChange={(e) => setFollowUpNote(e.target.value)}
-                    />
-                    {currentMilestoneInfoRequests.length ? (
+                  ) : currentMilestoneInfoRequests.length ? (
+                    <div className="mb-4 rounded-xl border border-agent-border bg-agent-bg/60 p-4">
+                      <h4 className="text-sm font-semibold text-white">Structured Review Requests</h4>
+                      <p className="mt-1 text-xs text-gray-400">
+                        Formal reviewer requests stay tracked here. Use the reviewer thread below for the actual conversation.
+                      </p>
                       <div className="mt-3 space-y-2">
                         {currentMilestoneInfoRequests.map((request) => (
                           <div key={request.requestId} className={`rounded-lg border px-3 py-2 ${getInfoRequestTone(request)}`}>
@@ -3933,65 +4188,21 @@ export default function AgreementDetailPage() {
                           </div>
                         ))}
                       </div>
-                    ) : null}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleSendInfoRequest(currentMilestone.id);
-                      }}
-                      disabled={sendInfoRequestLoading || !followUpDraftText.trim()}
-                      className="mt-3 rounded-lg border border-agent-border px-4 py-2 text-sm font-medium text-white hover:bg-agent-bg disabled:opacity-50"
-                    >
-                      {sendInfoRequestLoading ? 'Sending Request...' : 'Send Request More Info'}
-                    </button>
-                  </div>
-                  <div className="mb-4 rounded-xl border border-emerald-800/40 bg-emerald-950/20 p-4">
-                    <div className="text-[11px] uppercase tracking-[0.16em] text-emerald-300">Final Reviewer Action</div>
-                    <h4 className="mt-2 text-sm font-semibold text-white">Human confirmation checkpoint</h4>
-                    <p className="mt-1 text-xs text-gray-300">
-                      AI signals are suggestions only. A person still needs to review the evidence and explicitly confirm the payout decision.
-                    </p>
-                    <textarea
-                      className="mt-3 min-h-[88px] w-full rounded-lg border border-agent-border bg-agent-bg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500"
-                      placeholder="Reviewer decision note..."
-                      value={reviewerDecisionNote}
-                      onChange={(e) => setReviewerDecisionNote(e.target.value)}
-                    />
-                    <label className="mt-3 flex items-start gap-3 text-sm text-gray-200">
-                      <input
-                        type="checkbox"
-                        className="mt-1"
-                        checked={humanApprovalConfirmed}
-                        onChange={(e) => setHumanApprovalConfirmed(e.target.checked)}
-                      />
-                      <span>I reviewed the submitted proof myself and I want to approve this milestone.</span>
-                    </label>
-                    <label className="mt-3 flex items-start gap-3 text-sm text-gray-200">
-                      <input
-                        type="checkbox"
-                        className="mt-1"
-                        checked={acknowledgeProofCheck}
-                        onChange={(e) => setAcknowledgeProofCheck(e.target.checked)}
-                      />
-                      <span>I used the proof checker as a suggested pre-review aid, not as the final decision maker.</span>
-                    </label>
-                    {displayedRecommendation ? (
-                      <label className="mt-3 flex items-start gap-3 text-sm text-gray-200">
-                        <input
-                          type="checkbox"
-                          className="mt-1"
-                          checked={acknowledgeAiSuggestion}
-                          onChange={(e) => setAcknowledgeAiSuggestion(e.target.checked)}
-                        />
-                        <span>I understand the AI recommendation is suggested only and does not approve payout by itself.</span>
-                      </label>
-                    ) : null}
-                    {currentOpenInfoRequests.length > 0 ? (
-                      <div className="mt-3 rounded-lg border border-amber-800/40 bg-amber-950/20 px-3 py-2 text-xs text-amber-100">
-                        Approval is blocked until the open info request for this milestone receives a response.
-                      </div>
-                    ) : null}
-                  </div>
+                    </div>
+                  ) : null}
+                  <ReviewerDecisionDraftPanel
+                    reviewerDecisionNote={reviewerDecisionNote}
+                    setReviewerDecisionNote={setReviewerDecisionNote}
+                    humanApprovalConfirmed={humanApprovalConfirmed}
+                    setHumanApprovalConfirmed={setHumanApprovalConfirmed}
+                    acknowledgeProofCheck={acknowledgeProofCheck}
+                    setAcknowledgeProofCheck={setAcknowledgeProofCheck}
+                    acknowledgeAiSuggestion={acknowledgeAiSuggestion}
+                    setAcknowledgeAiSuggestion={setAcknowledgeAiSuggestion}
+                    displayedRecommendation={displayedRecommendation}
+                    currentOpenInfoRequestsCount={currentOpenInfoRequests.length}
+                    waitingForReview={currentMilestone.status === 'PROOF_SUBMITTED'}
+                  />
                   <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
                     <button
                       onClick={() => handleReviewAction('APPROVE')}
@@ -4001,7 +4212,6 @@ export default function AgreementDetailPage() {
                         || !reviewerDecisionNote.trim()
                         || !acknowledgeProofCheck
                         || (displayedRecommendation ? !acknowledgeAiSuggestion : false)
-                        || currentOpenInfoRequests.length > 0
                       }
                       className="flex min-w-[150px] items-center justify-center gap-1.5 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
                     >
@@ -4021,50 +4231,19 @@ export default function AgreementDetailPage() {
                 </div>
               )}
 
-            {isWorker && currentMilestone && currentOpenInfoRequests.length > 0 ? (
-              <div className="bg-agent-card border border-amber-800/40 rounded-xl p-6">
-                <h3 className="text-white font-semibold mb-2">Outstanding Reviewer Request</h3>
+            {isImportedBounty && currentMilestone && (isClient || isWorker) ? (
+              <div className="bg-agent-card border border-sky-800/40 rounded-xl p-6">
+                <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
+                  <ClipboardDocumentCheckIcon className="w-5 h-5 text-sky-300" />
+                  Reviewer Follow-up Thread
+                </h3>
                 <p className="text-sm text-gray-400">
-                  Reply here with the missing context so the reviewer can continue the milestone decision for {currentMilestone.title}.
+                  Imported bounties use this thread for direct reviewer and worker follow-up. Formal review requests stay summarized above when they exist.
                 </p>
-                {currentOpenInfoRequests.map((request) => (
-                  <div key={request.requestId} className={`mt-4 rounded-lg border p-3 ${getInfoRequestTone(request)}`}>
-                    <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.16em]">
-                      <span>{request.requestId}</span>
-                      <span>{new Date(request.createdAt).toLocaleString()}</span>
-                    </div>
-                    <div className="mt-2 space-y-2">
-                      {request.questions.map((question, index) => (
-                        <p key={`${request.requestId}-${index}`} className="text-sm">
-                          {index + 1}. {question}
-                        </p>
-                      ))}
-                    </div>
-                    {request.note ? (
-                      <p className="mt-2 text-xs text-gray-300">Reviewer note: {request.note}</p>
-                    ) : null}
-                    <textarea
-                      className="mt-3 min-h-[96px] w-full rounded-lg border border-agent-border bg-agent-bg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-agent-accent"
-                      placeholder="Answer the reviewer’s info request..."
-                      value={infoResponseContent}
-                      onChange={(e) => setInfoResponseContent(e.target.value)}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleSendInfoResponse(currentMilestone.id, request.requestId);
-                      }}
-                      disabled={sendInfoResponseLoading || !infoResponseContent.trim()}
-                      className="mt-3 rounded-lg border border-agent-border px-4 py-2 text-sm font-medium text-white hover:bg-agent-bg disabled:opacity-50"
-                    >
-                      {sendInfoResponseLoading ? 'Sending Response...' : 'Send Info Response'}
-                    </button>
-                  </div>
-                ))}
               </div>
             ) : null}
 
-            {canOnchainRefundReview && currentMilestone && (
+            {canOnchainRefundReview && currentMilestone && !isImportedBounty && (
               <div className="bg-agent-card border border-red-800/40 rounded-xl p-6">
                 <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
                   <XCircleIcon className="w-5 h-5 text-red-400" />
@@ -4093,7 +4272,7 @@ export default function AgreementDetailPage() {
               </div>
             )}
 
-            {['FUNDED', 'PROOF_SUBMITTED', 'UNDER_REVIEW'].includes(agreement.status) && currentMilestone && (
+            {['FUNDED', 'PROOF_SUBMITTED', 'UNDER_REVIEW'].includes(agreement.status) && currentMilestone && !isImportedBounty && (
               <div className="bg-agent-card border border-red-800/30 rounded-xl p-6">
                 <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
                   <ExclamationTriangleIcon className="w-5 h-5 text-orange-400" />
@@ -4161,6 +4340,7 @@ export default function AgreementDetailPage() {
                     e.target.value = '';
                   }}
                 />
+                <p className="mb-3 text-xs text-gray-500">Each uploaded image or attachment must be {MAX_ARTIFACT_SIZE_LABEL} or smaller.</p>
                 <ArtifactPreviewList
                   artifacts={disputeArtifacts}
                   onRemove={(artifactId) => removeArtifact(artifactId, setDisputeArtifacts)}
@@ -4185,7 +4365,7 @@ export default function AgreementDetailPage() {
               </div>
             )}
 
-            {agreement.status === 'DISPUTED' && currentMilestone && currentOpenDispute && (
+            {agreement.status === 'DISPUTED' && currentMilestone && currentOpenDispute && !isImportedBounty && (
               <div className="bg-agent-card border border-purple-800/50 rounded-xl p-6">
                 <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
                   <div>
@@ -4434,6 +4614,7 @@ export default function AgreementDetailPage() {
                           e.target.value = '';
                         }}
                       />
+                      <p className="mb-3 text-xs text-gray-500">Each uploaded image or attachment must be {MAX_ARTIFACT_SIZE_LABEL} or smaller.</p>
                       <ArtifactPreviewList
                         artifacts={replyArtifacts}
                         onRemove={(artifactId) => removeArtifact(artifactId, setReplyArtifacts)}
@@ -4539,6 +4720,7 @@ export default function AgreementDetailPage() {
                     (milestone.proofs || []).map((proof: any) => {
                       const parsedProof = parseProofBundle(proof.content);
                       const proofCheck = proofChecksByMilestone[milestone.id] || null;
+                      const canRecheckPassedMilestone = !['APPROVED', 'PAID', 'REFUNDED', 'EXPIRED', 'CANCELLED'].includes(milestone.status);
                       return (
                         <div key={proof.id} className="bg-agent-bg rounded-lg p-3">
                           <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -4568,6 +4750,7 @@ export default function AgreementDetailPage() {
                                 onCheck={() => {
                                   void handleCheckProof(milestone.id);
                                 }}
+                                showCheckAction={canRecheckPassedMilestone}
                               />
                             </div>
                           ) : null}
