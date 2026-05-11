@@ -1,12 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { NavbarMenu } from '@/components/NavbarMenu';
 import { AgentIcon, ArrowLeftIcon, DocumentTextIcon, PlusIcon, TrophyIcon, XCircleIcon } from '@/components/Icons';
 import { ckbToShannons, MIN_CELL_CAPACITY, shannonsToCKB } from '@/lib/ckb';
-import { fetchConfig, importCkboostAgreement } from '@/lib/api';
+import { fetchCkboostCampaignAutofill, fetchConfig, importCkboostAgreement } from '@/lib/api';
 import { useStore } from '@/lib/store';
 
 type MilestoneDraft = {
@@ -60,7 +60,9 @@ export default function ImportCkboostPage() {
   const authToken = useStore((s) => s.authToken);
   const [publicConfig, setPublicConfig] = useState<any>(null);
   const [saving, setSaving] = useState(false);
+  const [autofilling, setAutofilling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [autofillMessage, setAutofillMessage] = useState<string | null>(null);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [milestones, setMilestones] = useState<MilestoneDraft[]>([
     {
@@ -120,6 +122,9 @@ export default function ImportCkboostPage() {
     if (error) {
       setError(null);
     }
+    if (autofillMessage) {
+      setAutofillMessage(null);
+    }
   }
 
   function addMilestone() {
@@ -158,6 +163,57 @@ export default function ImportCkboostPage() {
     .split('\n')
     .map((item) => item.trim())
     .filter(Boolean);
+
+  async function handleAutofillFromCampaign() {
+    if (!walletAddress || !authToken) {
+      setError('Connect and authenticate your wallet first.');
+      return;
+    }
+
+    if (!form.campaignUrl.trim()) {
+      setError('Paste a CKBoost campaign link first.');
+      return;
+    }
+
+    setAutofilling(true);
+    setError(null);
+    setAutofillMessage(null);
+
+    try {
+      const data = await fetchCkboostCampaignAutofill({
+        campaignLink: form.campaignUrl.trim(),
+      });
+
+      setForm((prev) => ({
+        ...prev,
+        campaignId: data.campaignId,
+        campaignUrl: data.campaignUrl,
+        campaignTitle: data.campaignTitle,
+        campaignDescription: data.campaignDescription || prev.campaignDescription,
+        questBundleTitle: data.questBundleTitle || prev.questBundleTitle,
+        sponsorName: data.sponsorName || prev.sponsorName,
+        governanceThreadUrl: data.governanceThreadUrl || prev.governanceThreadUrl,
+        agreementTitle: prev.agreementTitle.trim() ? prev.agreementTitle : data.agreementTitle,
+        agreementDescription: prev.agreementDescription.trim() ? prev.agreementDescription : data.agreementDescription,
+        campaignParticipationCount: String(data.stats.questCount || 0),
+        totalPoints: String(data.stats.totalPoints || 0),
+      }));
+
+      if (data.milestones.length) {
+        setMilestones(data.milestones);
+      }
+
+      setAutofillMessage(
+        data.milestones.length
+          ? `Imported ${data.milestones.length} quest-derived milestone${data.milestones.length === 1 ? '' : 's'} from the CKBoost campaign.`
+          : 'Campaign details were filled from the CKBoost link. Add milestone amounts where CKBoost did not expose them.',
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to auto-fill the CKBoost campaign details.');
+    } finally {
+      setAutofilling(false);
+    }
+  }
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -398,6 +454,29 @@ export default function ImportCkboostPage() {
               <div className="space-y-5">
                 <div className="rounded-2xl border border-agent-border bg-agent-bg/40 p-5">
                   <h2 className="text-lg font-semibold text-white">CKBoost Campaign</h2>
+                  <div className="mt-4 rounded-xl border border-agent-border bg-agent-card/40 p-4">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-end">
+                      <div className="flex-1">
+                        <label className="mb-2 block text-xs uppercase tracking-[0.16em] text-gray-500">Campaign Link Auto-Fill</label>
+                        <input
+                          className={inputClass}
+                          value={form.campaignUrl}
+                          onChange={(e) => updateField('campaignUrl', e.target.value)}
+                          placeholder="https://ckboost.netlify.app/campaign/0x..."
+                        />
+                        <p className={helperClass}>Paste a public CKBoost campaign link and PactAgent will fill the campaign details and quest-derived milestones it can resolve from CKB.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleAutofillFromCampaign}
+                        disabled={autofilling}
+                        className="inline-flex h-11 items-center justify-center rounded-xl border border-agent-accent/40 bg-agent-accent/10 px-4 text-sm font-medium text-agent-accent hover:bg-agent-accent/20 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {autofilling ? 'Resolving campaign...' : 'Auto-Fill From Link'}
+                      </button>
+                    </div>
+                    {autofillMessage ? <p className="mt-3 text-sm text-emerald-300">{autofillMessage}</p> : null}
+                  </div>
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
                     <div>
                       <input
@@ -426,7 +505,7 @@ export default function ImportCkboostPage() {
                         onChange={(e) => updateField('campaignUrl', e.target.value)}
                         placeholder="https://ckboost.com/campaigns/42"
                       />
-                      <p className={helperClass}>Primary CKBoost campaign URL.</p>
+                      <p className={helperClass}>Primary CKBoost campaign URL. This is also the link used for auto-fill.</p>
                     </div>
                     <div>
                       <input

@@ -262,6 +262,39 @@ export async function importCkboostAgreement(data: {
   });
 }
 
+export async function fetchCkboostCampaignAutofill(data: {
+  campaignLink: string;
+}) {
+  return request<{
+    campaignId: string;
+    campaignUrl: string;
+    campaignTitle: string;
+    campaignDescription: string;
+    questBundleTitle?: string;
+    agreementTitle: string;
+    agreementDescription: string;
+    governanceThreadUrl?: string;
+    sponsorName?: string;
+    rules: string[];
+    milestones: Array<{
+      title: string;
+      description: string;
+      amountCkb: string;
+    }>;
+    stats: {
+      participantsCount: number;
+      totalCompletions: number;
+      questCount: number;
+      totalPoints: number;
+      startsAt?: string;
+      endsAt?: string;
+    };
+  }>('/integrations/ckboost/autofill', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
 export async function updateDraftAgreement(id: string, data: {
   title: string;
   description: string;

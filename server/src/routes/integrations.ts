@@ -14,6 +14,7 @@ import {
   recordCkboostEvent,
   upsertCkboostProfileSnapshot,
 } from '../services/ckboostIntegrationService';
+import { resolveCkboostCampaignAutoFill } from '../services/ckboostCampaignResolverService';
 
 const router = Router();
 const actionRateLimit = createRateLimit({
@@ -93,6 +94,10 @@ const ckboostEventSchema = z.object({
   importAgreement: ckboostImportSchema.optional(),
 });
 
+const ckboostAutofillSchema = z.object({
+  campaignLink: z.string().min(1).max(500),
+});
+
 function getAuthAddress(req: Request) {
   if (!req.auth?.address) {
     throw new Error('Authentication required');
@@ -132,6 +137,18 @@ router.post('/ckboost/import', requireAuth, actionRateLimit, async (req: Request
     res.json({ success: true, data: fullAgreement || agreement });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Failed to import CKBoost campaign';
+    res.status(400).json({ success: false, error: msg });
+  }
+});
+
+router.post('/ckboost/autofill', requireAuth, actionRateLimit, async (req: Request, res: Response) => {
+  try {
+    getAuthAddress(req);
+    const data = ckboostAutofillSchema.parse(req.body);
+    const result = await resolveCkboostCampaignAutoFill(data.campaignLink);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to resolve CKBoost campaign data';
     res.status(400).json({ success: false, error: msg });
   }
 });
