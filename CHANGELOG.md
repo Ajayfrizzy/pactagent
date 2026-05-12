@@ -29,18 +29,28 @@ The format is based on Keep a Changelog, and this project follows a simple seman
   - agreement-page and admin-page source sync controls for draft, review, and publish
   - explicit reviewer approval and reviewed-by enforcement before outward posting
   - source sync webhook events and scheduled background polling through the worker loop
+  - Discourse-aware source import and sync parsing for Nervos forum threads
+  - imported grant snapshots with requested budget, ETA, funding-address, and commencement-payment context
+  - dynamic milestone extraction from source threads instead of fixed milestone assumptions
+  - near-real-time agreement refresh after source sync updates
 - Phase 5 CKBoost handoff with:
   - `Create from CKBoost` dashboard entry and import page
   - CKBoost import service, route, and webhook-driven agreement ingestion
   - campaign, quest bundle, approved proof, contributor, and sponsor metadata mapping
   - sponsor wallet to client mapping while preserving importer-as-creator access
   - persisted CKBoost external IDs for future sync-back
+  - CKBoost campaign-link auto-fill for campaign metadata and quest-derived milestone drafts
 - Phase 6 CKBoost identity, reputation, and event sync with:
   - contributor snapshot panels on import and agreement pages
   - stored CKBoost profile snapshots and event history
   - scheduled CKBoost profile refresh jobs and webhook receivers
   - outbound CKBoost lifecycle notifications for proof submitted, milestone approved, and milestone paid
   - durable CKBoost notification delivery records with retry handling
+- Imported grant pricing support with:
+  - live CKB/USD quote endpoint
+  - grant-import quote panels for requested budget, commencement payment, and milestone budget references
+  - one-click application of live CKB estimates into editable milestone payout fields
+  - automatic quote refresh while the import form stays open
 - Public profile support for wallet-native identity, including profile metadata, public profile routes, and profile settings.
 - Lightweight reputation snapshots derived from agreement outcomes, disputes, settlement behavior, and milestone activity.
 - Invite link support for draft agreements and direct participant onboarding flows.
@@ -60,6 +70,9 @@ The format is based on Keep a Changelog, and this project follows a simple seman
 - CKBoost import now supports separating the sponsor/client identity from the importing wallet, while preserving creator attribution on the imported agreement source record.
 - DAO/bounty import now supports a true grant-style flow with multiple milestones and a visible total amount to lock upfront.
 - Imported DAO/bounty agreements now force manual review and partial milestone-based release behavior.
+- DAO/bounty import now supports forum-thread auto-fill so source metadata and milestone drafts can be resolved from a pasted Nervos grant link.
+- DAO/bounty import now preserves separate commencement payments as their own kickoff checkpoint instead of forcing them into Milestone 1.
+- CKBoost import now supports campaign-link auto-fill instead of relying only on manual campaign entry.
 - Agreement detail and dashboard views now surface source attribution and invite actions where relevant.
 - Wallet authentication and webhook flows are now aligned with stricter production deployment expectations, including authenticated webhook management routes.
 - Dashboard and agreement detail pages now place more emphasis on “what happens next,” milestone progress, and user action clarity instead of only showing raw agreement data.
@@ -93,6 +106,7 @@ The format is based on Keep a Changelog, and this project follows a simple seman
 - Visual contrast has been strengthened across educational panels, action summaries, milestone checkpoints, and selected webhook endpoint cards so high-stakes agreement work is easier to scan.
 - Webhook onboarding now explains the receive-subscribe-react lifecycle and includes “good first test” guidance for temporary webhook receivers.
 - DAO/bounty import now teaches the difference between source metadata, upfront funding, and manual reviewer control before users create the agreement.
+- DAO/bounty import now shows the link-first import flow at the top of the source intake section so operators begin with the forum thread before moving into the rest of the form.
 - Agreement detail now presents the milestone journey as a clearer step-by-step progression with better emphasis on the active checkpoint and upcoming action.
 - Mobile layouts now stack high-priority actions and summary cards more deliberately so agreement operations stay readable on smaller screens.
 - Agreement detail now includes a lifecycle hero, role-aware guidance, and a clearer agreement-mode summary so clients, workers, admins, and observers understand what matters to them immediately.
@@ -103,6 +117,7 @@ The format is based on Keep a Changelog, and this project follows a simple seman
 - Form fields across the DAO / bounty import experience now use roomier padding and better visual rhythm, and dropdowns now reserve proper right-side space for the indicator arrow.
 - PactAgent’s visual identity has been pushed beyond generic dark SaaS treatment in the core flows through stronger gradient heroes, mode-specific accents, and more distinctive operational summary panels.
 - Agreement detail now includes a unified operational timeline that merges settlements, audit actions, messages, amendments, and dispute activity into one readable history stream.
+- Imported grant UX now reduces manual amount entry by showing live CKB equivalents for imported USD budgets and allowing operators to apply those estimates per milestone or across the full grant.
 
 ### Fixed
 

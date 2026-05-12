@@ -45,12 +45,14 @@ PactAgent allows two participants to coordinate work and payment through a miles
 
 PactAgent also supports imported grant and bounty workflows:
 
-1. An operator imports a DAO, bounty, or CKBoost campaign into PactAgent.
-2. Source metadata, governance context, sponsor identity, and campaign history are attached to the agreement.
-3. The imported work is converted into manually reviewed milestones with partial release behavior.
-4. Proof is checked for completeness before human review, and missing information can trigger structured follow-up requests.
-5. Source-thread updates can be drafted, reviewed, published, and synced over time.
-6. CKBoost imports can keep contributor reputation, external IDs, event history, and sync-back notifications attached to the agreement.
+1. An operator can paste a Nervos forum grant thread or a CKBoost campaign link into the dedicated import flows.
+2. PactAgent auto-fills source metadata, governance context, source budget references, and draft milestone structure from the original source.
+3. Imported Nervos grants can preserve separate commencement payments as their own kickoff checkpoint instead of forcing them into Milestone 1.
+4. Imported USD budgets can be converted into live CKB estimates directly inside the import flow before the operator finalizes payout amounts.
+5. The imported work is converted into manually reviewed milestones with partial release behavior.
+6. Proof is checked for completeness before human review, and missing information can trigger structured follow-up requests.
+7. Source-thread updates can be drafted, reviewed, published, and synced over time.
+8. CKBoost imports can keep contributor reputation, external IDs, event history, and sync-back notifications attached to the agreement.
 
 ## Current Product Scope
 
@@ -70,8 +72,10 @@ What is already implemented:
 - structured milestone-linked info requests and responses with audit history
 - human confirmation checkpoints that keep AI output advisory before payout approval
 - DAO and bounty import with source attribution, manual review enforcement, and milestone-based release planning
-- source-thread sync, review, and publish controls for imported grants
-- CKBoost import, contributor snapshots, event history, webhook ingestion, and outbound lifecycle notifications
+- Nervos forum-thread auto-fill with dynamic milestone extraction, commencement-payment detection, and imported source snapshots
+- live CKB/USD quote conversion for imported grant budgets with editable milestone estimates
+- source-thread sync, review, publish controls, and Discourse-aware summarization for imported grants
+- CKBoost import, campaign-link auto-fill, contributor snapshots, event history, webhook ingestion, and outbound lifecycle notifications
 - Prisma + PostgreSQL persistence, ready for Supabase
 
 What is intentionally not implemented yet:
@@ -107,20 +111,24 @@ PactAgent currently uses real CKB transfers for funding and settlement, but the 
 
 ### Imported Grant / Bounty Flow
 
-1. Import a DAO or bounty source into PactAgent with source links, source title, sponsor context, and governance notes.
-2. Convert the work into formal milestones and fund the total grant once.
-3. Require manual review for every payout step.
-4. Run a proof completeness check before approval.
-5. Request more info through structured reviewer questions when needed.
-6. Optionally sync or publish source-thread updates for governance visibility.
+1. Paste a Nervos forum grant thread into the import flow and let PactAgent auto-fill the source fields.
+2. Review the imported source snapshot, including requested USD budget, ETA, funding address, and any separate commencement payment.
+3. Use the live CKB quote panel to estimate current CKB equivalents for the imported USD values.
+4. Apply live estimates to individual milestones or the whole grant, then adjust the final CKB payout amounts as needed.
+5. Add, remove, or edit milestones freely so the final agreement matches the real delivery plan even when the source thread has more or fewer than four checkpoints.
+6. Fund the total grant once and require manual review for every payout step.
+7. Run a proof completeness check before approval.
+8. Request more info through structured reviewer questions when needed.
+9. Optionally sync or publish source-thread updates for governance visibility.
 
 ### CKBoost Handoff Flow
 
-1. Create an agreement from CKBoost using the dedicated import flow.
-2. Map the sponsor to the agreement client and the contributor to the worker role.
-3. Carry campaign, quest bundle, approved proof, contributor reputation, and external IDs into PactAgent.
-4. Ingest CKBoost webhook events and refresh contributor snapshots over time.
-5. Notify CKBoost when proof is submitted, approved, or paid.
+1. Paste a CKBoost campaign link into the dedicated import flow.
+2. Resolve campaign title, description, rules, timing, and quest-derived milestone drafts from CKBoost campaign data.
+3. Map the sponsor to the agreement client and the contributor to the worker role.
+4. Carry campaign, quest bundle, approved proof, contributor reputation, and external IDs into PactAgent.
+5. Ingest CKBoost webhook events and refresh contributor snapshots over time.
+6. Notify CKBoost when proof is submitted, approved, or paid.
 
 ### Proof Review Flow
 
@@ -194,6 +202,19 @@ The frontend is built with Next.js and provides three main surfaces:
 - lists agreements for the authenticated wallet
 - shows escrow and review summary metrics
 - streams live operational activity through WebSockets
+
+### Grant / Bounty Import Page
+
+- accepts Nervos forum thread links and auto-fills source fields
+- preserves imported source budget context, ETA, funding address, and commencement-payment metadata
+- shows live CKB conversion for imported USD budgets
+- supports dynamic milestone editing plus one-click application of live CKB estimates
+
+### CKBoost Import Page
+
+- accepts CKBoost campaign links for source resolution
+- auto-fills campaign metadata and quest-derived milestone drafts
+- keeps contributor reputation and campaign context attached during handoff
 
 ### Agreement Detail Page
 
@@ -337,27 +358,44 @@ Implemented:
 
 Implemented:
 - forum/governance thread capture during import
+- `POST /api/agreements/import-bounty/autofill` for Nervos forum-thread auto-fill
+- Discourse-aware thread parsing for title, summary, requested budget, ETA, funding address, and governance metadata
+- imported source snapshots that preserve requested USD budget references and separate commencement-payment context
+- dynamic milestone extraction from source threads, including support for more or fewer than four checkpoints
 - source-thread card on agreement detail
 - admin and agreement-page source update controls
 - source sync service for ingesting and summarizing source-thread updates
+- Discourse JSON summarization instead of generic HTML scraping when the source is a forum topic
 - DB fields for thread URL, sync status, last synced at, latest summary, review and publish metadata
 - `POST /api/agreements/:id/source-sync`
 - `POST /api/agreements/:id/source-sync/publish`
 - explicit reviewer approval before direct posting
 - webhook events for source sync state changes
 - scheduled background source polling in the worker loop
+- near-real-time agreement refresh broadcasts after source sync updates land
 
 ### Phase 5: CKBoost Handoff
 
 Implemented:
 - `Create from CKBoost` entry point
 - CKBoost campaign/contributor import form
+- `POST /api/integrations/ckboost/autofill` for campaign-link auto-fill
+- CKBoost on-chain campaign resolver for title, description, rules, stats, and quest-derived milestone drafts
 - CKBoost import service and route
 - mapping from sponsor to client, contributor to worker, and campaign/quest/proof data into agreement metadata
 - imported contributor reputation and campaign history during creation
 - manual import and webhook-driven ingestion
 - `POST /api/integrations/ckboost/import`
 - persistence of CKBoost external IDs for future sync-back
+
+### Imported Grant Pricing
+
+Implemented:
+- `GET /api/integrations/market/ckb-price` for live CKB/USD quotes
+- live CKB conversion panels on the grant import page for requested budget, commencement payment, and milestone budget references
+- one-click application of live CKB estimates into editable milestone payout fields
+- automatic quote refresh while the imported grant form is open
+- manual override of the final CKB payout amounts before agreement creation
 
 ### Phase 6: CKBoost Identity, Reputation, And Event Sync
 
@@ -510,6 +548,9 @@ CKBOOST_SYNC_ENABLED=false
 CKBOOST_WEBHOOK_URL=
 CKBOOST_WEBHOOK_SECRET=
 CKBOOST_INBOUND_TOKEN=
+COINGECKO_API_BASE_URL=https://api.coingecko.com/api/v3
+COINGECKO_API_KEY=
+MARKET_PRICE_CACHE_TTL_MS=60000
 
 AI_ENABLED=false
 AI_PROVIDER=mock
@@ -534,6 +575,7 @@ Notes:
 - set `CKBOOST_SYNC_ENABLED=true` to enable outbound CKBoost lifecycle notifications for proof submission, approval, and payout
 - `CKBOOST_WEBHOOK_URL` is the outbound CKBoost endpoint PactAgent should notify for imported CKBoost agreements
 - `CKBOOST_INBOUND_TOKEN` protects the `POST /api/integrations/ckboost/webhook` receiver when CKBoost pushes reputation or campaign events back into PactAgent
+- `COINGECKO_API_BASE_URL`, `COINGECKO_API_KEY`, and `MARKET_PRICE_CACHE_TTL_MS` control the live CKB quote service used during imported grant conversion from USD source budgets into editable CKB estimates
 - AI can run in mock mode without external dependencies
 
 ### 4. Configure web environment
@@ -603,6 +645,7 @@ The app will be available at:
 - treasury custody is still a trust assumption in the current architecture
 - proof validation is still operationally focused rather than cryptographic or oracle-backed verification
 - dispute AI is advisory, not a replacement for arbitration
+- imported grant USD-to-CKB conversion uses a live quote for operator guidance, but the final CKB payout values are still chosen manually and are not price-locked automatically
 - there is no role-separated admin or arbitrator interface yet
 - premium automation packaging and billing controls from Phase 7 are still not implemented
 
