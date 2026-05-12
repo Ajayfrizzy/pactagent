@@ -17,16 +17,79 @@ import {
   XCircleIcon,
 } from '@/components/Icons';
 import { ckbToShannons, MIN_CELL_CAPACITY, shannonsToCKB } from '@/lib/ckb';
-import { fetchConfig, importBountyAgreement } from '@/lib/api';
+import { fetchBountyGrantAutofill, fetchCkbPriceQuote, fetchConfig, importBountyAgreement } from '@/lib/api';
 import { useStore } from '@/lib/store';
 
 type MilestoneDraft = {
   title: string;
   description: string;
   amountCkb: string;
+  sourceBudgetLabel?: string;
+  sourceBudgetUsd?: number | null;
+  kind?: 'COMMENCEMENT' | 'DELIVERABLE';
+};
+
+type GrantAutofillMetadata = {
+  grantAmountRequested?: string | null;
+  etaToCompletion?: string | null;
+  fundingAddress?: string | null;
+  upfrontPayment?: {
+    percentage?: string | null;
+    amountUsd?: string | null;
+    label?: string | null;
+  };
+  sourceLastSyncedAt?: string;
+  missingFields?: string[];
+};
+
+type CkbPriceQuote = {
+  assetId: 'nervos-network';
+  symbol: 'CKB';
+  currency: 'USD';
+  priceUsd: number;
+  inversePriceCkbPerUsd: number;
+  lastUpdatedAt: string | null;
+  fetchedAt: string;
 };
 
 const MIN_MILESTONE_CKB = Number(shannonsToCKB(MIN_CELL_CAPACITY.toString()));
+
+function parseUsdAmount(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const match = value.replace(/,/g, '').match(/-?\d+(?:\.\d+)?/);
+  if (!match?.[0]) {
+    return null;
+  }
+
+  const amount = Number.parseFloat(match[0]);
+  return Number.isFinite(amount) ? amount : null;
+}
+
+function formatUsdAmount(amount: number | null | undefined) {
+  if (!Number.isFinite(amount ?? NaN)) {
+    return null;
+  }
+
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 6,
+  }).format(amount as number);
+}
+
+function formatEstimatedCkb(amount: number | null | undefined) {
+  if (!Number.isFinite(amount ?? NaN)) {
+    return null;
+  }
+
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(amount as number);
+}
 
 function isValidHttpUrl(value: string) {
   try {
@@ -71,8 +134,14 @@ export default function ImportBountyPage() {
   const authToken = useStore((s) => s.authToken);
   const [publicConfig, setPublicConfig] = useState<any>(null);
   const [saving, setSaving] = useState(false);
+  const [autofilling, setAutofilling] = useState(false);
+  const [loadingPrice, setLoadingPrice] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [autofillMessage, setAutofillMessage] = useState<string | null>(null);
+  const [priceMessage, setPriceMessage] = useState<string | null>(null);
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [grantAutofillMetadata, setGrantAutofillMetadata] = useState<GrantAutofillMetadata | null>(null);
+  const [ckbPriceQuote, setCkbPriceQuote] = useState<CkbPriceQuote | null>(null);
   const [milestones, setMilestones] = useState<MilestoneDraft[]>([
     {
       title: 'Milestone 1',
@@ -90,6 +159,7 @@ export default function ImportBountyPage() {
     bountyTitle: '',
     bountyDescription: '',
     governanceNotes: '',
+    externalMetadataJson: '',
     agreementTitle: '',
     agreementDescription: '',
     workerAddress: '',
@@ -113,10 +183,25 @@ export default function ImportBountyPage() {
     void load();
   }, []);
 
+  useEffect(() => {
+    if (!grantAutofillMetadata) {
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void loadCkbPrice(true);
+    }, 60_000);
+
+    return () => window.clearInterval(intervalId);
+  }, [grantAutofillMetadata]);
+
   function updateField(field: keyof typeof form, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }));
     if (error) {
       setError(null);
+    }
+    if (autofillMessage) {
+      setAutofillMessage(null);
     }
   }
 
@@ -144,6 +229,119 @@ export default function ImportBountyPage() {
         currentIndex === index ? { ...milestone, [field]: value } : milestone,
       ),
     );
+  }
+
+  async function loadCkbPrice(fresh = false) {
+    setLoadingPrice(true);
+
+    try {
+      const quote = await fetchCkbPriceQuote({ fresh });
+      setCkbPriceQuote(quote);
+      setPriceMessage(null);
+      return quote;
+    } catch (err) {
+      setPriceMessage(err instanceof Error ? err.message : 'Failed to fetch the live CKB quote.');
+      return null;
+    } finally {
+      setLoadingPrice(false);
+    }
+  }
+
+  function estimateCkbFromUsd(usdAmount: number | null | undefined) {
+    if (!ckbPriceQuote || !Number.isFinite(usdAmount ?? NaN) || !usdAmount || ckbPriceQuote.priceUsd <= 0) {
+      return null;
+    }
+
+    return usdAmount / ckbPriceQuote.priceUsd;
+  }
+
+  function formatEstimatedAmountInput(value: number) {
+    return value.toFixed(8).replace(/0+$/, '').replace(/\.$/, '');
+  }
+
+  function applyMilestoneEstimate(index: number) {
+    const usdAmount = milestones[index]?.sourceBudgetUsd;
+    const estimate = estimateCkbFromUsd(usdAmount);
+    if (!estimate) {
+      return;
+    }
+
+    updateMilestone(index, 'amountCkb', formatEstimatedAmountInput(estimate));
+  }
+
+  function applyAllEstimatedMilestones() {
+    setMilestones((prev) =>
+      prev.map((milestone) => {
+        const estimate = estimateCkbFromUsd(milestone.sourceBudgetUsd);
+        if (!estimate) {
+          return milestone;
+        }
+
+        return {
+          ...milestone,
+          amountCkb: formatEstimatedAmountInput(estimate),
+        };
+      }),
+    );
+  }
+
+  async function handleAutofillFromSource() {
+    if (!walletAddress || !authToken) {
+      setError('Connect and authenticate your wallet first.');
+      return;
+    }
+
+    if (!isValidHttpUrl(form.externalUrl)) {
+      setError('Paste a valid Nervos forum thread URL first.');
+      return;
+    }
+
+    setAutofilling(true);
+    setError(null);
+    setAutofillMessage(null);
+
+    try {
+      const result = await fetchBountyGrantAutofill({
+        sourceUrl: form.externalUrl,
+      });
+
+      const metadata = result.sourceMetadata as GrantAutofillMetadata;
+      setForm((prev) => ({
+        ...prev,
+        sourceType: result.sourceType,
+        sourceLabel: result.sourceLabel,
+        externalUrl: result.externalUrl,
+        forumThreadUrl: result.forumThreadUrl,
+        sourceReferenceId: result.sourceReferenceId || '',
+        sponsorName: result.sponsorName || '',
+        bountyTitle: result.bountyTitle,
+        bountyDescription: result.bountyDescription,
+        governanceNotes: result.governanceNotes,
+        externalMetadataJson: JSON.stringify(result.sourceMetadata),
+        agreementTitle: prev.agreementTitle.trim() ? prev.agreementTitle : result.agreementTitle,
+        agreementDescription: prev.agreementDescription.trim() ? prev.agreementDescription : result.agreementDescription,
+        deadlineDays: result.deadlineDays || prev.deadlineDays,
+      }));
+      setMilestones(result.milestones.map((milestone) => ({
+        title: milestone.title,
+        description: milestone.description,
+        amountCkb: milestone.amountCkb || '',
+        sourceBudgetLabel: milestone.sourceBudgetLabel,
+        sourceBudgetUsd: parseUsdAmount(milestone.sourceBudgetLabel),
+        kind: milestone.kind,
+      })));
+      setGrantAutofillMetadata(metadata);
+      setAutofillMessage(
+        metadata?.missingFields?.length
+          ? `Forum details imported. ${metadata.missingFields.join(', ')} still need manual completion. Enter final CKB payout amounts before creating the agreement.`
+          : 'Forum details imported. Enter final CKB payout amounts and any worker-specific details before creating the agreement.'
+      );
+      await loadCkbPrice();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to auto-fill from the source link.');
+    } finally {
+      setAutofilling(false);
+    }
   }
 
   async function handleSubmit(event: React.FormEvent) {
@@ -237,6 +435,7 @@ export default function ImportBountyPage() {
         bountyTitle: form.bountyTitle,
         bountyDescription: form.bountyDescription || undefined,
         governanceNotes: form.governanceNotes || undefined,
+        externalMetadataJson: form.externalMetadataJson || undefined,
         agreement: {
           title: form.agreementTitle || form.bountyTitle,
           description: form.agreementDescription || form.bountyDescription,
@@ -316,6 +515,11 @@ export default function ImportBountyPage() {
     description: !milestone.description.trim() ? 'Describe what the builder must ship and what the reviewer should verify.' : null,
     amount: getMilestoneAmountError(milestone.amountCkb),
   }));
+  const importedGrantUsdAmount = parseUsdAmount(grantAutofillMetadata?.grantAmountRequested);
+  const importedGrantEstimatedCkb = estimateCkbFromUsd(importedGrantUsdAmount);
+  const importedCommencementUsdAmount = parseUsdAmount(grantAutofillMetadata?.upfrontPayment?.amountUsd);
+  const importedCommencementEstimatedCkb = estimateCkbFromUsd(importedCommencementUsdAmount);
+  const milestonesWithSourceEstimates = milestones.filter((milestone) => Number.isFinite(milestone.sourceBudgetUsd ?? NaN));
 
   function shouldShowFieldError(value: string, message: string | null) {
     return Boolean(message && (submitAttempted || value.trim()));
@@ -428,6 +632,125 @@ export default function ImportBountyPage() {
                     </div>
                   </div>
 
+                  <div className="mt-6 rounded-[24px] border border-agent-border/70 bg-agent-bg/40 p-5">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                      <div className="max-w-2xl">
+                        <div className="text-sm font-medium text-white">Start with the forum thread</div>
+                        <p className="mt-1 text-sm leading-6 text-slate-400">
+                          Paste the Nervos grant thread first. PactAgent will pull the title, summary, budget references, and milestone draft structure before you fill the remaining fields.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleAutofillFromSource();
+                        }}
+                        disabled={autofilling}
+                        className="inline-flex items-center justify-center rounded-xl border border-agent-accent/40 bg-agent-accent/10 px-5 py-3 text-sm font-medium text-agent-accent hover:bg-agent-accent/20 disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {autofilling ? 'Importing source...' : 'Auto-Fill From Link'}
+                      </button>
+                    </div>
+
+                    <div className="mt-4">
+                      <input
+                        type="url"
+                        className={`${inputClass} ${shouldShowFieldError(form.externalUrl, fieldErrors.externalUrl) ? errorInputClass : ''}`}
+                        value={form.externalUrl}
+                        onChange={(e) => updateField('externalUrl', e.target.value)}
+                        placeholder="https://talk.nervos.org/t/your-grant-thread"
+                        inputMode="url"
+                        autoCapitalize="none"
+                        spellCheck={false}
+                      />
+                      {shouldShowFieldError(form.externalUrl, fieldErrors.externalUrl) ? (
+                        <p className={fieldErrorClass}>{fieldErrors.externalUrl}</p>
+                      ) : (
+                        <p className={helperClass}>Paste the original DAO proposal, forum post, or bounty page link here first.</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {autofillMessage ? (
+                    <div className="mt-4 rounded-xl border border-emerald-700/40 bg-emerald-950/20 p-4 text-sm text-emerald-100">
+                      {autofillMessage}
+                    </div>
+                  ) : null}
+                  {grantAutofillMetadata ? (
+                    <div className="mt-4 rounded-[24px] border border-amber-500/20 bg-amber-500/5 p-5">
+                      <div className="text-[11px] uppercase tracking-[0.16em] text-amber-200">Imported Grant Snapshot</div>
+                      <div className="mt-3 flex flex-col gap-3 rounded-2xl border border-sky-400/20 bg-sky-950/20 p-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <div className="text-sm font-medium text-white">Live CKB Conversion</div>
+                          <p className="mt-1 text-xs text-slate-400">
+                            Use the current CKB price to turn the imported USD grant values into editable payout estimates.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void loadCkbPrice(true);
+                          }}
+                          disabled={loadingPrice}
+                          className="inline-flex items-center justify-center rounded-xl border border-sky-400/40 bg-sky-500/10 px-4 py-3 text-sm font-medium text-sky-200 hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-70"
+                        >
+                          {loadingPrice ? 'Refreshing quote...' : 'Refresh Live CKB Quote'}
+                        </button>
+                      </div>
+                      {ckbPriceQuote ? (
+                        <div className="mt-3 rounded-2xl border border-sky-400/20 bg-slate-950/20 p-4 text-sm text-slate-200">
+                          <div>1 CKB = {formatUsdAmount(ckbPriceQuote.priceUsd)} USD</div>
+                          <div className="mt-1">1 USD = {formatEstimatedCkb(ckbPriceQuote.inversePriceCkbPerUsd)} CKB</div>
+                          <div className="mt-1 text-xs text-slate-400">
+                            Quote updated {new Date(ckbPriceQuote.lastUpdatedAt || ckbPriceQuote.fetchedAt).toLocaleString()}
+                          </div>
+                        </div>
+                      ) : null}
+                      {priceMessage ? (
+                        <div className="mt-3 rounded-xl border border-red-800/60 bg-red-950/20 p-3 text-sm text-red-200">
+                          {priceMessage}
+                        </div>
+                      ) : null}
+                      <div className="mt-4 grid gap-3 md:grid-cols-2">
+                        <div className="rounded-2xl border border-amber-400/20 bg-slate-950/20 p-4">
+                          <div className="text-xs uppercase tracking-wide text-slate-500">Requested Source Budget</div>
+                          <div className="mt-2 text-sm text-white">{grantAutofillMetadata.grantAmountRequested || 'Not found in source thread'}</div>
+                          {importedGrantEstimatedCkb ? (
+                            <p className="mt-2 text-xs text-emerald-200">
+                              Live estimate: {formatEstimatedCkb(importedGrantEstimatedCkb)} CKB
+                            </p>
+                          ) : null}
+                        </div>
+                        <div className="rounded-2xl border border-amber-400/20 bg-slate-950/20 p-4">
+                          <div className="text-xs uppercase tracking-wide text-slate-500">ETA From Source</div>
+                          <div className="mt-2 text-sm text-white">{grantAutofillMetadata.etaToCompletion || 'Not found in source thread'}</div>
+                        </div>
+                        <div className="rounded-2xl border border-amber-400/20 bg-slate-950/20 p-4">
+                          <div className="text-xs uppercase tracking-wide text-slate-500">Commencement Payment</div>
+                          <div className="mt-2 text-sm text-white">
+                            {[
+                              grantAutofillMetadata.upfrontPayment?.label,
+                              grantAutofillMetadata.upfrontPayment?.amountUsd,
+                              grantAutofillMetadata.upfrontPayment?.percentage,
+                            ].filter(Boolean).join(' · ') || 'No separate commencement payment found'}
+                          </div>
+                          {importedCommencementEstimatedCkb ? (
+                            <p className="mt-2 text-xs text-emerald-200">
+                              Live kickoff estimate: {formatEstimatedCkb(importedCommencementEstimatedCkb)} CKB
+                            </p>
+                          ) : null}
+                          <p className="mt-2 text-xs text-slate-400">
+                            This stays visible as source context. You can use the live estimate or override it manually before creating the agreement.
+                          </p>
+                        </div>
+                        <div className="rounded-2xl border border-amber-400/20 bg-slate-950/20 p-4">
+                          <div className="text-xs uppercase tracking-wide text-slate-500">Funding Address In Source</div>
+                          <div className="mt-2 break-all text-sm text-white">{grantAutofillMetadata.fundingAddress || 'Not provided in source thread'}</div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div className="mt-5 grid gap-3 sm:grid-cols-2">
                     <div className="rounded-2xl border border-agent-border/70 bg-agent-bg/50 p-4">
                       <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Operator</div>
@@ -464,23 +787,6 @@ export default function ImportBountyPage() {
                   <p className={helperClass}>A human-friendly source name, not the full URL.</p>
                 )}
               </div>
-                  </div>
-                  <div className="mt-4">
-              <input
-                type="url"
-                className={`${inputClass} ${shouldShowFieldError(form.externalUrl, fieldErrors.externalUrl) ? errorInputClass : ''}`}
-                value={form.externalUrl}
-                onChange={(e) => updateField('externalUrl', e.target.value)}
-                placeholder="https://dao.example.com/proposals/42"
-                inputMode="url"
-                autoCapitalize="none"
-                spellCheck={false}
-              />
-              {shouldShowFieldError(form.externalUrl, fieldErrors.externalUrl) ? (
-                <p className={fieldErrorClass}>{fieldErrors.externalUrl}</p>
-              ) : (
-                <p className={helperClass}>Paste the original DAO proposal, forum post, or bounty page link.</p>
-              )}
                   </div>
                   <div className="mt-4">
               <input
@@ -604,14 +910,25 @@ export default function ImportBountyPage() {
                     Define every deliverable the builder must complete. The total below is what the sponsor will fund once after the agreement is created.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={addMilestone}
-                  className="inline-flex items-center gap-2 self-start rounded-xl border border-agent-accent/40 bg-agent-accent/10 px-5 py-3 text-sm font-medium text-agent-accent hover:bg-agent-accent/20"
-                >
-                  <PlusIcon className="h-4 w-4" />
-                  Add Milestone
-                </button>
+                <div className="flex flex-wrap gap-3">
+                  {milestonesWithSourceEstimates.length > 0 && ckbPriceQuote ? (
+                    <button
+                      type="button"
+                      onClick={applyAllEstimatedMilestones}
+                      className="inline-flex items-center gap-2 self-start rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-5 py-3 text-sm font-medium text-emerald-200 hover:bg-emerald-500/20"
+                    >
+                      Apply All Live Estimates
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={addMilestone}
+                    className="inline-flex items-center gap-2 self-start rounded-xl border border-agent-accent/40 bg-agent-accent/10 px-5 py-3 text-sm font-medium text-agent-accent hover:bg-agent-accent/20"
+                  >
+                    <PlusIcon className="h-4 w-4" />
+                    Add Milestone
+                  </button>
+                </div>
               </div>
 
                     <div className="mt-6 grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
@@ -634,7 +951,11 @@ export default function ImportBountyPage() {
                     <div className="mb-5 flex items-center justify-between gap-3">
                       <div>
                         <h3 className="text-lg font-semibold text-white">Milestone {index + 1}</h3>
-                        <p className="mt-1 text-xs text-gray-500">Reviewer-approved payout checkpoint</p>
+                        <p className="mt-1 text-xs text-gray-500">
+                          {milestone.kind === 'COMMENCEMENT'
+                            ? 'Kickoff release imported from the grant’s separate commencement payment'
+                            : 'Reviewer-approved payout checkpoint'}
+                        </p>
                       </div>
                       {milestones.length > 1 ? (
                         <button
@@ -678,7 +999,27 @@ export default function ImportBountyPage() {
                         {milestoneErrors[index]?.amount && (submitAttempted || milestone.amountCkb.trim()) ? (
                           <p className={fieldErrorClass}>{milestoneErrors[index]?.amount}</p>
                         ) : (
-                          <p className={helperClass}>Amount released when this milestone is approved.</p>
+                          <div className={helperClass}>
+                            <div>
+                              {milestone.sourceBudgetLabel
+                                ? `Source reference: ${milestone.sourceBudgetLabel}.`
+                                : 'Amount released when this milestone is approved.'}
+                            </div>
+                            {milestone.sourceBudgetUsd && ckbPriceQuote ? (
+                              <div className="mt-1 flex flex-wrap items-center gap-2 text-emerald-200">
+                                <span>Live estimate: {formatEstimatedCkb(estimateCkbFromUsd(milestone.sourceBudgetUsd))} CKB</span>
+                                <button
+                                  type="button"
+                                  onClick={() => applyMilestoneEstimate(index)}
+                                  className="rounded-lg border border-emerald-500/40 px-2 py-1 text-[11px] font-medium text-emerald-200 hover:bg-emerald-500/10"
+                                >
+                                  Apply estimate
+                                </button>
+                              </div>
+                            ) : milestone.sourceBudgetLabel ? (
+                              <div className="mt-1 text-slate-400">Refresh the live quote to estimate the current CKB amount.</div>
+                            ) : null}
+                          </div>
                         )}
                       </div>
                     </div>

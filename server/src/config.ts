@@ -84,6 +84,11 @@ export const config = {
   ckboostCampaignBaseUrl:
     process.env.CKBOOST_CAMPAIGN_BASE_URL
     || 'https://ckboost.netlify.app/campaign',
+  coinGeckoApiBaseUrl:
+    process.env.COINGECKO_API_BASE_URL
+    || 'https://api.coingecko.com/api/v3',
+  coinGeckoApiKey: process.env.COINGECKO_API_KEY || '',
+  marketPriceCacheTtlMs: parseNumber(process.env.MARKET_PRICE_CACHE_TTL_MS, 60_000),
 
   onchainEscrowEnabled: process.env.ONCHAIN_ESCROW_ENABLED === 'true',
   onchainLockCodeHash: process.env.ONCHAIN_LOCK_CODE_HASH || '',

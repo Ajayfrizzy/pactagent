@@ -65,7 +65,7 @@ function shouldScheduleSourceSync(lastSyncedAt: Date | null | undefined, now: Da
     return true;
   }
 
-  return now.getTime() - lastSyncedAt.getTime() >= 30 * 60 * 1000;
+  return now.getTime() - lastSyncedAt.getTime() >= 5 * 60 * 1000;
 }
 
 function shouldScheduleCkboostSync(lastSyncedAt: Date | null | undefined, now: Date) {

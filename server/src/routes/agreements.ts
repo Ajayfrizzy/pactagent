@@ -34,6 +34,7 @@ import {
   saveSourceSyncDraft,
   syncAgreementSource,
 } from '../services/sourceSyncService';
+import { resolveNervosGrantAutofill } from '../services/nervosGrantResolverService';
 import {
   enqueueAgreementJob,
   listAgreementJobs,
@@ -105,7 +106,12 @@ const importBountySchema = z.object({
   bountyTitle: z.string().min(1).max(200),
   bountyDescription: z.string().max(4000).optional(),
   governanceNotes: z.string().max(2000).optional(),
+  externalMetadataJson: z.string().max(50000).optional(),
   agreement: createAgreementSchema,
+});
+
+const bountyAutofillSchema = z.object({
+  sourceUrl: z.string().url(),
 });
 
 const fundSchema = z.object({
@@ -444,6 +450,7 @@ router.post('/import-bounty', actionRateLimit, async (req: Request, res: Respons
         externalUrl: data.externalUrl,
         forumThreadUrl: data.forumThreadUrl,
         sourceReferenceId: data.sourceReferenceId,
+        externalMetadataJson: data.externalMetadataJson,
         sponsorName: data.sponsorName,
         bountyTitle: data.bountyTitle,
         bountyDescription: data.bountyDescription,
@@ -468,6 +475,18 @@ router.post('/import-bounty', actionRateLimit, async (req: Request, res: Respons
     res.json({ success: true, data: agreement });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Validation error';
+    res.status(400).json({ success: false, error: msg });
+  }
+});
+
+router.post('/import-bounty/autofill', requireAuth, actionRateLimit, async (req: Request, res: Response) => {
+  try {
+    getAuthAddress(req);
+    const data = bountyAutofillSchema.parse(req.body);
+    const result = await resolveNervosGrantAutofill(data.sourceUrl);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to resolve grant source';
     res.status(400).json({ success: false, error: msg });
   }
 });

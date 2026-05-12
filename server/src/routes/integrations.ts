@@ -15,6 +15,7 @@ import {
   upsertCkboostProfileSnapshot,
 } from '../services/ckboostIntegrationService';
 import { resolveCkboostCampaignAutoFill } from '../services/ckboostCampaignResolverService';
+import { fetchCkbPriceQuote } from '../services/marketPriceService';
 
 const router = Router();
 const actionRateLimit = createRateLimit({
@@ -98,6 +99,13 @@ const ckboostAutofillSchema = z.object({
   campaignLink: z.string().min(1).max(500),
 });
 
+const ckbPriceQuerySchema = z.object({
+  fresh: z
+    .union([z.literal('true'), z.literal('false')])
+    .optional()
+    .transform((value) => value === 'true'),
+});
+
 function getAuthAddress(req: Request) {
   if (!req.auth?.address) {
     throw new Error('Authentication required');
@@ -149,6 +157,18 @@ router.post('/ckboost/autofill', requireAuth, actionRateLimit, async (req: Reque
     res.json({ success: true, data: result });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Failed to resolve CKBoost campaign data';
+    res.status(400).json({ success: false, error: msg });
+  }
+});
+
+router.get('/market/ckb-price', requireAuth, actionRateLimit, async (req: Request, res: Response) => {
+  try {
+    getAuthAddress(req);
+    const query = ckbPriceQuerySchema.parse(req.query);
+    const quote = await fetchCkbPriceQuote(Boolean(query.fresh));
+    res.json({ success: true, data: quote });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to fetch the current CKB price';
     res.status(400).json({ success: false, error: msg });
   }
 });

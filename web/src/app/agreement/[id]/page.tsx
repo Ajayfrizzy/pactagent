@@ -2448,6 +2448,7 @@ export default function AgreementDetailPage() {
   );
   const ckboostCampaignHistory = safeParseJson<string[]>(agreement.ckboostProfileSnapshot?.campaignHistoryJson) || [];
   const ckboostStats = safeParseJson<Record<string, unknown>>(agreement.ckboostProfileSnapshot?.statsJson) || null;
+  const importedSourceMetadata = safeParseJson<Record<string, any>>(agreement.source?.externalMetadataJson) || null;
   const latestSourceSyncActivity = buildLatestSourceSyncActivity(auditLogs);
   const lifecycleSteps: Array<{
     key: string;
@@ -3338,6 +3339,40 @@ export default function AgreementDetailPage() {
                       <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4 md:col-span-2">
                         <div className="text-xs uppercase tracking-wide text-gray-500">Latest Synced Activity</div>
                         <div className="mt-2 whitespace-pre-wrap text-sm text-gray-300">{agreement.source.latestSummary}</div>
+                      </div>
+                    ) : null}
+                    {importedSourceMetadata?.parser === 'NERVOS_GRANT_THREAD_V1' ? (
+                      <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4 md:col-span-2">
+                        <div className="text-xs uppercase tracking-wide text-gray-500">Imported Grant Snapshot</div>
+                        <div className="mt-4 grid gap-3 md:grid-cols-2">
+                          <div className="rounded-lg border border-agent-border bg-slate-950/20 p-4">
+                            <div className="text-xs uppercase tracking-wide text-gray-500">Requested Source Budget</div>
+                            <div className="mt-2 text-sm text-white">{importedSourceMetadata.grantAmountRequested || 'Not found in source thread'}</div>
+                          </div>
+                          <div className="rounded-lg border border-agent-border bg-slate-950/20 p-4">
+                            <div className="text-xs uppercase tracking-wide text-gray-500">ETA From Source</div>
+                            <div className="mt-2 text-sm text-white">{importedSourceMetadata.etaToCompletion || 'Not found in source thread'}</div>
+                          </div>
+                          <div className="rounded-lg border border-agent-border bg-slate-950/20 p-4">
+                            <div className="text-xs uppercase tracking-wide text-gray-500">Commencement Payment</div>
+                            <div className="mt-2 text-sm text-white">
+                              {[
+                                importedSourceMetadata.upfrontPayment?.label,
+                                importedSourceMetadata.upfrontPayment?.amountUsd,
+                                importedSourceMetadata.upfrontPayment?.percentage,
+                              ].filter(Boolean).join(' · ') || 'No separate commencement payment parsed'}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-agent-border bg-slate-950/20 p-4">
+                            <div className="text-xs uppercase tracking-wide text-gray-500">Funding Address In Source</div>
+                            <div className="mt-2 break-all text-sm text-white">{importedSourceMetadata.fundingAddress || 'Not provided in source thread'}</div>
+                          </div>
+                        </div>
+                        {Array.isArray(importedSourceMetadata.missingFields) && importedSourceMetadata.missingFields.length ? (
+                          <div className="mt-4 rounded-lg border border-amber-700/40 bg-amber-950/20 p-4 text-sm text-amber-100">
+                            Missing source fields: {importedSourceMetadata.missingFields.join(', ')}
+                          </div>
+                        ) : null}
                       </div>
                     ) : null}
                     {latestSourceSyncActivity ? (

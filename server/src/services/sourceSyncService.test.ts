@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { SOURCE_SYNC_STATUSES, parseDiscourseTopicTarget, summarizeSourceThreadHtml } from './sourceSyncService';
+import { SOURCE_SYNC_STATUSES, summarizeSourceThreadHtml } from './sourceSyncService';
+import { parseDiscourseTopicTarget } from './discourseThreadService';
 
 test('summarizeSourceThreadHtml extracts the title, description, and body excerpt', () => {
   const summary = summarizeSourceThreadHtml(

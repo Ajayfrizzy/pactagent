@@ -28,6 +28,10 @@ function getCacheTtlMs(path: string, method: string) {
     return 30_000;
   }
 
+  if (path === '/integrations/market/ckb-price') {
+    return 60_000;
+  }
+
   if (path === '/health') {
     return 5_000;
   }
@@ -178,6 +182,7 @@ export async function importBountyAgreement(data: {
   bountyTitle: string;
   bountyDescription?: string;
   governanceNotes?: string;
+  externalMetadataJson?: string;
   agreement: {
     title: string;
     description: string;
@@ -199,6 +204,36 @@ export async function importBountyAgreement(data: {
   };
 }) {
   return request<any>('/agreements/import-bounty', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function fetchBountyGrantAutofill(data: {
+  sourceUrl: string;
+}) {
+  return request<{
+    sourceType: 'DAO';
+    sourceLabel: string;
+    externalUrl: string;
+    forumThreadUrl: string;
+    sourceReferenceId?: string;
+    sponsorName?: string;
+    bountyTitle: string;
+    bountyDescription: string;
+    governanceNotes: string;
+    agreementTitle: string;
+    agreementDescription: string;
+    deadlineDays: string;
+    milestones: Array<{
+      title: string;
+      description: string;
+      amountCkb: string;
+      sourceBudgetLabel?: string;
+      kind: 'COMMENCEMENT' | 'DELIVERABLE';
+    }>;
+    sourceMetadata: Record<string, unknown>;
+  }>('/agreements/import-bounty/autofill', {
     method: 'POST',
     body: JSON.stringify(data),
   });
@@ -293,6 +328,21 @@ export async function fetchCkboostCampaignAutofill(data: {
     method: 'POST',
     body: JSON.stringify(data),
   });
+}
+
+export async function fetchCkbPriceQuote(options?: {
+  fresh?: boolean;
+}) {
+  const query = options?.fresh ? '?fresh=true' : '';
+  return request<{
+    assetId: 'nervos-network';
+    symbol: 'CKB';
+    currency: 'USD';
+    priceUsd: number;
+    inversePriceCkbPerUsd: number;
+    lastUpdatedAt: string | null;
+    fetchedAt: string;
+  }>(`/integrations/market/ckb-price${query}`);
 }
 
 export async function updateDraftAgreement(id: string, data: {

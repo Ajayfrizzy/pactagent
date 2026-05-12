@@ -1,6 +1,11 @@
 import { config } from '../config';
 import { prisma } from '../db';
 import { createAuditLog } from './auditLogService';
+import {
+  fetchDiscourseTopicJson,
+  parseDiscourseTopicTarget,
+  summarizeDiscourseTopicJson,
+} from './discourseThreadService';
 import { createLog } from './logService';
 
 export const SOURCE_SYNC_STATUSES = [
@@ -14,12 +19,6 @@ export const SOURCE_SYNC_STATUSES = [
 ] as const;
 
 export type SourceSyncStatus = (typeof SOURCE_SYNC_STATUSES)[number];
-
-type DiscoursePublishTarget = {
-  apiBaseUrl: string;
-  topicId: number;
-  topicUrl: string;
-};
 
 type PublishResult = {
   externalId: string | null;
@@ -68,26 +67,6 @@ export function summarizeSourceThreadHtml(url: string, html: string) {
   ].filter(Boolean);
 
   return truncate(parts.join(' '), 1200) || `Source thread captured from ${url}.`;
-}
-
-export function parseDiscourseTopicTarget(threadUrl: string): DiscoursePublishTarget | null {
-  try {
-    const parsed = new URL(threadUrl);
-    const match = parsed.pathname.match(/\/t\/[^/]+\/(\d+)(?:\/\d+)?\/?$/i) || parsed.pathname.match(/\/t\/(\d+)(?:\/\d+)?\/?$/i);
-    const topicId = match?.[1] ? Number.parseInt(match[1], 10) : Number.NaN;
-
-    if (!Number.isFinite(topicId)) {
-      return null;
-    }
-
-    return {
-      apiBaseUrl: parsed.origin,
-      topicId,
-      topicUrl: parsed.toString(),
-    };
-  } catch {
-    return null;
-  }
 }
 
 function buildDiscoursePublishedUrl(topicUrl: string, postNumber: number | null) {
@@ -305,19 +284,26 @@ export async function syncAgreementSource(params: {
     let latestSummary = params.manualSummary?.trim() || '';
 
     if (!latestSummary) {
-      const response = await fetch(nextThreadUrl, {
-        headers: {
-          'User-Agent': 'PactAgent SourceSync/1.0',
-          Accept: 'text/html,application/xhtml+xml',
-        },
-      });
+      const discourseTarget = parseDiscourseTopicTarget(nextThreadUrl);
+      if (discourseTarget) {
+        const topic = await fetchDiscourseTopicJson(nextThreadUrl, config.forumPublishTimeoutMs);
+        latestSummary = summarizeDiscourseTopicJson(nextThreadUrl, topic);
+      } else {
+        const response = await fetch(nextThreadUrl, {
+          headers: {
+            'User-Agent': 'PactAgent SourceSync/1.0',
+            Accept: 'text/html,application/xhtml+xml',
+          },
+          signal: AbortSignal.timeout(config.forumPublishTimeoutMs),
+        });
 
-      if (!response.ok) {
-        throw new Error(`Source thread returned ${response.status}`);
+        if (!response.ok) {
+          throw new Error(`Source thread returned ${response.status}`);
+        }
+
+        const html = await response.text();
+        latestSummary = summarizeSourceThreadHtml(nextThreadUrl, html);
       }
-
-      const html = await response.text();
-      latestSummary = summarizeSourceThreadHtml(nextThreadUrl, html);
     }
 
     const source = await prisma.agreementSource.update({
@@ -357,6 +343,11 @@ export async function syncAgreementSource(params: {
           latestSummary: source.latestSummary,
         },
       });
+    }
+
+    if (typeof agreement.id === 'string') {
+      const { broadcastAgreementUpdateById } = await import('./agreementService');
+      await broadcastAgreementUpdateById(agreement.id);
     }
 
     return source;
