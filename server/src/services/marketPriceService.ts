@@ -40,6 +40,15 @@ function buildQuote(priceUsd: number, lastUpdatedAt: string | null): CkbPriceQuo
   };
 }
 
+function buildCoinGeckoPriceUrl() {
+  const normalizedBase = config.coinGeckoApiBaseUrl.replace(/\/+$/, '');
+  const url = new URL(`${normalizedBase}/simple/price`);
+  url.searchParams.set('ids', 'nervos-network');
+  url.searchParams.set('vs_currencies', 'usd');
+  url.searchParams.set('include_last_updated_at', 'true');
+  return url;
+}
+
 export function parseUsdAmount(value: string | null | undefined) {
   if (!value) {
     return null;
@@ -73,10 +82,7 @@ export async function fetchCkbPriceQuote(forceFresh = false): Promise<CkbPriceQu
   }
 
   inflightQuote = (async () => {
-    const url = new URL('/simple/price', config.coinGeckoApiBaseUrl);
-    url.searchParams.set('ids', 'nervos-network');
-    url.searchParams.set('vs_currencies', 'usd');
-    url.searchParams.set('include_last_updated_at', 'true');
+    const url = buildCoinGeckoPriceUrl();
 
     const response = await fetch(url.toString(), {
       headers: getApiHeaders(),

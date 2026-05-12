@@ -26,6 +26,7 @@ type MilestoneDraft = {
   amountCkb: string;
   sourceBudgetLabel?: string;
   sourceBudgetUsd?: number | null;
+  usdAmountInput?: string;
   kind?: 'COMMENCEMENT' | 'DELIVERABLE';
 };
 
@@ -89,6 +90,48 @@ function formatEstimatedCkb(amount: number | null | undefined) {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   }).format(amount as number);
+}
+
+function formatLargeCkbAmount(amount: number | null | undefined) {
+  if (!Number.isFinite(amount ?? NaN)) {
+    return '0';
+  }
+
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 8,
+  }).format(amount as number);
+}
+
+function formatUsdReferenceInput(amount: number | null | undefined) {
+  if (!Number.isFinite(amount ?? NaN)) {
+    return '';
+  }
+
+  return String(amount as number);
+}
+
+function describeMissingSourceFields(fields: string[] | null | undefined) {
+  if (!Array.isArray(fields) || !fields.length) {
+    return null;
+  }
+
+  if (fields.length === 1 && fields[0] === 'fundingAddress') {
+    return 'The original forum thread did not include a funding wallet address.';
+  }
+
+  return `The original forum thread is still missing: ${fields.join(', ')}.`;
+}
+
+function estimateCkbFromQuote(
+  usdAmount: number | null | undefined,
+  quote: Pick<CkbPriceQuote, 'priceUsd'> | null | undefined,
+) {
+  if (!quote || !Number.isFinite(usdAmount ?? NaN) || !usdAmount || quote.priceUsd <= 0) {
+    return null;
+  }
+
+  return usdAmount / quote.priceUsd;
 }
 
 function isValidHttpUrl(value: string) {
@@ -212,6 +255,7 @@ export default function ImportBountyPage() {
         title: `Milestone ${prev.length + 1}`,
         description: 'Describe the next grant deliverable and the review expectation.',
         amountCkb: '',
+        usdAmountInput: '',
       },
     ]);
   }
@@ -226,7 +270,23 @@ export default function ImportBountyPage() {
     }
     setMilestones((prev) =>
       prev.map((milestone, currentIndex) =>
-        currentIndex === index ? { ...milestone, [field]: value } : milestone,
+        currentIndex === index
+          ? (() => {
+              const nextMilestone = { ...milestone, [field]: value };
+
+              if (field === 'usdAmountInput') {
+                const usdAmount = parseUsdAmount(value);
+                nextMilestone.sourceBudgetUsd = usdAmount;
+
+                const estimate = estimateCkbFromQuote(usdAmount, ckbPriceQuote);
+                if (estimate) {
+                  nextMilestone.amountCkb = formatEstimatedAmountInput(estimate);
+                }
+              }
+
+              return nextMilestone;
+            })()
+          : milestone,
       ),
     );
   }
@@ -248,15 +308,52 @@ export default function ImportBountyPage() {
   }
 
   function estimateCkbFromUsd(usdAmount: number | null | undefined) {
-    if (!ckbPriceQuote || !Number.isFinite(usdAmount ?? NaN) || !usdAmount || ckbPriceQuote.priceUsd <= 0) {
-      return null;
-    }
-
-    return usdAmount / ckbPriceQuote.priceUsd;
+    return estimateCkbFromQuote(usdAmount, ckbPriceQuote);
   }
 
   function formatEstimatedAmountInput(value: number) {
     return value.toFixed(8).replace(/0+$/, '').replace(/\.$/, '');
+  }
+
+  function convertUsdInputToCkb(index: number) {
+    const usdAmount = parseUsdAmount(milestones[index]?.usdAmountInput);
+    const estimate = estimateCkbFromUsd(usdAmount);
+    if (!estimate) {
+      return;
+    }
+
+    setMilestones((prev) =>
+      prev.map((milestone, currentIndex) =>
+        currentIndex === index
+          ? {
+              ...milestone,
+              sourceBudgetUsd: usdAmount,
+              amountCkb: formatEstimatedAmountInput(estimate),
+            }
+          : milestone,
+      ),
+    );
+  }
+
+  function convertCkbInputToUsd(index: number) {
+    const milestone = milestones[index];
+    const ckbAmount = Number.parseFloat(milestone?.amountCkb || '');
+    if (!ckbPriceQuote || !Number.isFinite(ckbAmount) || ckbAmount <= 0) {
+      return;
+    }
+
+    const usdAmount = ckbAmount * ckbPriceQuote.priceUsd;
+    setMilestones((prev) =>
+      prev.map((item, currentIndex) =>
+        currentIndex === index
+          ? {
+              ...item,
+              sourceBudgetUsd: usdAmount,
+              usdAmountInput: usdAmount.toFixed(2),
+            }
+          : item,
+      ),
+    );
   }
 
   function applyMilestoneEstimate(index: number) {
@@ -306,6 +403,16 @@ export default function ImportBountyPage() {
       });
 
       const metadata = result.sourceMetadata as GrantAutofillMetadata;
+      const importedMilestones = result.milestones.map((milestone) => ({
+        title: milestone.title,
+        description: milestone.description,
+        amountCkb: milestone.amountCkb || '',
+        sourceBudgetLabel: milestone.sourceBudgetLabel,
+        sourceBudgetUsd: parseUsdAmount(milestone.sourceBudgetLabel),
+        usdAmountInput: formatUsdReferenceInput(parseUsdAmount(milestone.sourceBudgetLabel)),
+        kind: milestone.kind,
+      }));
+
       setForm((prev) => ({
         ...prev,
         sourceType: result.sourceType,
@@ -322,21 +429,35 @@ export default function ImportBountyPage() {
         agreementDescription: prev.agreementDescription.trim() ? prev.agreementDescription : result.agreementDescription,
         deadlineDays: result.deadlineDays || prev.deadlineDays,
       }));
-      setMilestones(result.milestones.map((milestone) => ({
-        title: milestone.title,
-        description: milestone.description,
-        amountCkb: milestone.amountCkb || '',
-        sourceBudgetLabel: milestone.sourceBudgetLabel,
-        sourceBudgetUsd: parseUsdAmount(milestone.sourceBudgetLabel),
-        kind: milestone.kind,
-      })));
       setGrantAutofillMetadata(metadata);
+      const quote = await loadCkbPrice();
+      const milestonesWithEstimates = quote
+        ? importedMilestones.map((milestone) => {
+            const estimate = estimateCkbFromQuote(milestone.sourceBudgetUsd, quote);
+            return estimate
+              ? {
+                  ...milestone,
+                  amountCkb: formatEstimatedAmountInput(estimate),
+                }
+              : milestone;
+          })
+        : importedMilestones;
+
+      setMilestones(milestonesWithEstimates);
+      const missingFieldsMessage = describeMissingSourceFields(metadata?.missingFields);
       setAutofillMessage(
-        metadata?.missingFields?.length
-          ? `Forum details imported. ${metadata.missingFields.join(', ')} still need manual completion. Enter final CKB payout amounts before creating the agreement.`
-          : 'Forum details imported. Enter final CKB payout amounts and any worker-specific details before creating the agreement.'
+        missingFieldsMessage
+          ? (
+            quote
+              ? `Forum details imported. ${missingFieldsMessage} Milestone CKB amounts were estimated automatically from the live quote and can still be adjusted.`
+              : `Forum details imported. ${missingFieldsMessage} The live CKB quote could not be loaded, so enter payout amounts manually.`
+          )
+          : (
+            quote
+              ? 'Forum details imported. Milestone CKB amounts were estimated automatically from the live quote and can still be adjusted before creating the agreement.'
+              : 'Forum details imported. The live CKB quote could not be loaded, so enter payout amounts manually before creating the agreement.'
+          )
       );
-      await loadCkbPrice();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to auto-fill from the source link.');
     } finally {
@@ -520,6 +641,7 @@ export default function ImportBountyPage() {
   const importedCommencementUsdAmount = parseUsdAmount(grantAutofillMetadata?.upfrontPayment?.amountUsd);
   const importedCommencementEstimatedCkb = estimateCkbFromUsd(importedCommencementUsdAmount);
   const milestonesWithSourceEstimates = milestones.filter((milestone) => Number.isFinite(milestone.sourceBudgetUsd ?? NaN));
+  const deliverableMilestoneCount = milestones.filter((milestone) => milestone.kind !== 'COMMENCEMENT').length;
 
   function shouldShowFieldError(value: string, message: string | null) {
     return Boolean(message && (submitAttempted || value.trim()));
@@ -917,7 +1039,7 @@ export default function ImportBountyPage() {
                       onClick={applyAllEstimatedMilestones}
                       className="inline-flex items-center gap-2 self-start rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-5 py-3 text-sm font-medium text-emerald-200 hover:bg-emerald-500/20"
                     >
-                      Apply All Live Estimates
+                      Refresh All CKB Estimates
                     </button>
                   ) : null}
                   <button
@@ -940,7 +1062,9 @@ export default function ImportBountyPage() {
                       </div>
                       <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-5">
                         <div className="text-xs uppercase tracking-[0.16em] text-emerald-200">Total To Lock Upfront</div>
-                        <div className="mt-3 text-4xl font-bold text-white">{totalGrantCkb || 0} CKB</div>
+                        <div className="mt-3 break-words text-[2rem] font-bold leading-tight text-white sm:text-[2.4rem]">
+                          {formatLargeCkbAmount(totalGrantCkb)} CKB
+                        </div>
                         <p className="mt-2 text-sm leading-7 text-slate-300">Released progressively, never all at once.</p>
                       </div>
                     </div>
@@ -950,10 +1074,14 @@ export default function ImportBountyPage() {
                   <div key={`${milestone.title}-${index}`} className="rounded-[24px] border border-agent-border bg-agent-card/50 p-5">
                     <div className="mb-5 flex items-center justify-between gap-3">
                       <div>
-                        <h3 className="text-lg font-semibold text-white">Milestone {index + 1}</h3>
+                        <h3 className="text-lg font-semibold text-white">
+                          {milestone.kind === 'COMMENCEMENT'
+                            ? 'Commencement Payment'
+                            : `Milestone ${milestones.slice(0, index + 1).filter((item) => item.kind !== 'COMMENCEMENT').length}`}
+                        </h3>
                         <p className="mt-1 text-xs text-gray-500">
                           {milestone.kind === 'COMMENCEMENT'
-                            ? 'Kickoff release imported from the grant’s separate commencement payment'
+                            ? `Separate kickoff release imported from the grant’s upfront payment. This is not counted as Milestone 1 of ${deliverableMilestoneCount || 0}.`
                             : 'Reviewer-approved payout checkpoint'}
                         </p>
                       </div>
@@ -976,16 +1104,45 @@ export default function ImportBountyPage() {
                         onChange={(e) => updateMilestone(index, 'title', e.target.value)}
                         placeholder="Milestone title"
                       />
-                      <input
-                        type="number"
-                        min={MIN_MILESTONE_CKB}
-                        step="0.00000001"
-                        inputMode="decimal"
-                        className={`${inputClass} ${milestoneErrors[index]?.amount && (submitAttempted || milestone.amountCkb.trim()) ? errorInputClass : ''}`}
-                        value={milestone.amountCkb}
-                        onChange={(e) => updateMilestone(index, 'amountCkb', e.target.value)}
-                        placeholder={`Milestone amount (min ${MIN_MILESTONE_CKB} CKB)`}
-                      />
+                      <div className="space-y-3">
+                        <input
+                          type="number"
+                          step="0.01"
+                          inputMode="decimal"
+                          className={inputClass}
+                          value={milestone.usdAmountInput || ''}
+                          onChange={(e) => updateMilestone(index, 'usdAmountInput', e.target.value)}
+                          placeholder="USD source amount"
+                        />
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => convertUsdInputToCkb(index)}
+                            disabled={!ckbPriceQuote}
+                            className="rounded-lg border border-sky-400/40 px-3 py-2 text-[11px] font-medium text-sky-200 hover:bg-sky-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            USD {'->'} CKB
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => convertCkbInputToUsd(index)}
+                            disabled={!ckbPriceQuote}
+                            className="rounded-lg border border-slate-400/30 px-3 py-2 text-[11px] font-medium text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            CKB {'->'} USD
+                          </button>
+                        </div>
+                        <input
+                          type="number"
+                          min={MIN_MILESTONE_CKB}
+                          step="0.00000001"
+                          inputMode="decimal"
+                          className={`${inputClass} ${milestoneErrors[index]?.amount && (submitAttempted || milestone.amountCkb.trim()) ? errorInputClass : ''}`}
+                          value={milestone.amountCkb}
+                          onChange={(e) => updateMilestone(index, 'amountCkb', e.target.value)}
+                          placeholder={`Milestone amount (min ${MIN_MILESTONE_CKB} CKB)`}
+                        />
+                      </div>
                     </div>
                     <div className="mt-2 grid gap-5 md:grid-cols-[1.2fr_0.8fr]">
                       <div>
@@ -1005,16 +1162,12 @@ export default function ImportBountyPage() {
                                 ? `Source reference: ${milestone.sourceBudgetLabel}.`
                                 : 'Amount released when this milestone is approved.'}
                             </div>
+                            <div className="mt-1 text-slate-400">
+                              USD is only a planning reference. PactAgent still stores and pays the real amount in CKB.
+                            </div>
                             {milestone.sourceBudgetUsd && ckbPriceQuote ? (
-                              <div className="mt-1 flex flex-wrap items-center gap-2 text-emerald-200">
-                                <span>Live estimate: {formatEstimatedCkb(estimateCkbFromUsd(milestone.sourceBudgetUsd))} CKB</span>
-                                <button
-                                  type="button"
-                                  onClick={() => applyMilestoneEstimate(index)}
-                                  className="rounded-lg border border-emerald-500/40 px-2 py-1 text-[11px] font-medium text-emerald-200 hover:bg-emerald-500/10"
-                                >
-                                  Apply estimate
-                                </button>
+                              <div className="mt-1 text-emerald-200">
+                                Live estimate: {formatEstimatedCkb(estimateCkbFromUsd(milestone.sourceBudgetUsd))} CKB
                               </div>
                             ) : milestone.sourceBudgetLabel ? (
                               <div className="mt-1 text-slate-400">Refresh the live quote to estimate the current CKB amount.</div>

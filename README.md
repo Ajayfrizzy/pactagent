@@ -48,11 +48,12 @@ PactAgent also supports imported grant and bounty workflows:
 1. An operator can paste a Nervos forum grant thread or a CKBoost campaign link into the dedicated import flows.
 2. PactAgent auto-fills source metadata, governance context, source budget references, and draft milestone structure from the original source.
 3. Imported Nervos grants can preserve separate commencement payments as their own kickoff checkpoint instead of forcing them into Milestone 1.
-4. Imported USD budgets can be converted into live CKB estimates directly inside the import flow before the operator finalizes payout amounts.
-5. The imported work is converted into manually reviewed milestones with partial release behavior.
-6. Proof is checked for completeness before human review, and missing information can trigger structured follow-up requests.
-7. Source-thread updates can be drafted, reviewed, published, and synced over time.
-8. CKBoost imports can keep contributor reputation, external IDs, event history, and sync-back notifications attached to the agreement.
+4. Imported milestone USD budgets can auto-populate live CKB estimates, and operators can refresh all estimates or convert between USD and CKB before finalizing payout amounts.
+5. Once funding is confirmed, a dedicated commencement payment can be auto-released immediately while the remaining grant stays milestone-reviewed.
+6. The imported work is converted into manually reviewed milestones with partial release behavior.
+7. Proof is checked for completeness before human review, and missing information can trigger structured follow-up requests.
+8. Source-thread updates can be drafted, reviewed, published, and synced over time.
+9. CKBoost imports can keep contributor reputation, external IDs, event history, and sync-back notifications attached to the agreement.
 
 ## Current Product Scope
 
@@ -73,7 +74,8 @@ What is already implemented:
 - human confirmation checkpoints that keep AI output advisory before payout approval
 - DAO and bounty import with source attribution, manual review enforcement, and milestone-based release planning
 - Nervos forum-thread auto-fill with dynamic milestone extraction, commencement-payment detection, and imported source snapshots
-- live CKB/USD quote conversion for imported grant budgets with editable milestone estimates
+- live CKB/USD quote conversion for imported grant budgets with automatic CKB prefill, editable USD/CKB helper inputs, and total-lock previews
+- automatic commencement-payment release after funding for imported grants that include a dedicated kickoff checkpoint
 - source-thread sync, review, publish controls, and Discourse-aware summarization for imported grants
 - CKBoost import, campaign-link auto-fill, contributor snapshots, event history, webhook ingestion, and outbound lifecycle notifications
 - Prisma + PostgreSQL persistence, ready for Supabase
@@ -114,12 +116,13 @@ PactAgent currently uses real CKB transfers for funding and settlement, but the 
 1. Paste a Nervos forum grant thread into the import flow and let PactAgent auto-fill the source fields.
 2. Review the imported source snapshot, including requested USD budget, ETA, funding address, and any separate commencement payment.
 3. Use the live CKB quote panel to estimate current CKB equivalents for the imported USD values.
-4. Apply live estimates to individual milestones or the whole grant, then adjust the final CKB payout amounts as needed.
+4. Let imported milestone USD references auto-fill their current CKB equivalents, then use `Refresh All CKB Estimates` or the USD/CKB converter helpers when you want to re-run the latest quote.
 5. Add, remove, or edit milestones freely so the final agreement matches the real delivery plan even when the source thread has more or fewer than four checkpoints.
-6. Fund the total grant once and require manual review for every payout step.
-7. Run a proof completeness check before approval.
-8. Request more info through structured reviewer questions when needed.
-9. Optionally sync or publish source-thread updates for governance visibility.
+6. Fund the total grant once so the agreement has the full payout capacity up front.
+7. If the import includes a separate commencement payment, PactAgent can release that kickoff amount automatically as soon as funding is confirmed.
+8. Run a proof completeness check before approving the remaining milestones through manual review.
+9. Request more info through structured reviewer questions when needed.
+10. Optionally sync or publish source-thread updates for governance visibility.
 
 ### CKBoost Handoff Flow
 
@@ -153,6 +156,7 @@ PactAgent includes a background worker that continuously scans active agreements
 The agent currently handles:
 - expiring unfunded agreements after deadline
 - activating the first or next milestone
+- auto-releasing imported commencement payments immediately after funding when the source marks a dedicated kickoff checkpoint
 - starting and completing proof completeness checks
 - validating submitted proof presence and completeness
 - moving agreements into review only when the latest proof is ready
@@ -207,8 +211,8 @@ The frontend is built with Next.js and provides three main surfaces:
 
 - accepts Nervos forum thread links and auto-fills source fields
 - preserves imported source budget context, ETA, funding address, and commencement-payment metadata
-- shows live CKB conversion for imported USD budgets
-- supports dynamic milestone editing plus one-click application of live CKB estimates
+- shows live CKB conversion for imported USD budgets with editable USD/CKB helper fields and a single `Refresh All CKB Estimates` action
+- supports dynamic milestone editing and keeps commencement payments visually separate from numbered delivery milestones
 
 ### CKBoost Import Page
 
@@ -393,7 +397,9 @@ Implemented:
 Implemented:
 - `GET /api/integrations/market/ckb-price` for live CKB/USD quotes
 - live CKB conversion panels on the grant import page for requested budget, commencement payment, and milestone budget references
-- one-click application of live CKB estimates into editable milestone payout fields
+- automatic CKB prefill from imported USD source budgets when a live quote is available
+- milestone-level USD helper inputs with `USD -> CKB` and `CKB -> USD` conversion support
+- a single `Refresh All CKB Estimates` action for reapplying the latest quote across the full grant
 - automatic quote refresh while the imported grant form is open
 - manual override of the final CKB payout amounts before agreement creation
 

@@ -4,6 +4,7 @@ import {
   buildRefundConsensusState,
   buildSplitConsensusState,
   matchOnchainFundingOutputsToMilestones,
+  shouldAutoReleaseCurrentCommencementMilestone,
 } from './agreementService';
 
 const clientAddress = 'ckt1-client';
@@ -128,4 +129,57 @@ test('matchOnchainFundingOutputsToMilestones pairs milestones with final on-chai
     { milestoneId: 'm1', outputIndex: 2, outputData: '0xaaaa' },
     { milestoneId: 'm2', outputIndex: 4, outputData: '0xbbbb' },
   ]);
+});
+
+test('shouldAutoReleaseCurrentCommencementMilestone returns true for imported commencement checkpoints', () => {
+  const result = shouldAutoReleaseCurrentCommencementMilestone({
+    milestones: [
+      {
+        sortOrder: 1,
+        status: 'ACTIVE',
+        title: 'Grant Commencement',
+        description: 'This imported kickoff release represents the source thread’s upfront commencement payment before the main delivery milestones begin.',
+      },
+      {
+        sortOrder: 2,
+        status: 'PENDING',
+        title: 'Milestone 1',
+        description: 'Normal delivery milestone',
+      },
+    ],
+    source: {
+      externalMetadataJson: JSON.stringify({
+        parser: 'NERVOS_GRANT_THREAD_V1',
+        milestones: [
+          { index: 0, title: 'Grant Commencement', kind: 'COMMENCEMENT' },
+          { index: 1, title: 'Milestone 1', kind: 'DELIVERABLE' },
+        ],
+      }),
+    },
+  });
+
+  assert.equal(result, true);
+});
+
+test('shouldAutoReleaseCurrentCommencementMilestone returns false for regular milestones', () => {
+  const result = shouldAutoReleaseCurrentCommencementMilestone({
+    milestones: [
+      {
+        sortOrder: 1,
+        status: 'ACTIVE',
+        title: 'Milestone 1',
+        description: 'Normal delivery milestone',
+      },
+    ],
+    source: {
+      externalMetadataJson: JSON.stringify({
+        parser: 'NERVOS_GRANT_THREAD_V1',
+        milestones: [
+          { index: 0, title: 'Milestone 1', kind: 'DELIVERABLE' },
+        ],
+      }),
+    },
+  });
+
+  assert.equal(result, false);
 });

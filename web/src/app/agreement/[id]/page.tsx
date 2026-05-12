@@ -145,6 +145,18 @@ function getMilestonePhaseLabel(status: string) {
   }
 }
 
+function describeMissingSourceFields(fields: string[] | null | undefined) {
+  if (!Array.isArray(fields) || !fields.length) {
+    return null;
+  }
+
+  if (fields.length === 1 && fields[0] === 'fundingAddress') {
+    return 'The original forum thread did not include a funding wallet address.';
+  }
+
+  return `The original forum thread is still missing: ${fields.join(', ')}.`;
+}
+
 type LifecycleStepState = 'complete' | 'current' | 'upcoming' | 'blocked';
 
 function getLifecycleStepStyles(state: LifecycleStepState) {
@@ -3368,9 +3380,9 @@ export default function AgreementDetailPage() {
                             <div className="mt-2 break-all text-sm text-white">{importedSourceMetadata.fundingAddress || 'Not provided in source thread'}</div>
                           </div>
                         </div>
-                        {Array.isArray(importedSourceMetadata.missingFields) && importedSourceMetadata.missingFields.length ? (
+                        {describeMissingSourceFields(importedSourceMetadata.missingFields) ? (
                           <div className="mt-4 rounded-lg border border-amber-700/40 bg-amber-950/20 p-4 text-sm text-amber-100">
-                            Missing source fields: {importedSourceMetadata.missingFields.join(', ')}
+                            {describeMissingSourceFields(importedSourceMetadata.missingFields)}
                           </div>
                         ) : null}
                       </div>

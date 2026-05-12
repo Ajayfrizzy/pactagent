@@ -16,6 +16,7 @@ import {
 } from './commitmentService';
 import { createAuditLog } from './auditLogService';
 import { createLog } from './logService';
+import { attemptFiberPayout } from './fiberService';
 import {
   buildOnchainEscrowDescriptor,
   isOnchainEscrowReady,
@@ -159,6 +160,17 @@ type SplitConsensusState = {
   clientRefundAmount: string | null;
   fullyApproved: boolean;
   awaitingAddress: string | null;
+};
+
+type ImportedSourceMetadataMilestone = {
+  index?: number;
+  title?: string | null;
+  kind?: string | null;
+};
+
+type ImportedSourceMetadata = {
+  parser?: string | null;
+  milestones?: ImportedSourceMetadataMilestone[] | null;
 };
 
 function canTransitionAgreement(from: string, to: string): boolean {
@@ -919,12 +931,217 @@ function getCurrentMilestoneFromAgreement(agreement: any) {
   );
 }
 
+function safeParseSourceMetadata<T>(value: string | null | undefined): T | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeLooseText(value: string | null | undefined) {
+  return (value || '').trim().toLowerCase();
+}
+
+function milestoneLooksLikeCommencement(milestone: {
+  title?: string | null;
+  description?: string | null;
+}) {
+  const title = normalizeLooseText(milestone.title);
+  const description = normalizeLooseText(milestone.description);
+
+  return title.includes('commencement')
+    || description.includes('upfront commencement payment')
+    || description.includes('kickoff release');
+}
+
+function getImportedCommencementMilestoneSortOrder(agreement: {
+  source?: {
+    externalMetadataJson?: string | null;
+  } | null;
+}) {
+  const metadata = safeParseSourceMetadata<ImportedSourceMetadata>(agreement.source?.externalMetadataJson);
+  if (metadata?.parser !== 'NERVOS_GRANT_THREAD_V1' || !Array.isArray(metadata.milestones)) {
+    return null;
+  }
+
+  const commencementIndex = metadata.milestones.findIndex((milestone) => milestone?.kind === 'COMMENCEMENT');
+  return commencementIndex >= 0 ? commencementIndex + 1 : null;
+}
+
+export function shouldAutoReleaseCurrentCommencementMilestone(agreement: {
+  milestones: Array<{
+    sortOrder: number;
+    status: string;
+    title?: string | null;
+    description?: string | null;
+  }>;
+  source?: {
+    externalMetadataJson?: string | null;
+  } | null;
+}) {
+  const milestone = getCurrentMilestoneFromAgreement(agreement);
+  if (!milestone) {
+    return false;
+  }
+
+  const commencementSortOrder = getImportedCommencementMilestoneSortOrder(agreement);
+  if (!commencementSortOrder || milestone.sortOrder !== commencementSortOrder) {
+    return false;
+  }
+
+  return milestoneLooksLikeCommencement(milestone);
+}
+
 function isImportedBountyAgreement(agreement: {
   source?: {
     sourceType?: string | null;
   } | null;
 }) {
   return agreement.source?.sourceType === 'BOUNTY';
+}
+
+async function sendApprovedMilestonePayout(params: {
+  agreementId: string;
+  milestoneId: string;
+  trigger: 'STANDARD_APPROVAL' | 'COMMENCEMENT_AUTO_RELEASE';
+}) {
+  const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(params.agreementId));
+  const milestone = agreement.milestones.find((item: any) => item.id === params.milestoneId);
+
+  if (!milestone) {
+    throw new Error('Approved milestone not found for payout.');
+  }
+
+  if (milestone.status !== 'APPROVED') {
+    throw new Error('Milestone must be approved before payout can be sent.');
+  }
+
+  const pendingPayout = agreement.settlements.find(
+    (settlement: any) =>
+      settlement.direction === 'PAYOUT' &&
+      settlement.milestoneId === milestone.id &&
+      settlement.status === 'PENDING'
+  );
+  if (pendingPayout) {
+    return confirmPendingSettlementIfReady(params.agreementId);
+  }
+
+  const existingConfirmedPayout = agreement.settlements.find(
+    (settlement: any) =>
+      settlement.direction === 'PAYOUT' &&
+      settlement.milestoneId === milestone.id &&
+      settlement.status === 'CONFIRMED'
+  );
+  if (existingConfirmedPayout) {
+    return completeApprovedMilestone(params.agreementId);
+  }
+
+  await createLog({
+    agreementId: params.agreementId,
+    level: 'INFO',
+    eventType: 'RELEASE_PREPARED',
+    message:
+      params.trigger === 'COMMENCEMENT_AUTO_RELEASE'
+        ? `Preparing immediate commencement payout: ${milestone.title}`
+        : `Preparing payout for milestone ${milestone.sortOrder}: ${milestone.title}`,
+    metadata: {
+      milestoneId: milestone.id,
+      milestoneTitle: milestone.title,
+      milestoneAmount: milestone.amount,
+      payoutNetwork: agreement.payoutNetwork,
+      trigger: params.trigger,
+    },
+  });
+
+  if (agreement.payoutNetwork === 'FIBER' || agreement.releaseMode === 'PARTIAL') {
+    const fiberResult = await attemptFiberPayout(
+      params.agreementId,
+      agreement.workerFiberPubkey || agreement.workerAddress,
+      milestone.amount
+    );
+
+    await createLog({
+      agreementId: params.agreementId,
+      level: fiberResult.route === 'FIBER' ? 'SUCCESS' : 'INFO',
+      eventType: 'RELEASE_SENT',
+      message:
+        fiberResult.route === 'FIBER'
+          ? `Milestone payment released via Fiber: ${milestone.title}`
+          : `Milestone payment released on CKB fallback: ${milestone.title}`,
+      metadata: {
+        milestoneId: milestone.id,
+        milestoneTitle: milestone.title,
+        trigger: params.trigger,
+        ...fiberResult,
+      },
+    });
+
+    if (fiberResult.route === 'FIBER' && fiberResult.paymentReference) {
+      await recordMilestoneSettlementAttempt({
+        agreementId: params.agreementId,
+        milestoneId: milestone.id,
+        direction: 'PAYOUT',
+        network: 'FIBER',
+        amount: milestone.amount,
+        paymentReference: fiberResult.paymentReference,
+        status: 'CONFIRMED',
+        confirmedAt: new Date(),
+      });
+
+      const updatedAgreement = await completeApprovedMilestone(params.agreementId);
+      await createLog({
+        agreementId: params.agreementId,
+        level: 'SUCCESS',
+        eventType: 'SETTLEMENT_CONFIRMED',
+        message: `Milestone settled on Fiber: ${milestone.title}`,
+        metadata: {
+          milestoneId: milestone.id,
+          milestoneTitle: milestone.title,
+          finalAgreementStatus: updatedAgreement?.status,
+          trigger: params.trigger,
+        },
+      });
+
+      return updatedAgreement;
+    }
+  }
+
+  const payoutTxHash = await sendTreasuryTransfer(
+    agreement.workerAddress,
+    milestone.amount
+  );
+  await recordMilestoneSettlementAttempt({
+    agreementId: params.agreementId,
+    milestoneId: milestone.id,
+    direction: 'PAYOUT',
+    network: 'CKB',
+    amount: milestone.amount,
+    txHash: payoutTxHash,
+  });
+
+  await createLog({
+    agreementId: params.agreementId,
+    level: 'INFO',
+    eventType: 'RELEASE_SENT',
+    message:
+      params.trigger === 'COMMENCEMENT_AUTO_RELEASE'
+        ? `Commencement payout prepared on CKB: ${milestone.title}`
+        : `Milestone payment prepared on CKB: ${milestone.title}`,
+    metadata: {
+      milestoneId: milestone.id,
+      milestoneTitle: milestone.title,
+      amount: milestone.amount,
+      route: 'CKB',
+      trigger: params.trigger,
+    },
+  });
+
+  return getAgreementById(params.agreementId);
 }
 
 function getLatestSettlementRecord(
@@ -2112,6 +2329,16 @@ export async function confirmFundingIfReady(agreementId: string) {
 
     await transitionStatus(agreementId, 'FUNDED');
     const activeMilestone = await activateNextMilestone(agreementId);
+    const shouldAutoReleaseCommencement = activeMilestone
+      && shouldAutoReleaseCurrentCommencementMilestone({
+        milestones: agreement.milestones.map((milestone: any) => ({
+          sortOrder: milestone.sortOrder,
+          status: milestone.id === activeMilestone.id ? 'ACTIVE' : milestone.status,
+          title: milestone.title,
+          description: milestone.description,
+        })),
+        source: agreement.source,
+      });
 
     await createLog({
       agreementId,
@@ -2126,6 +2353,28 @@ export async function confirmFundingIfReady(agreementId: string) {
         matchedOutputIndexes: matchedMilestoneOutputs.map((output) => output?.outputIndex ?? null),
       },
     });
+
+    if (shouldAutoReleaseCommencement && activeMilestone) {
+      await transitionMilestoneStatus(activeMilestone.id, 'APPROVED');
+      await transitionStatus(agreementId, 'APPROVED');
+      await createLog({
+        agreementId,
+        level: 'INFO',
+        eventType: 'MILESTONE_APPROVED',
+        message: `Commencement payment approved automatically after funding: ${activeMilestone.title}`,
+        metadata: {
+          milestoneId: activeMilestone.id,
+          milestoneTitle: activeMilestone.title,
+          trigger: 'COMMENCEMENT_AUTO_RELEASE',
+        },
+      });
+
+      await sendApprovedMilestonePayout({
+        agreementId,
+        milestoneId: activeMilestone.id,
+        trigger: 'COMMENCEMENT_AUTO_RELEASE',
+      });
+    }
 
     return getAgreementById(agreementId);
   }

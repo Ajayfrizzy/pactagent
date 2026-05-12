@@ -49,8 +49,13 @@ The format is based on Keep a Changelog, and this project follows a simple seman
 - Imported grant pricing support with:
   - live CKB/USD quote endpoint
   - grant-import quote panels for requested budget, commencement payment, and milestone budget references
-  - one-click application of live CKB estimates into editable milestone payout fields
+  - automatic CKB prefill from imported USD source budgets when a live quote is available
+  - milestone-level USD helper inputs with `USD -> CKB` and `CKB -> USD` conversion support
+  - a single `Refresh All CKB Estimates` action for reapplying the latest quote across the full grant
   - automatic quote refresh while the import form stays open
+- Imported grant kickoff settlement support with:
+  - dedicated commencement-payment detection from imported source metadata
+  - automatic commencement-payment release immediately after funding confirmation
 - Public profile support for wallet-native identity, including profile metadata, public profile routes, and profile settings.
 - Lightweight reputation snapshots derived from agreement outcomes, disputes, settlement behavior, and milestone activity.
 - Invite link support for draft agreements and direct participant onboarding flows.
@@ -72,7 +77,9 @@ The format is based on Keep a Changelog, and this project follows a simple seman
 - Imported DAO/bounty agreements now force manual review and partial milestone-based release behavior.
 - DAO/bounty import now supports forum-thread auto-fill so source metadata and milestone drafts can be resolved from a pasted Nervos grant link.
 - DAO/bounty import now preserves separate commencement payments as their own kickoff checkpoint instead of forcing them into Milestone 1.
+- Imported grants can now auto-release a dedicated commencement payment immediately after funding while keeping the remaining milestones under manual review.
 - CKBoost import now supports campaign-link auto-fill instead of relying only on manual campaign entry.
+- Imported grant pricing now auto-fills CKB milestone amounts from source USD budgets and keeps editable USD/CKB conversion helpers in the import flow.
 - Agreement detail and dashboard views now surface source attribution and invite actions where relevant.
 - Wallet authentication and webhook flows are now aligned with stricter production deployment expectations, including authenticated webhook management routes.
 - Dashboard and agreement detail pages now place more emphasis on “what happens next,” milestone progress, and user action clarity instead of only showing raw agreement data.
@@ -117,12 +124,17 @@ The format is based on Keep a Changelog, and this project follows a simple seman
 - Form fields across the DAO / bounty import experience now use roomier padding and better visual rhythm, and dropdowns now reserve proper right-side space for the indicator arrow.
 - PactAgent’s visual identity has been pushed beyond generic dark SaaS treatment in the core flows through stronger gradient heroes, mode-specific accents, and more distinctive operational summary panels.
 - Agreement detail now includes a unified operational timeline that merges settlements, audit actions, messages, amendments, and dispute activity into one readable history stream.
-- Imported grant UX now reduces manual amount entry by showing live CKB equivalents for imported USD budgets and allowing operators to apply those estimates per milestone or across the full grant.
+- Imported grant UX now reduces manual amount entry by showing live CKB equivalents for imported USD budgets, recalculating totals as values change, and centralizing re-estimation under a single `Refresh All CKB Estimates` control.
+- Grant milestone cards now label separate kickoff funding as `Commencement Payment` instead of `Milestone 1`.
+- Large grant-funding totals now format and wrap cleanly inside the total-lock summary card.
+- Imported-source warnings now use plain-language messaging when the original forum thread omits a funding wallet address.
 
 ### Fixed
 
 - Resolved production webhook route availability issues caused by stale backend processes and port conflicts during deployment.
 - Resolved live wallet sign-in failures caused by backend CORS misconfiguration between frontend and API subdomains.
+- Resolved CoinGecko live-price failures caused by incorrect market-price endpoint path handling.
+- Resolved imported-grant total-lock summaries failing to reflect edited amount references in real time.
 
 ## [0.1.0] - Initial milestone escrow foundation
 
