@@ -16,7 +16,7 @@ import {
   ShieldCheckIcon,
   XCircleIcon,
 } from '@/components/Icons';
-import { ckbToShannons, MIN_CELL_CAPACITY, shannonsToCKB } from '@/lib/ckb';
+import { ckbToShannons, formatCkbAmount, getMinimumMilestoneCapacity, MIN_CELL_CAPACITY, shannonsToCKB } from '@/lib/ckb';
 import { fetchBountyGrantAutofill, fetchCkbPriceQuote, fetchConfig, importBountyAgreement } from '@/lib/api';
 import { useStore } from '@/lib/store';
 
@@ -52,8 +52,6 @@ type CkbPriceQuote = {
   lastUpdatedAt: string | null;
   fetchedAt: string;
 };
-
-const MIN_MILESTONE_CKB = Number(shannonsToCKB(MIN_CELL_CAPACITY.toString()));
 
 function parseUsdAmount(value: string | null | undefined) {
   if (!value) {
@@ -153,7 +151,7 @@ function isValidFiberPublicKey(value: string) {
   return /^(?:0x)?(?:02|03)[0-9a-f]{64}$/i.test(trimmed) || /^(?:0x)?04[0-9a-f]{128}$/i.test(trimmed);
 }
 
-function getMilestoneAmountError(amountCkb: string) {
+function getMilestoneAmountError(amountCkb: string, minimumMilestoneCkb: string) {
   const trimmed = amountCkb.trim();
   if (!trimmed) {
     return 'Enter the amount to release when this milestone is approved.';
@@ -164,8 +162,8 @@ function getMilestoneAmountError(amountCkb: string) {
     return 'Enter a valid numeric CKB amount.';
   }
 
-  if (amount < MIN_MILESTONE_CKB) {
-    return `Each milestone must be at least ${MIN_MILESTONE_CKB} CKB.`;
+  if (amount < Number(minimumMilestoneCkb)) {
+    return `Each milestone must be at least ${minimumMilestoneCkb} CKB.`;
   }
 
   return null;
@@ -212,6 +210,17 @@ export default function ImportBountyPage() {
     proofType: 'URL',
     payoutNetwork: 'CKB',
   });
+  const minimumMilestoneCapacity = getMinimumMilestoneCapacity({
+    escrowModel:
+      publicConfig?.onchainEscrowReady && form.payoutNetwork === 'CKB'
+        ? 'ONCHAIN_LOCK'
+        : 'TREASURY_BRIDGE',
+    payoutNetwork: form.payoutNetwork,
+    escrowLockCodeHash: publicConfig?.onchainLockCodeHash,
+    escrowLockHashType: publicConfig?.onchainLockHashType,
+    escrowLockArgs: publicConfig?.onchainEscrowReady ? `0x${'00'.repeat(32 * 3)}` : null,
+  });
+  const minimumMilestoneCkb = formatCkbAmount(minimumMilestoneCapacity);
 
   useEffect(() => {
     async function load() {
@@ -524,10 +533,10 @@ export default function ImportBountyPage() {
       || !milestone.description.trim()
       || !milestone.amountCkb.trim()
       || !Number.isFinite(Number(milestone.amountCkb))
-      || Number(milestone.amountCkb) < MIN_MILESTONE_CKB,
+      || Number(milestone.amountCkb) < Number(minimumMilestoneCkb),
     );
     if (invalidMilestone) {
-      setError(`Each milestone needs a title, description, and at least ${MIN_MILESTONE_CKB} CKB.`);
+      setError(`Each milestone needs a title, description, and at least ${minimumMilestoneCkb} CKB.`);
       return;
     }
 
@@ -634,7 +643,7 @@ export default function ImportBountyPage() {
   const milestoneErrors = milestones.map((milestone) => ({
     title: !milestone.title.trim() ? 'Give this milestone a short deliverable title.' : null,
     description: !milestone.description.trim() ? 'Describe what the builder must ship and what the reviewer should verify.' : null,
-    amount: getMilestoneAmountError(milestone.amountCkb),
+    amount: getMilestoneAmountError(milestone.amountCkb, minimumMilestoneCkb),
   }));
   const importedGrantUsdAmount = parseUsdAmount(grantAutofillMetadata?.grantAmountRequested);
   const importedGrantEstimatedCkb = estimateCkbFromUsd(importedGrantUsdAmount);
@@ -1134,13 +1143,13 @@ export default function ImportBountyPage() {
                         </div>
                         <input
                           type="number"
-                          min={MIN_MILESTONE_CKB}
+                          min={minimumMilestoneCkb}
                           step="0.00000001"
                           inputMode="decimal"
                           className={`${inputClass} ${milestoneErrors[index]?.amount && (submitAttempted || milestone.amountCkb.trim()) ? errorInputClass : ''}`}
                           value={milestone.amountCkb}
                           onChange={(e) => updateMilestone(index, 'amountCkb', e.target.value)}
-                          placeholder={`Milestone amount (min ${MIN_MILESTONE_CKB} CKB)`}
+                          placeholder={`Milestone amount (min ${minimumMilestoneCkb} CKB)`}
                         />
                       </div>
                     </div>

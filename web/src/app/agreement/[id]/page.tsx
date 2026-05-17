@@ -11,6 +11,8 @@ import { useWebSocket } from '@/hooks/useWebSocket';
 import { useStore } from '@/lib/store';
 import {
   ckbToShannons,
+  formatCkbAmount,
+  getMinimumMilestoneCapacity,
   sendCapacityTransfer,
   sendOnchainEscrowFunding,
   sendOnchainEscrowResolution,
@@ -1526,11 +1528,31 @@ export default function AgreementDetailPage() {
         throw new Error('Wallet session not found. Please reconnect your wallet.');
       }
 
+      const minimumMilestoneCapacity = getMinimumMilestoneCapacity({
+        escrowModel: agreement.escrowModel,
+        payoutNetwork: agreement.payoutNetwork,
+        escrowLockCodeHash: agreement.escrowLockCodeHash,
+        escrowLockHashType: agreement.escrowLockHashType,
+        escrowLockArgs: agreement.escrowLockArgs,
+      });
+
       // Validate minimum CKB amount before doing anything else
       if (BigInt(agreement.amount) < MIN_CELL_CAPACITY) {
         throw new Error(
           `Agreement amount is too low. CKB requires at least 61 CKB per transaction output. Current amount: ${shannonsToCKB(agreement.amount)} CKB.`,
         );
+      }
+
+      if (agreement.escrowModel === 'ONCHAIN_LOCK') {
+        const underfundedMilestone = agreement.milestones.find(
+          (milestone: { amount: string; sortOrder: number }) => BigInt(milestone.amount) < minimumMilestoneCapacity,
+        );
+
+        if (underfundedMilestone) {
+          throw new Error(
+            `Milestone ${underfundedMilestone.sortOrder} is too small for on-chain lock funding. Each milestone currently needs at least ${formatCkbAmount(minimumMilestoneCapacity)} CKB, but this one is ${shannonsToCKB(underfundedMilestone.amount)} CKB.`,
+          );
+        }
       }
 
       setFundingStatus('Verifying wallet address...');

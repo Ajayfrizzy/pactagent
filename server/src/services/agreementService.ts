@@ -19,6 +19,7 @@ import { createLog } from './logService';
 import { attemptFiberPayout } from './fiberService';
 import {
   buildOnchainEscrowDescriptor,
+  getOnchainEscrowOccupiedCapacity,
   isOnchainEscrowReady,
 } from './onchainEscrowService';
 import {
@@ -56,6 +57,16 @@ const MILESTONE_VALID_TRANSITIONS: Record<string, string[]> = {
   REFUNDED: [],
   EXPIRED: [],
 };
+
+function formatShannonsAsCkb(value: bigint) {
+  const base = BigInt(10 ** 8);
+  const whole = value / base;
+  const fraction = value % base;
+  if (fraction === BigInt(0)) {
+    return whole.toString();
+  }
+  return `${whole}.${fraction.toString().padStart(8, '0').replace(/0+$/, '')}`;
+}
 
 const agreementListInclude = {
   milestones: {
@@ -1989,6 +2000,20 @@ export async function createAgreement(data: {
           workerAddress,
         })
       : null;
+
+  if (escrowModel === 'ONCHAIN_LOCK' && onchainDescriptor) {
+    const minimumMilestoneCapacity = getOnchainEscrowOccupiedCapacity({
+      lockArgs: onchainDescriptor.lockArgs,
+    });
+    const underfundedMilestone = normalizedMilestones.find((milestone) => BigInt(milestone.amount) < minimumMilestoneCapacity);
+
+    if (underfundedMilestone) {
+      throw new Error(
+        `Milestone ${underfundedMilestone.sortOrder} is too small for on-chain lock funding. Each milestone currently needs at least ${formatShannonsAsCkb(minimumMilestoneCapacity)} CKB, but this milestone is ${formatShannonsAsCkb(BigInt(underfundedMilestone.amount))} CKB.`,
+      );
+    }
+  }
+
   const escrowAddress =
     escrowModel === 'ONCHAIN_LOCK'
       ? onchainDescriptor?.escrowAddress || null

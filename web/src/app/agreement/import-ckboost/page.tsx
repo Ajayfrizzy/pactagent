@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { NavbarMenu } from '@/components/NavbarMenu';
 import { AgentIcon, ArrowLeftIcon, DocumentTextIcon, PlusIcon, TrophyIcon, XCircleIcon } from '@/components/Icons';
-import { ckbToShannons, MIN_CELL_CAPACITY, shannonsToCKB } from '@/lib/ckb';
+import { ckbToShannons, formatCkbAmount, getMinimumMilestoneCapacity, MIN_CELL_CAPACITY, shannonsToCKB } from '@/lib/ckb';
 import { fetchCkboostCampaignAutofill, fetchConfig, importCkboostAgreement } from '@/lib/api';
 import { useStore } from '@/lib/store';
 
@@ -14,8 +14,6 @@ type MilestoneDraft = {
   description: string;
   amountCkb: string;
 };
-
-const MIN_MILESTONE_CKB = Number(shannonsToCKB(MIN_CELL_CAPACITY.toString()));
 
 function isValidHttpUrl(value: string) {
   try {
@@ -36,7 +34,7 @@ function isValidFiberPublicKey(value: string) {
   return /^(?:0x)?(?:02|03)[0-9a-f]{64}$/i.test(trimmed) || /^(?:0x)?04[0-9a-f]{128}$/i.test(trimmed);
 }
 
-function getMilestoneAmountError(amountCkb: string) {
+function getMilestoneAmountError(amountCkb: string, minimumMilestoneCkb: string) {
   const trimmed = amountCkb.trim();
   if (!trimmed) {
     return 'Enter the amount to release when this milestone is approved.';
@@ -47,8 +45,8 @@ function getMilestoneAmountError(amountCkb: string) {
     return 'Enter a valid numeric CKB amount.';
   }
 
-  if (amount < MIN_MILESTONE_CKB) {
-    return `Each milestone must be at least ${MIN_MILESTONE_CKB} CKB.`;
+  if (amount < Number(minimumMilestoneCkb)) {
+    return `Each milestone must be at least ${minimumMilestoneCkb} CKB.`;
   }
 
   return null;
@@ -103,6 +101,17 @@ export default function ImportCkboostPage() {
     payoutNetwork: 'CKB',
     workerFiberPubkey: '',
   });
+  const minimumMilestoneCapacity = getMinimumMilestoneCapacity({
+    escrowModel:
+      publicConfig?.onchainEscrowReady && form.payoutNetwork === 'CKB'
+        ? 'ONCHAIN_LOCK'
+        : 'TREASURY_BRIDGE',
+    payoutNetwork: form.payoutNetwork,
+    escrowLockCodeHash: publicConfig?.onchainLockCodeHash,
+    escrowLockHashType: publicConfig?.onchainLockHashType,
+    escrowLockArgs: publicConfig?.onchainEscrowReady ? `0x${'00'.repeat(32 * 3)}` : null,
+  });
+  const minimumMilestoneCkb = formatCkbAmount(minimumMilestoneCapacity);
 
   useEffect(() => {
     async function load() {
@@ -290,10 +299,10 @@ export default function ImportCkboostPage() {
       || !milestone.description.trim()
       || !milestone.amountCkb.trim()
       || !Number.isFinite(Number(milestone.amountCkb))
-      || Number(milestone.amountCkb) < MIN_MILESTONE_CKB,
+      || Number(milestone.amountCkb) < Number(minimumMilestoneCkb),
     );
     if (invalidMilestone) {
-      setError(`Each milestone needs a title, description, and at least ${MIN_MILESTONE_CKB} CKB.`);
+      setError(`Each milestone needs a title, description, and at least ${minimumMilestoneCkb} CKB.`);
       return;
     }
 
@@ -391,7 +400,7 @@ export default function ImportCkboostPage() {
   const milestoneErrors = milestones.map((milestone) => ({
     title: !milestone.title.trim() ? 'Give this deliverable a short milestone name.' : null,
     description: !milestone.description.trim() ? 'Describe what the contributor must deliver and what should be reviewed.' : null,
-    amount: getMilestoneAmountError(milestone.amountCkb),
+    amount: getMilestoneAmountError(milestone.amountCkb, minimumMilestoneCkb),
   }));
 
   function shouldShowFieldError(value: string, message: string | null) {

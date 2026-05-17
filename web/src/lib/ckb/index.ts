@@ -5,6 +5,8 @@ const AVERAGE_CKB_BLOCK_MS = 8_000;
 
 /** CKB requires a minimum of 61 CKB per output cell. */
 export const MIN_CELL_CAPACITY = BigInt(61) * BigInt(10 ** 8); // 6_100_000_000 shannons
+const SHANNONS_PER_CKB = BigInt(10 ** 8);
+const ESCROW_CELL_DATA_BYTES = 88;
 
 /**
  * Race a promise against a timeout. If the timeout fires first the returned
@@ -38,6 +40,15 @@ export function shannonsToCKB(shannons: string): string {
   const val = BigInt(shannons);
   const whole = val / CKB_DECIMALS;
   const frac = val % CKB_DECIMALS;
+  if (frac === BigInt(0)) {
+    return whole.toString();
+  }
+  return `${whole}.${frac.toString().padStart(8, '0').replace(/0+$/, '')}`;
+}
+
+export function formatCkbAmount(value: bigint): string {
+  const whole = value / SHANNONS_PER_CKB;
+  const frac = value % SHANNONS_PER_CKB;
   if (frac === BigInt(0)) {
     return whole.toString();
   }
@@ -133,6 +144,36 @@ function getEscrowLockScript(agreement: {
   };
 }
 
+export function getOnchainEscrowOccupiedCapacity(agreement: {
+  escrowLockCodeHash?: string | null;
+  escrowLockHashType?: string | null;
+  escrowLockArgs?: string | null;
+}) {
+  const escrowScript = getEscrowLockScript(agreement);
+  const occupied = ccc.CellOutput.from(
+    {
+      lock: escrowScript,
+    },
+    `0x${'00'.repeat(ESCROW_CELL_DATA_BYTES)}`,
+  ).capacity;
+
+  return BigInt(occupied);
+}
+
+export function getMinimumMilestoneCapacity(params: {
+  escrowModel?: string | null;
+  payoutNetwork?: string | null;
+  escrowLockCodeHash?: string | null;
+  escrowLockHashType?: string | null;
+  escrowLockArgs?: string | null;
+}) {
+  if (params.escrowModel === 'ONCHAIN_LOCK' && params.payoutNetwork === 'CKB') {
+    return getOnchainEscrowOccupiedCapacity(params);
+  }
+
+  return MIN_CELL_CAPACITY;
+}
+
 function getEscrowCellDep(config: {
   onchainLockTxHash?: string | null;
   onchainLockIndex?: string | null;
@@ -203,9 +244,17 @@ export async function sendOnchainEscrowFunding(params: {
       refundTimeoutBlock,
     });
 
+    const requiredCapacity = getOnchainEscrowOccupiedCapacity(agreement);
+    const milestoneCapacity = BigInt(milestone.amount);
+    if (milestoneCapacity < requiredCapacity) {
+      throw new Error(
+        `Milestone ${milestone.sortOrder} is too small for on-chain lock funding. It needs at least ${formatCkbAmount(requiredCapacity)} CKB to cover the escrow cell, but this milestone is ${formatCkbAmount(milestoneCapacity)} CKB.`,
+      );
+    }
+
     const outputIndex = tx.addOutput({
       lock: escrowScript,
-      capacity: BigInt(milestone.amount),
+      capacity: milestoneCapacity,
     }, escrowCellData);
 
     milestoneOutputs.push({

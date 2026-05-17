@@ -82,6 +82,8 @@ app.get('/api/config', async (_req, res) => {
       supportedEscrowModels: isOnchainEscrowReady()
         ? ['TREASURY_BRIDGE', 'ONCHAIN_LOCK']
         : ['TREASURY_BRIDGE'],
+      onchainLockCodeHash: config.onchainLockCodeHash || null,
+      onchainLockHashType: config.onchainLockHashType || null,
       onchainLockTxHash: config.onchainLockTxHash || null,
       onchainLockIndex: config.onchainLockIndex || null,
       onchainLockDepType: config.onchainLockDepType || null,

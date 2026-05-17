@@ -1,5 +1,7 @@
-import { Address, ClientPublicMainnet, ClientPublicTestnet } from '@ckb-ccc/core';
+import { Address, CellOutput, ClientPublicMainnet, ClientPublicTestnet } from '@ckb-ccc/core';
 import { config, requireConfig } from '../config';
+
+const ESCROW_CELL_DATA_BYTES = 88;
 
 function getClient() {
   return config.ckbNetwork === 'mainnet'
@@ -72,6 +74,23 @@ export async function buildOnchainEscrowDescriptor(input: {
     workerLockHash,
     agreementSalt,
   };
+}
+
+export function getOnchainEscrowOccupiedCapacity(input: {
+  lockArgs: string;
+}) {
+  requireConfig(config.onchainLockCodeHash, 'ONCHAIN_LOCK_CODE_HASH');
+
+  return BigInt(CellOutput.from(
+    {
+      lock: {
+        codeHash: config.onchainLockCodeHash,
+        hashType: config.onchainLockHashType,
+        args: input.lockArgs,
+      },
+    },
+    `0x${'00'.repeat(ESCROW_CELL_DATA_BYTES)}`,
+  ).capacity);
 }
 
 export function getOnchainEscrowCellDep() {

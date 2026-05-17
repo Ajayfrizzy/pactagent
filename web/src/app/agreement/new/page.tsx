@@ -7,7 +7,13 @@ import { NavbarMenu } from '@/components/NavbarMenu';
 import { useStore } from '@/lib/store';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { createAgreement, fetchConfig } from '@/lib/api';
-import { ckbToShannons, MIN_CELL_CAPACITY, shannonsToCKB } from '@/lib/ckb';
+import {
+  ckbToShannons,
+  formatCkbAmount,
+  getMinimumMilestoneCapacity,
+  MIN_CELL_CAPACITY,
+  shannonsToCKB,
+} from '@/lib/ckb';
 import { AgentIcon, ArrowLeftIcon, DocumentTextIcon, PlusIcon, XCircleIcon } from '@/components/Icons';
 
 interface MilestoneDraft {
@@ -29,8 +35,6 @@ const defaultMilestones: MilestoneDraft[] = [
   },
 ];
 
-const MIN_MILESTONE_CKB = Number(shannonsToCKB(MIN_CELL_CAPACITY.toString()));
-
 function canSignerFundAgreement(signer: ccc.Signer | undefined) {
   return signer?.type === ccc.SignerType.CKB || signer?.type === ccc.SignerType.EVM;
 }
@@ -45,7 +49,7 @@ function isLikelyCkbAddress(value: string) {
   return /^(ckt|ckb)1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]{20,}$/i.test(trimmed);
 }
 
-function getMilestoneAmountError(amountCKB: string) {
+function getMilestoneAmountError(amountCKB: string, minimumMilestoneCkb: string) {
   const trimmed = amountCKB.trim();
   if (!trimmed) {
     return 'Enter the amount to release when this milestone is approved.';
@@ -56,8 +60,8 @@ function getMilestoneAmountError(amountCKB: string) {
     return 'Enter a valid CKB amount';
   }
 
-  if (amount < MIN_MILESTONE_CKB) {
-    return `Each milestone must be at least ${MIN_MILESTONE_CKB} CKB.`;
+  if (amount < Number(minimumMilestoneCkb)) {
+    return `Each milestone must be at least ${minimumMilestoneCkb} CKB.`;
   }
 
   return null;
@@ -87,6 +91,17 @@ export default function NewAgreementPage() {
     payoutNetwork: 'CKB',
   });
   const [milestones, setMilestones] = useState<MilestoneDraft[]>(defaultMilestones);
+  const minimumMilestoneCapacity = getMinimumMilestoneCapacity({
+    escrowModel:
+      publicConfig?.onchainEscrowReady && form.payoutNetwork === 'CKB'
+        ? 'ONCHAIN_LOCK'
+        : 'TREASURY_BRIDGE',
+    payoutNetwork: form.payoutNetwork,
+    escrowLockCodeHash: publicConfig?.onchainLockCodeHash,
+    escrowLockHashType: publicConfig?.onchainLockHashType,
+    escrowLockArgs: publicConfig?.onchainEscrowReady ? `0x${'00'.repeat(32 * 3)}` : null,
+  });
+  const minimumMilestoneCkb = formatCkbAmount(minimumMilestoneCapacity);
 
   useEffect(() => {
     let cancelled = false;
@@ -145,7 +160,7 @@ export default function NewAgreementPage() {
   }
 
   const totalCkb = milestones.reduce((sum, milestone) => sum + (parseFloat(milestone.amountCKB) || 0), 0);
-  const milestoneAmountErrors = milestones.map((milestone) => getMilestoneAmountError(milestone.amountCKB));
+  const milestoneAmountErrors = milestones.map((milestone) => getMilestoneAmountError(milestone.amountCKB, minimumMilestoneCkb));
   const hasInvalidMilestoneAmount = milestoneAmountErrors.some((message) => Boolean(message));
 
   async function handleSubmit(e: React.FormEvent) {
@@ -209,7 +224,7 @@ export default function NewAgreementPage() {
     }
 
     if (hasInvalidMilestoneAmount) {
-      setError(`Each milestone must be at least ${MIN_MILESTONE_CKB} CKB before you can continue.`);
+      setError(`Each milestone must be at least ${minimumMilestoneCkb} CKB before you can continue.`);
       return;
     }
 
@@ -301,7 +316,7 @@ export default function NewAgreementPage() {
   const milestoneFieldErrors = milestones.map((milestone, index) => ({
     title: !milestone.title.trim() ? `Give milestone ${index + 1} a short deliverable title.` : null,
     description: !milestone.description.trim() ? 'Describe what the worker must ship and what “done” looks like.' : null,
-    amount: getMilestoneAmountError(milestone.amountCKB),
+    amount: getMilestoneAmountError(milestone.amountCKB, minimumMilestoneCkb),
   }));
 
   function shouldShowFieldError(value: string, message: string | null) {
@@ -624,14 +639,14 @@ export default function NewAgreementPage() {
                         type="number"
                         className={amountError && (submitAttempted || milestone.amountCKB.trim()) ? `${inputClass} ${errorInputClass}` : inputClass}
                         placeholder="100"
-                        min={String(MIN_MILESTONE_CKB)}
+                        min={minimumMilestoneCkb}
                         step="any"
                         value={milestone.amountCKB}
                         onChange={(e) => updateMilestone(index, 'amountCKB', e.target.value)}
                         required
                       />
                             <p className={`mt-1.5 text-xs ${amountError && (submitAttempted || milestone.amountCKB.trim()) ? 'text-red-300' : 'text-gray-500'}`}>
-                              {(amountError && (submitAttempted || milestone.amountCKB.trim())) ? amountError : `Minimum ${MIN_MILESTONE_CKB} CKB required per milestone.`}
+                              {(amountError && (submitAttempted || milestone.amountCKB.trim())) ? amountError : `Minimum ${minimumMilestoneCkb} CKB required per milestone.`}
                             </p>
                           </>
                         );
