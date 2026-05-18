@@ -495,6 +495,7 @@ async function getAgreementMilestoneProofOrThrow(agreementId: string, milestoneI
     agreement,
     milestone,
     latestProof,
+    priorProofs: milestone.proofs.slice(1),
     infoRequests,
   };
 }
@@ -555,7 +556,17 @@ export async function completeProofReview(params: {
   triggeredByType?: 'USER' | 'SYSTEM';
   skipAudit?: boolean;
 }) {
-  const { milestone, latestProof, infoRequests } = await getAgreementMilestoneProofOrThrow(params.agreementId, params.milestoneId);
+  const { milestone, latestProof, priorProofs, infoRequests } = await getAgreementMilestoneProofOrThrow(params.agreementId, params.milestoneId);
+  const priorProofTexts = priorProofs.flatMap((proof) => {
+    const parsed = parseProofBundle(proof.content);
+    return [
+      parsed.summary,
+      parsed.primaryText,
+      ...parsed.artifacts
+        .filter((artifact) => artifact.kind === 'TEXT' || artifact.kind === 'URL')
+        .map((artifact) => artifact.content),
+    ].filter(Boolean);
+  });
   const supplementalTexts = infoRequests
     .map((request) => request.responseContent?.trim())
     .filter((value): value is string => Boolean(value));
@@ -566,7 +577,7 @@ export async function completeProofReview(params: {
     milestoneTitle: milestone.title,
     milestoneDescription: milestone.description,
     proofContent: latestProof.content,
-    supplementalTexts,
+    supplementalTexts: [...priorProofTexts, ...supplementalTexts],
     reviewRequests: infoRequests.map((request) => ({
       id: request.id,
       status: request.status,

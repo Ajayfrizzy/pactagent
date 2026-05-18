@@ -44,6 +44,7 @@ export type NervosGrantSourceMetadata = {
     percentage: string | null;
     amountUsd: string | null;
     label: string | null;
+    amountShannons: string | null;
   };
   milestones: Array<{
     index: number;
@@ -310,24 +311,6 @@ function buildImportedMilestones(params: {
   }
 
   const drafts: ImportedGrantMilestoneDraft[] = [];
-  if (params.upfrontPercentage || params.upfrontAmountUsd) {
-    const budgetLabel = [params.upfrontAmountUsd, params.upfrontPercentage].filter(Boolean).join(' · ');
-    drafts.push({
-      title: 'Grant Commencement',
-      description: buildMilestoneDescription({
-        title: 'Grant Commencement',
-        description:
-          'Kickoff release tied to grant commencement before the numbered delivery milestones begin. Reviewers can use this checkpoint for sponsor acceptance, setup confirmation, or any start-of-grant prerequisites.',
-        budgetAmountUsd: params.upfrontAmountUsd,
-        budgetPercent: params.upfrontPercentage,
-        kind: 'COMMENCEMENT',
-      }),
-      amountCkb: '',
-      sourceBudgetLabel: budgetLabel || undefined,
-      kind: 'COMMENCEMENT',
-    });
-  }
-
   for (const milestone of milestones) {
     const amountUsd = budgetByMilestoneIndex.get(milestone.index) || null;
     const sourceBudgetLabel = [amountUsd, milestone.budgetPercent].filter(Boolean).join(' · ');
@@ -358,6 +341,7 @@ function inferUpfrontPayment(deliverablesSection: string, budgetBreakdown: Array
     percentage: commencementPercent || upfrontFromText?.[1] || null,
     amountUsd: commencementEntry?.amount || null,
     label: commencementEntry?.label || null,
+    amountShannons: null,
   };
 }
 
@@ -380,6 +364,7 @@ function buildSourceMetadata(params: {
     percentage: string | null;
     amountUsd: string | null;
     label: string | null;
+    amountShannons: string | null;
   };
   budgetBreakdown: Array<{ label: string; amount: string }>;
   milestones: ImportedGrantMilestoneDraft[];

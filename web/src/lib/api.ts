@@ -383,11 +383,12 @@ export async function fundAgreement(
     outputIndex: number;
     escrowCellData: string;
     refundTimeoutBlock: string;
-  }>
+  }>,
+  commencementOutputIndex?: number,
 ) {
   return request<any>(`/agreements/${id}/fund`, {
     method: 'POST',
-    body: JSON.stringify({ txHash, milestoneOutputs }),
+    body: JSON.stringify({ txHash, milestoneOutputs, commencementOutputIndex }),
   });
 }
 

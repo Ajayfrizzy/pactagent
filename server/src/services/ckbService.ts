@@ -224,6 +224,36 @@ export async function inspectTransactionOutputsToAddress(params: {
   };
 }
 
+export async function inspectTransactionOutputsToScript(params: {
+  txHash: string;
+  script: {
+    codeHash: string;
+    hashType: string;
+    args: string;
+  };
+}) {
+  const tx = await rpcCall<CkbTransactionResponse>('get_transaction', [params.txHash]);
+  const outputs = tx?.transaction?.outputs ?? [];
+  const outputsData = tx?.transaction?.outputs_data ?? tx?.transaction?.outputsData ?? [];
+
+  const matchingOutputs = outputs
+    .map((output, index) => ({ output, index }))
+    .filter(({ output }) => output?.lock && scriptsEqual(output.lock, params.script))
+    .map(({ output, index }) => ({
+      index,
+      capacity: parseCapacity(output.capacity),
+      outputData: outputsData[index] || null,
+    }));
+
+  return {
+    foundTransaction: Boolean(tx?.transaction),
+    status: tx?.tx_status?.status ?? ('unknown' as CkbTxStatus),
+    blockHash: tx?.tx_status?.block_hash ?? null,
+    matchingOutputs,
+    totalMatchedCapacity: matchingOutputs.reduce((sum, item) => sum + item.capacity, BigInt(0)),
+  };
+}
+
 export async function findSpendingTransactionForOutPoint(params: {
   txHash: string;
   index: number;

@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  getImportedCommencementDetails,
   buildRefundConsensusState,
   buildSplitConsensusState,
   matchOnchainFundingOutputsToMilestones,
-  shouldAutoReleaseCurrentCommencementMilestone,
 } from './agreementService';
 
 const clientAddress = 'ckt1-client';
@@ -131,25 +131,17 @@ test('matchOnchainFundingOutputsToMilestones pairs milestones with final on-chai
   ]);
 });
 
-test('shouldAutoReleaseCurrentCommencementMilestone returns true for imported commencement checkpoints', () => {
-  const result = shouldAutoReleaseCurrentCommencementMilestone({
-    milestones: [
-      {
-        sortOrder: 1,
-        status: 'ACTIVE',
-        title: 'Grant Commencement',
-        description: 'This imported kickoff release represents the source thread’s upfront commencement payment before the main delivery milestones begin.',
-      },
-      {
-        sortOrder: 2,
-        status: 'PENDING',
-        title: 'Milestone 1',
-        description: 'Normal delivery milestone',
-      },
-    ],
+test('getImportedCommencementDetails returns imported commencement metadata when present', () => {
+  const result = getImportedCommencementDetails({
     source: {
       externalMetadataJson: JSON.stringify({
         parser: 'NERVOS_GRANT_THREAD_V1',
+        upfrontPayment: {
+          amountUsd: '$1,500',
+          percentage: '10%',
+          label: 'Grant Commencement (10%)',
+          amountShannons: '12300000000',
+        },
         milestones: [
           { index: 0, title: 'Grant Commencement', kind: 'COMMENCEMENT' },
           { index: 1, title: 'Milestone 1', kind: 'DELIVERABLE' },
@@ -158,19 +150,17 @@ test('shouldAutoReleaseCurrentCommencementMilestone returns true for imported co
     },
   });
 
-  assert.equal(result, true);
+  assert.deepEqual(result, {
+    title: 'Grant Commencement',
+    amountUsd: '$1,500',
+    percentage: '10%',
+    label: 'Grant Commencement (10%)',
+    amountShannons: '12300000000',
+  });
 });
 
-test('shouldAutoReleaseCurrentCommencementMilestone returns false for regular milestones', () => {
-  const result = shouldAutoReleaseCurrentCommencementMilestone({
-    milestones: [
-      {
-        sortOrder: 1,
-        status: 'ACTIVE',
-        title: 'Milestone 1',
-        description: 'Normal delivery milestone',
-      },
-    ],
+test('getImportedCommencementDetails returns null for regular imported milestones', () => {
+  const result = getImportedCommencementDetails({
     source: {
       externalMetadataJson: JSON.stringify({
         parser: 'NERVOS_GRANT_THREAD_V1',
@@ -181,5 +171,5 @@ test('shouldAutoReleaseCurrentCommencementMilestone returns false for regular mi
     },
   });
 
-  assert.equal(result, false);
+  assert.equal(result, null);
 });

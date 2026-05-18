@@ -54,6 +54,14 @@ const actionRateLimit = createRateLimit({
 const MAX_ARTIFACT_SIZE_BYTES = 1024 * 1024;
 const MAX_ARTIFACT_SIZE_LABEL = '1 MB';
 
+function isSponsorControlledImportedAgreement(agreement: {
+  source?: {
+    sourceType?: string | null;
+  } | null;
+}) {
+  return agreement.source?.sourceType === 'BOUNTY' || agreement.source?.sourceType === 'DAO';
+}
+
 type AgreementParticipantRecord = NonNullable<
   Awaited<ReturnType<typeof agreementService.getAgreementParticipantById>>
 >;
@@ -124,6 +132,7 @@ const fundSchema = z.object({
       refundTimeoutBlock: z.string().min(1),
     })
   ).optional(),
+  commencementOutputIndex: z.number().int().min(0).optional(),
 });
 
 const submitProofSchema = z.object({
@@ -692,10 +701,10 @@ router.post('/:id/fund', actionRateLimit, async (req: Request, res: Response) =>
       return res.status(403).json({ success: false, error: 'Only the client can fund this agreement' });
     }
 
-    const { txHash, milestoneOutputs } = fundSchema.parse(req.body);
+    const { txHash, milestoneOutputs, commencementOutputIndex } = fundSchema.parse(req.body);
     const agreement = result.agreement.id && (await agreementService.getAgreementById(req.params.id));
     const updated = agreement?.escrowModel === 'ONCHAIN_LOCK'
-      ? await agreementService.registerOnchainFundingIntent(req.params.id, txHash, milestoneOutputs || [])
+      ? await agreementService.registerOnchainFundingIntent(req.params.id, txHash, milestoneOutputs || [], commencementOutputIndex)
       : await agreementService.fundAgreement(req.params.id, txHash);
     await createAuditLog({
       agreementId: req.params.id,
@@ -725,7 +734,7 @@ router.post('/:id/onchain-resolution', actionRateLimit, async (req: Request, res
     const agreement = result.agreement;
     const isClient = agreement.clientAddress === authAddress;
     const isWorker = agreement.workerAddress === authAddress;
-    const isImportedBounty = agreement.source?.sourceType === 'BOUNTY';
+    const isSponsorControlledImport = isSponsorControlledImportedAgreement(agreement);
 
     if (agreement.escrowModel !== 'ONCHAIN_LOCK') {
       return res.status(400).json({ success: false, error: 'This agreement does not use the on-chain lock settlement path' });
@@ -739,8 +748,8 @@ router.post('/:id/onchain-resolution', actionRateLimit, async (req: Request, res
       return res.status(403).json({ success: false, error: 'Only the worker or client timeout path can submit an on-chain refund resolution.' });
     }
 
-    if (direction === 'REFUND' && isImportedBounty) {
-      return res.status(409).json({ success: false, error: 'Imported bounty milestones do not support worker refund settlement.' });
+    if (direction === 'REFUND' && isSponsorControlledImport) {
+      return res.status(409).json({ success: false, error: 'Imported grant milestones do not support worker refund settlement.' });
     }
 
     const updated = await agreementService.recordOnchainResolutionIntent({
@@ -887,10 +896,10 @@ router.post('/:id/open-dispute', actionRateLimit, async (req: Request, res: Resp
       return res.status(403).json({ success: false, error: 'Authenticated wallet must match the dispute opener' });
     }
 
-    if (result.agreement.source?.sourceType === 'BOUNTY') {
+    if (isSponsorControlledImportedAgreement(result.agreement)) {
       return res.status(409).json({
         success: false,
-        error: 'Imported bounty milestones do not use disputes. Use reviewer follow-up messages instead.',
+        error: 'Imported grant milestones do not use disputes. Use reviewer follow-up messages instead.',
       });
     }
 
@@ -956,10 +965,10 @@ router.post('/:id/dispute/evidence', actionRateLimit, async (req: Request, res: 
       return res.status(403).json({ success: false, error: 'Authenticated wallet must match the evidence submitter' });
     }
 
-    if (result.agreement.source?.sourceType === 'BOUNTY') {
+    if (isSponsorControlledImportedAgreement(result.agreement)) {
       return res.status(409).json({
         success: false,
-        error: 'Imported bounty milestones do not use the dispute evidence workspace.',
+        error: 'Imported grant milestones do not use the dispute evidence workspace.',
       });
     }
 
@@ -1024,10 +1033,10 @@ router.post('/:id/dispute/split-offer', actionRateLimit, async (req: Request, re
       return res.status(403).json({ success: false, error: 'Authenticated wallet must match the split settlement actor' });
     }
 
-    if (result.agreement.source?.sourceType === 'BOUNTY') {
+    if (isSponsorControlledImportedAgreement(result.agreement)) {
       return res.status(409).json({
         success: false,
-        error: 'Imported bounty milestones do not support split settlement disputes.',
+        error: 'Imported grant milestones do not support split settlement disputes.',
       });
     }
 
@@ -1057,10 +1066,10 @@ router.post('/:id/dispute/refund-consent', actionRateLimit, async (req: Request,
       return res.status(403).json({ success: false, error: 'Authenticated wallet must match the refund approver' });
     }
 
-    if (result.agreement.source?.sourceType === 'BOUNTY') {
+    if (isSponsorControlledImportedAgreement(result.agreement)) {
       return res.status(409).json({
         success: false,
-        error: 'Imported bounty milestones do not support refund settlement.',
+        error: 'Imported grant milestones do not support refund settlement.',
       });
     }
 

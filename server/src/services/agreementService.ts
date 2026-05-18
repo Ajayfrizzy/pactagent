@@ -23,6 +23,7 @@ import {
   isOnchainEscrowReady,
 } from './onchainEscrowService';
 import {
+  parseProofBundle,
   type ArtifactInput,
   type DisputeResolutionChoice,
   computeContentHash,
@@ -177,11 +178,19 @@ type ImportedSourceMetadataMilestone = {
   index?: number;
   title?: string | null;
   kind?: string | null;
+  budgetAmountUsd?: string | null;
+  budgetPercent?: string | null;
 };
 
 type ImportedSourceMetadata = {
   parser?: string | null;
   milestones?: ImportedSourceMetadataMilestone[] | null;
+  upfrontPayment?: {
+    percentage?: string | null;
+    amountUsd?: string | null;
+    label?: string | null;
+    amountShannons?: string | null;
+  } | null;
 };
 
 function canTransitionAgreement(from: string, to: string): boolean {
@@ -958,62 +967,48 @@ function normalizeLooseText(value: string | null | undefined) {
   return (value || '').trim().toLowerCase();
 }
 
-function milestoneLooksLikeCommencement(milestone: {
-  title?: string | null;
-  description?: string | null;
-}) {
-  const title = normalizeLooseText(milestone.title);
-  const description = normalizeLooseText(milestone.description);
-
-  return title.includes('commencement')
-    || description.includes('upfront commencement payment')
-    || description.includes('kickoff release');
-}
-
-function getImportedCommencementMilestoneSortOrder(agreement: {
+function getImportedSourceMetadata(agreement: {
   source?: {
     externalMetadataJson?: string | null;
   } | null;
 }) {
-  const metadata = safeParseSourceMetadata<ImportedSourceMetadata>(agreement.source?.externalMetadataJson);
-  if (metadata?.parser !== 'NERVOS_GRANT_THREAD_V1' || !Array.isArray(metadata.milestones)) {
+  return safeParseSourceMetadata<ImportedSourceMetadata>(agreement.source?.externalMetadataJson);
+}
+
+export function getImportedCommencementDetails(agreement: {
+  source?: {
+    externalMetadataJson?: string | null;
+  } | null;
+}) {
+  const metadata = getImportedSourceMetadata(agreement);
+  if (metadata?.parser !== 'NERVOS_GRANT_THREAD_V1') {
     return null;
   }
 
-  const commencementIndex = metadata.milestones.findIndex((milestone) => milestone?.kind === 'COMMENCEMENT');
-  return commencementIndex >= 0 ? commencementIndex + 1 : null;
-}
+  const commencementEntry = Array.isArray(metadata.milestones)
+    ? metadata.milestones.find((milestone) => milestone?.kind === 'COMMENCEMENT')
+    : null;
+  const upfrontPayment = metadata.upfrontPayment || null;
 
-export function shouldAutoReleaseCurrentCommencementMilestone(agreement: {
-  milestones: Array<{
-    sortOrder: number;
-    status: string;
-    title?: string | null;
-    description?: string | null;
-  }>;
-  source?: {
-    externalMetadataJson?: string | null;
-  } | null;
-}) {
-  const milestone = getCurrentMilestoneFromAgreement(agreement);
-  if (!milestone) {
-    return false;
+  if (!commencementEntry && !upfrontPayment) {
+    return null;
   }
 
-  const commencementSortOrder = getImportedCommencementMilestoneSortOrder(agreement);
-  if (!commencementSortOrder || milestone.sortOrder !== commencementSortOrder) {
-    return false;
-  }
-
-  return milestoneLooksLikeCommencement(milestone);
+  return {
+    title: commencementEntry?.title || 'Grant Commencement',
+    amountUsd: commencementEntry?.budgetAmountUsd || upfrontPayment?.amountUsd || null,
+    percentage: commencementEntry?.budgetPercent || upfrontPayment?.percentage || null,
+    label: upfrontPayment?.label || null,
+    amountShannons: upfrontPayment?.amountShannons || null,
+  };
 }
 
-function isImportedBountyAgreement(agreement: {
+export function isSponsorControlledImportedAgreement(agreement: {
   source?: {
     sourceType?: string | null;
   } | null;
 }) {
-  return agreement.source?.sourceType === 'BOUNTY';
+  return agreement.source?.sourceType === 'BOUNTY' || agreement.source?.sourceType === 'DAO';
 }
 
 async function sendApprovedMilestonePayout(params: {
@@ -1149,6 +1144,109 @@ async function sendApprovedMilestonePayout(params: {
       amount: milestone.amount,
       route: 'CKB',
       trigger: params.trigger,
+    },
+  });
+
+  return getAgreementById(params.agreementId);
+}
+
+async function sendImportedCommencementPayout(params: {
+  agreementId: string;
+  amount: string;
+  title?: string | null;
+}) {
+  const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(params.agreementId));
+  const existingSettlement = agreement.settlements.find(
+    (settlement: any) =>
+      settlement.direction === 'PAYOUT' &&
+      settlement.milestoneId == null &&
+      settlement.amount === params.amount &&
+      ['PENDING', 'CONFIRMED'].includes(settlement.status),
+  );
+
+  if (existingSettlement) {
+    return existingSettlement.status === 'PENDING'
+      ? confirmPendingSettlementIfReady(params.agreementId)
+      : getAgreementById(params.agreementId);
+  }
+
+  await createLog({
+    agreementId: params.agreementId,
+    level: 'INFO',
+    eventType: 'RELEASE_PREPARED',
+    message: params.title
+      ? `Preparing immediate commencement payout: ${params.title}`
+      : 'Preparing immediate commencement payout',
+    metadata: {
+      amount: params.amount,
+      trigger: 'COMMENCEMENT_AUTO_RELEASE',
+      payoutNetwork: agreement.payoutNetwork,
+    },
+  });
+
+  if (agreement.payoutNetwork === 'FIBER' || agreement.releaseMode === 'PARTIAL') {
+    const fiberResult = await attemptFiberPayout(
+      params.agreementId,
+      agreement.workerFiberPubkey || agreement.workerAddress,
+      params.amount,
+    );
+
+    await createLog({
+      agreementId: params.agreementId,
+      level: fiberResult.route === 'FIBER' ? 'SUCCESS' : 'INFO',
+      eventType: 'RELEASE_SENT',
+      message:
+        fiberResult.route === 'FIBER'
+          ? 'Commencement payout released via Fiber'
+          : 'Commencement payout released on CKB fallback',
+      metadata: {
+        amount: params.amount,
+        trigger: 'COMMENCEMENT_AUTO_RELEASE',
+        ...fiberResult,
+      },
+    });
+
+    if (fiberResult.route === 'FIBER' && fiberResult.paymentReference) {
+      await createSettlementRecord({
+        agreementId: params.agreementId,
+        milestoneId: null,
+        direction: 'PAYOUT',
+        network: 'FIBER',
+        amount: params.amount,
+        paymentReference: fiberResult.paymentReference,
+        status: 'CONFIRMED',
+        confirmedAt: new Date(),
+      });
+      return getAgreementById(params.agreementId);
+    }
+  }
+
+  const payoutTxHash = await sendTreasuryTransfer(agreement.workerAddress, params.amount);
+  await createSettlementRecord({
+    agreementId: params.agreementId,
+    milestoneId: null,
+    direction: 'PAYOUT',
+    network: 'CKB',
+    amount: params.amount,
+    txHash: payoutTxHash,
+    status: 'PENDING',
+  });
+
+  await setAgreementSettlementState(params.agreementId, {
+    settlementStatus: 'PAYOUT_PENDING',
+    ckbTxHashRelease: payoutTxHash,
+    lastSettlementError: null,
+  });
+
+  await createLog({
+    agreementId: params.agreementId,
+    level: 'INFO',
+    eventType: 'RELEASE_SENT',
+    message: 'Commencement payout prepared on CKB',
+    metadata: {
+      amount: params.amount,
+      txHash: payoutTxHash,
+      trigger: 'COMMENCEMENT_AUTO_RELEASE',
     },
   });
 
@@ -1957,11 +2055,18 @@ export async function createAgreement(data: {
     throw new Error('At least one milestone is required');
   }
 
+  const sourceMetadata = data.sourceMetadata
+    ? safeParseSourceMetadata<ImportedSourceMetadata>(data.sourceMetadata.externalMetadataJson)
+    : null;
+  const commencementAmount = sourceMetadata?.upfrontPayment?.amountShannons
+    ? BigInt(sourceMetadata.upfrontPayment.amountShannons)
+    : BigInt(0);
+
   const clientAddress = normalizeAddress(data.clientAddress);
   const workerAddress = normalizeAddress(data.workerAddress);
 
   const totalAmount = data.milestones
-    .reduce((sum, milestone) => sum + BigInt(milestone.amount), BigInt(0))
+    .reduce((sum, milestone) => sum + BigInt(milestone.amount), commencementAmount)
     .toString();
   const agreementId = uuid();
   const normalizedMilestones = data.milestones.map((milestone, index) => ({
@@ -2184,7 +2289,8 @@ export async function registerOnchainFundingIntent(
     outputIndex: number;
     escrowCellData: string;
     refundTimeoutBlock: string;
-  }>
+  }>,
+  commencementOutputIndex?: number | null,
 ) {
   const agreement = await fetchAgreementOrThrow(agreementId);
 
@@ -2257,6 +2363,7 @@ export async function registerOnchainFundingIntent(
         milestoneId: item.milestoneId,
         outputIndex: item.outputIndex,
       })),
+      commencementOutputIndex: commencementOutputIndex ?? null,
     },
   });
 
@@ -2284,6 +2391,17 @@ export async function confirmFundingIfReady(agreementId: string) {
           toAddress: agreement.escrowAddress || await getTreasuryAddress(),
           expectedAmount: agreement.amount,
         });
+  const importedCommencement = getImportedCommencementDetails(agreement);
+  const commencementAmount = importedCommencement?.amountShannons
+    ? BigInt(importedCommencement.amountShannons)
+    : BigInt(0);
+  const commencementVerification =
+    agreement.escrowModel === 'ONCHAIN_LOCK' && commencementAmount > BigInt(0)
+      ? await inspectTransactionOutputsToAddress({
+          txHash: agreement.ckbTxHashFund,
+          toAddress: agreement.workerAddress,
+        })
+      : null;
 
   if (!verification.foundTransaction || verification.status === 'pending' || verification.status === 'proposed') {
     return null;
@@ -2314,7 +2432,15 @@ export async function confirmFundingIfReady(agreementId: string) {
     agreement.escrowModel === 'ONCHAIN_LOCK'
       ? verification.status === 'committed' &&
         'totalMatchedCapacity' in verification &&
-        verification.totalMatchedCapacity >= BigInt(agreement.amount) &&
+        verification.totalMatchedCapacity >= (BigInt(agreement.amount) - commencementAmount) &&
+        (
+          commencementAmount === BigInt(0)
+          || Boolean(
+            commencementVerification &&
+            commencementVerification.status === 'committed' &&
+            commencementVerification.matchingOutputs.some((output) => output.capacity >= commencementAmount),
+          )
+        ) &&
         matchedMilestoneOutputs.length === agreement.milestones.length &&
         matchedMilestoneOutputs.every(Boolean)
       : verification.status === 'committed' &&
@@ -2354,16 +2480,6 @@ export async function confirmFundingIfReady(agreementId: string) {
 
     await transitionStatus(agreementId, 'FUNDED');
     const activeMilestone = await activateNextMilestone(agreementId);
-    const shouldAutoReleaseCommencement = activeMilestone
-      && shouldAutoReleaseCurrentCommencementMilestone({
-        milestones: agreement.milestones.map((milestone: any) => ({
-          sortOrder: milestone.sortOrder,
-          status: milestone.id === activeMilestone.id ? 'ACTIVE' : milestone.status,
-          title: milestone.title,
-          description: milestone.description,
-        })),
-        source: agreement.source,
-      });
 
     await createLog({
       agreementId,
@@ -2375,29 +2491,53 @@ export async function confirmFundingIfReady(agreementId: string) {
         blockHash: verification.blockHash,
         activeMilestoneId: activeMilestone?.id ?? null,
         activeMilestoneTitle: activeMilestone?.title ?? null,
+        commencementAmount: commencementAmount > BigInt(0) ? commencementAmount.toString() : null,
         matchedOutputIndexes: matchedMilestoneOutputs.map((output) => output?.outputIndex ?? null),
       },
     });
 
-    if (shouldAutoReleaseCommencement && activeMilestone) {
-      await transitionMilestoneStatus(activeMilestone.id, 'APPROVED');
-      await transitionStatus(agreementId, 'APPROVED');
-      await createLog({
-        agreementId,
-        level: 'INFO',
-        eventType: 'MILESTONE_APPROVED',
-        message: `Commencement payment approved automatically after funding: ${activeMilestone.title}`,
-        metadata: {
-          milestoneId: activeMilestone.id,
-          milestoneTitle: activeMilestone.title,
-          trigger: 'COMMENCEMENT_AUTO_RELEASE',
-        },
-      });
+    if (commencementAmount > BigInt(0)) {
+      const existingCommencementPayout = agreement.settlements.find(
+        (settlement: any) =>
+          settlement.direction === 'PAYOUT' &&
+          settlement.milestoneId == null &&
+          settlement.amount === commencementAmount.toString() &&
+          settlement.status === 'CONFIRMED',
+      );
 
-      await sendApprovedMilestonePayout({
+      if (!existingCommencementPayout) {
+        await createSettlementRecord({
+          agreementId,
+          milestoneId: null,
+          direction: 'PAYOUT',
+          network: 'CKB',
+          amount: commencementAmount.toString(),
+          txHash: agreement.ckbTxHashFund,
+          status: 'CONFIRMED',
+          confirmedAt,
+        });
+
+        await createLog({
+          agreementId,
+          level: 'SUCCESS',
+          eventType: 'SETTLEMENT_CONFIRMED',
+          message: importedCommencement?.title
+            ? `${importedCommencement.title} released immediately after funding confirmation`
+            : 'Commencement payout released immediately after funding confirmation',
+          metadata: {
+            amount: commencementAmount.toString(),
+            txHash: agreement.ckbTxHashFund,
+            trigger: 'COMMENCEMENT_AUTO_RELEASE',
+          },
+        });
+      }
+    }
+
+    if (agreement.escrowModel !== 'ONCHAIN_LOCK' && commencementAmount > BigInt(0)) {
+      await sendImportedCommencementPayout({
         agreementId,
-        milestoneId: activeMilestone.id,
-        trigger: 'COMMENCEMENT_AUTO_RELEASE',
+        amount: commencementAmount.toString(),
+        title: importedCommencement?.title || null,
       });
     }
 
@@ -2467,11 +2607,34 @@ export async function submitProof(
     throw new Error('Proof can only be submitted for the active milestone or to revise a requested update');
   }
 
+  const latestExistingProof = milestone.proofs?.[0] || null;
+  const previousProof = latestExistingProof?.content
+    ? parseProofBundle(latestExistingProof.content)
+    : null;
+  const mergedArtifacts = new Map<string, ArtifactInput>();
+  if (previousProof) {
+    previousProof.artifacts.forEach((artifact) => {
+      mergedArtifacts.set(artifact.id, {
+        id: artifact.id,
+        kind: artifact.kind,
+        label: artifact.label,
+        mimeType: artifact.mimeType || undefined,
+        content: artifact.content,
+        sizeBytes: artifact.sizeBytes || undefined,
+      });
+    });
+  }
+  (options?.artifacts || []).forEach((artifact, index) => {
+    mergedArtifacts.set(artifact.id || `${artifact.kind}-${index}`, artifact);
+  });
+
+  const mergedPrimaryText = content.trim() || previousProof?.primaryText || '';
+  const mergedSummary = options?.summary?.trim() || previousProof?.summary || '';
   const revision = (milestone.proofs?.length || 0) + 1;
   const serializedContent = serializeProofBundle({
-    summary: options?.summary,
-    primaryText: content,
-    artifacts: options?.artifacts,
+    summary: mergedSummary,
+    primaryText: mergedPrimaryText,
+    artifacts: Array.from(mergedArtifacts.values()),
     revision,
   });
   const hash = contentHash || computeContentHash(serializedContent);
@@ -2529,8 +2692,8 @@ export async function recordOnchainResolutionIntent(params: {
     throw new Error('This agreement is not configured for on-chain lock settlement');
   }
 
-  if (params.direction === 'REFUND' && isImportedBountyAgreement(agreement)) {
-    throw new Error('Imported bounty milestones cannot be refunded through the worker settlement path.');
+  if (params.direction === 'REFUND' && isSponsorControlledImportedAgreement(agreement)) {
+    throw new Error('Imported grant milestones cannot be refunded through the worker settlement path.');
   }
 
   if (params.direction === 'PAYOUT') {
@@ -2585,8 +2748,8 @@ export async function openDispute(
   }
 ) {
   const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
-  if (isImportedBountyAgreement(agreement)) {
-    throw new Error('Imported bounty milestones use reviewer follow-up requests instead of disputes.');
+  if (isSponsorControlledImportedAgreement(agreement)) {
+    throw new Error('Imported grant milestones use reviewer follow-up requests instead of disputes.');
   }
   const milestone = agreement.milestones.find((item: any) => item.id === milestoneId);
 
@@ -2658,8 +2821,8 @@ export async function recordMutualRefundConsent(
   actorAddress: string
 ) {
   const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
-  if (isImportedBountyAgreement(agreement)) {
-    throw new Error('Imported bounty milestones do not support mutual refund settlement.');
+  if (isSponsorControlledImportedAgreement(agreement)) {
+    throw new Error('Imported grant milestones do not support mutual refund settlement.');
   }
   const milestone = getCurrentMilestoneFromAgreement(agreement);
 
@@ -2768,8 +2931,8 @@ export async function addDisputeEvidence(
   }
 ) {
   const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
-  if (isImportedBountyAgreement(agreement)) {
-    throw new Error('Imported bounty milestones do not use the dispute evidence workspace.');
+  if (isSponsorControlledImportedAgreement(agreement)) {
+    throw new Error('Imported grant milestones do not use the dispute evidence workspace.');
   }
   const dispute = agreement.disputes.find((item: any) => item.id === disputeId);
 
@@ -2891,8 +3054,8 @@ export async function recordSplitSettlementConsent(
   workerAmount: string
 ) {
   const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
-  if (isImportedBountyAgreement(agreement)) {
-    throw new Error('Imported bounty milestones do not support split dispute settlement.');
+  if (isSponsorControlledImportedAgreement(agreement)) {
+    throw new Error('Imported grant milestones do not support split dispute settlement.');
   }
   const milestone = getCurrentMilestoneFromAgreement(agreement);
 
@@ -2995,8 +3158,8 @@ export async function settleCurrentMilestoneSplit(
   workerAmount: string
 ) {
   const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
-  if (isImportedBountyAgreement(agreement)) {
-    throw new Error('Imported bounty milestones do not support split dispute settlement.');
+  if (isSponsorControlledImportedAgreement(agreement)) {
+    throw new Error('Imported grant milestones do not support split dispute settlement.');
   }
   const milestone = getCurrentMilestoneFromAgreement(agreement);
 
@@ -3068,8 +3231,8 @@ export async function settleCurrentMilestoneSplit(
 
 export async function refundCurrentMilestone(agreementId: string) {
   const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
-  if (isImportedBountyAgreement(agreement)) {
-    throw new Error('Imported bounty milestones cannot be refunded.');
+  if (isSponsorControlledImportedAgreement(agreement)) {
+    throw new Error('Imported grant milestones cannot be refunded.');
   }
   const milestone = getCurrentMilestoneFromAgreement(agreement);
 
@@ -3259,6 +3422,22 @@ export async function confirmPendingSettlementIfReady(agreementId: string) {
     });
 
     if (pendingSettlement.direction === 'PAYOUT') {
+      if (!pendingSettlement.milestoneId) {
+        await createLog({
+          agreementId,
+          level: 'SUCCESS',
+          eventType: 'SETTLEMENT_CONFIRMED',
+          message: 'Commencement payout confirmed on-chain',
+          metadata: {
+            settlementId: pendingSettlement.id,
+            txHash: pendingSettlement.txHash,
+            blockHash: verification.blockHash,
+            trigger: 'COMMENCEMENT_AUTO_RELEASE',
+          },
+        });
+        return getAgreementById(agreementId);
+      }
+
       const updatedAgreement = await completeApprovedMilestone(agreementId);
       await createLog({
         agreementId,

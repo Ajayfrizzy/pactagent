@@ -397,6 +397,56 @@ export default function ImportCkboostPage() {
   const helperClass = 'mt-1 text-xs text-gray-500';
   const fieldErrorClass = 'mt-1 text-xs text-red-300';
   const totalGrantCkb = milestones.reduce((sum, milestone) => sum + (Number(milestone.amountCkb) || 0), 0);
+  const fieldErrors = {
+    campaignId: !form.campaignId.trim() ? 'Campaign ID is required.' : null,
+    campaignTitle: !form.campaignTitle.trim() ? 'Campaign title is required.' : null,
+    campaignUrl:
+      form.campaignUrl.trim() && !isValidHttpUrl(form.campaignUrl)
+        ? 'Enter a valid campaign URL.'
+        : !form.campaignUrl.trim()
+          ? 'Campaign URL is required.'
+          : null,
+    governanceThreadUrl:
+      form.governanceThreadUrl.trim() && !isValidHttpUrl(form.governanceThreadUrl)
+        ? 'Enter a valid governance thread URL.'
+        : null,
+    contributorWalletAddress:
+      !form.contributorWalletAddress.trim()
+        ? 'Contributor wallet address is required.'
+        : !isLikelyCkbAddress(form.contributorWalletAddress)
+          ? 'Use a valid CKB address starting with ckt1 or ckb1.'
+          : null,
+    contributorProfileUrl:
+      form.contributorProfileUrl.trim() && !isValidHttpUrl(form.contributorProfileUrl)
+        ? 'Enter a valid contributor profile URL.'
+        : null,
+    approvedProofUrl:
+      form.approvedProofUrl.trim() && !isValidHttpUrl(form.approvedProofUrl)
+        ? 'Enter a valid approved proof URL.'
+        : null,
+    sponsorWalletAddress:
+      form.sponsorWalletAddress.trim() && !isLikelyCkbAddress(form.sponsorWalletAddress)
+        ? 'Enter a valid sponsor wallet address or leave it blank.'
+        : null,
+    agreementDescription:
+      !(form.agreementDescription.trim() || form.campaignDescription.trim())
+        ? 'Add an agreement description or campaign description so the scope is reviewable.'
+        : null,
+    workerFiberPubkey:
+      form.payoutNetwork === 'FIBER' && !form.workerFiberPubkey.trim()
+        ? 'Fiber payouts require the contributor Fiber public key.'
+        : form.workerFiberPubkey.trim() && !isValidFiberPublicKey(form.workerFiberPubkey)
+          ? 'Use a compressed 33-byte or uncompressed 65-byte Fiber public key.'
+          : null,
+    deadlineDays:
+      !Number.isInteger(Number(form.deadlineDays)) || Number(form.deadlineDays) < 1
+        ? 'Use a whole number of days, for example 7 or 30.'
+        : null,
+    disputeWindowHours:
+      !Number.isInteger(Number(form.disputeWindowHours)) || Number(form.disputeWindowHours) < 1
+        ? 'Use a whole number of hours, for example 24 or 48.'
+        : null,
+  };
   const milestoneErrors = milestones.map((milestone) => ({
     title: !milestone.title.trim() ? 'Give this deliverable a short milestone name.' : null,
     description: !milestone.description.trim() ? 'Describe what the contributor must deliver and what should be reviewed.' : null,
@@ -518,12 +568,12 @@ export default function ImportCkboostPage() {
                     </div>
                     <div>
                       <input
-                        className={inputClass}
+                        className={`${inputClass} ${shouldShowFieldError(form.governanceThreadUrl, fieldErrors.governanceThreadUrl) ? errorInputClass : ''}`}
                         value={form.governanceThreadUrl}
                         onChange={(e) => updateField('governanceThreadUrl', e.target.value)}
                         placeholder="https://forum.example.com/t/campaign-42"
                       />
-                      <p className={helperClass}>Optional forum or governance thread linked to the campaign.</p>
+                      {shouldShowFieldError(form.governanceThreadUrl, fieldErrors.governanceThreadUrl) ? <p className={fieldErrorClass}>{fieldErrors.governanceThreadUrl}</p> : <p className={helperClass}>Optional forum or governance thread linked to the campaign.</p>}
                     </div>
                   </div>
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
@@ -538,12 +588,12 @@ export default function ImportCkboostPage() {
                     </div>
                     <div>
                       <input
-                        className={inputClass}
+                        className={`${inputClass} ${shouldShowFieldError(form.sponsorWalletAddress, fieldErrors.sponsorWalletAddress) ? errorInputClass : ''}`}
                         value={form.sponsorWalletAddress}
                         onChange={(e) => updateField('sponsorWalletAddress', e.target.value)}
                         placeholder={walletAddress || 'ckt1q...'}
                       />
-                      <p className={helperClass}>Optional sponsor wallet. If provided, this becomes the real client address while your connected wallet remains the importer.</p>
+                      {shouldShowFieldError(form.sponsorWalletAddress, fieldErrors.sponsorWalletAddress) ? <p className={fieldErrorClass}>{fieldErrors.sponsorWalletAddress}</p> : <p className={helperClass}>Optional sponsor wallet. If provided, this becomes the real client address while your connected wallet remains the importer.</p>}
                     </div>
                     <div className="md:col-span-2">
                       <input
@@ -607,11 +657,12 @@ export default function ImportCkboostPage() {
                   </div>
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
                     <div>
-                      <input className={inputClass} value={form.contributorWalletAddress} onChange={(e) => updateField('contributorWalletAddress', e.target.value)} placeholder="ckt1q..." />
-                      <p className={helperClass}>This contributor wallet becomes the PactAgent worker address.</p>
+                      <input className={`${inputClass} ${shouldShowFieldError(form.contributorWalletAddress, fieldErrors.contributorWalletAddress) ? errorInputClass : ''}`} value={form.contributorWalletAddress} onChange={(e) => updateField('contributorWalletAddress', e.target.value)} placeholder="ckt1q..." />
+                      {shouldShowFieldError(form.contributorWalletAddress, fieldErrors.contributorWalletAddress) ? <p className={fieldErrorClass}>{fieldErrors.contributorWalletAddress}</p> : <p className={helperClass}>This contributor wallet becomes the PactAgent worker address.</p>}
                     </div>
                     <div>
-                      <input className={inputClass} value={form.contributorProfileUrl} onChange={(e) => updateField('contributorProfileUrl', e.target.value)} placeholder="https://ckboost.netlify.app/profile/ada" />
+                      <input className={`${inputClass} ${shouldShowFieldError(form.contributorProfileUrl, fieldErrors.contributorProfileUrl) ? errorInputClass : ''}`} value={form.contributorProfileUrl} onChange={(e) => updateField('contributorProfileUrl', e.target.value)} placeholder="https://ckboost.netlify.app/profile/ada" />
+                      {shouldShowFieldError(form.contributorProfileUrl, fieldErrors.contributorProfileUrl) ? <p className={fieldErrorClass}>{fieldErrors.contributorProfileUrl}</p> : null}
                     </div>
                   </div>
                 </div>
@@ -624,17 +675,18 @@ export default function ImportCkboostPage() {
                       <p className={helperClass}>Optional. Leave blank to derive a title from the campaign.</p>
                     </div>
                     <div>
-                      <input className={inputClass} value={form.workerFiberPubkey} onChange={(e) => updateField('workerFiberPubkey', e.target.value)} placeholder="02abcd... or 04abcd..." />
-                      <p className={helperClass}>Needed only for Fiber payouts.</p>
+                      <input className={`${inputClass} ${shouldShowFieldError(form.workerFiberPubkey, fieldErrors.workerFiberPubkey) ? errorInputClass : ''}`} value={form.workerFiberPubkey} onChange={(e) => updateField('workerFiberPubkey', e.target.value)} placeholder="02abcd... or 04abcd..." />
+                      {shouldShowFieldError(form.workerFiberPubkey, fieldErrors.workerFiberPubkey) ? <p className={fieldErrorClass}>{fieldErrors.workerFiberPubkey}</p> : <p className={helperClass}>Needed only for Fiber payouts.</p>}
                     </div>
                   </div>
                   <div className="mt-4">
                     <textarea
-                      className={`${inputClass} min-h-24`}
+                      className={`${inputClass} min-h-24 ${shouldShowFieldError(form.agreementDescription, fieldErrors.agreementDescription) ? errorInputClass : ''}`}
                       value={form.agreementDescription}
                       onChange={(e) => updateField('agreementDescription', e.target.value)}
                       placeholder="Define the formal PactAgent grant scope, milestone acceptance criteria, and expected deliverables."
                     />
+                    {shouldShowFieldError(form.agreementDescription, fieldErrors.agreementDescription) ? <p className={fieldErrorClass}>{fieldErrors.agreementDescription}</p> : null}
                   </div>
 
                   <div className="mt-5 rounded-xl border border-agent-border bg-agent-card/50 p-4">
@@ -684,8 +736,8 @@ export default function ImportCkboostPage() {
                               </div>
                             </div>
                             <div>
-                              <input className={`${inputClass} ${shouldShowFieldError(milestone.amountCkb, milestoneErrors[index].amount) ? errorInputClass : ''}`} value={milestone.amountCkb} onChange={(e) => updateMilestone(index, 'amountCkb', e.target.value)} placeholder="120" />
-                              {shouldShowFieldError(milestone.amountCkb, milestoneErrors[index].amount) ? <p className={fieldErrorClass}>{milestoneErrors[index].amount}</p> : null}
+                              <input className={`${inputClass} ${shouldShowFieldError(milestone.amountCkb, milestoneErrors[index].amount) ? errorInputClass : ''}`} value={milestone.amountCkb} onChange={(e) => updateMilestone(index, 'amountCkb', e.target.value)} placeholder={`120 (min ${minimumMilestoneCkb})`} />
+                              {shouldShowFieldError(milestone.amountCkb, milestoneErrors[index].amount) ? <p className={fieldErrorClass}>{milestoneErrors[index].amount}</p> : <p className={helperClass}>Minimum {minimumMilestoneCkb} CKB for the current escrow setup.</p>}
                             </div>
                           </div>
                         </div>
@@ -779,12 +831,12 @@ export default function ImportCkboostPage() {
                     </div>
                     <div className="grid gap-4 md:grid-cols-2">
                       <div>
-                        <input className={inputClass} value={form.deadlineDays} onChange={(e) => updateField('deadlineDays', e.target.value)} placeholder="7" />
-                        <p className={helperClass}>Days until the handoff grant expires.</p>
+                        <input className={`${inputClass} ${shouldShowFieldError(form.deadlineDays, fieldErrors.deadlineDays) ? errorInputClass : ''}`} value={form.deadlineDays} onChange={(e) => updateField('deadlineDays', e.target.value)} placeholder="7" />
+                        {shouldShowFieldError(form.deadlineDays, fieldErrors.deadlineDays) ? <p className={fieldErrorClass}>{fieldErrors.deadlineDays}</p> : <p className={helperClass}>Days until the handoff grant expires.</p>}
                       </div>
                       <div>
-                        <input className={inputClass} value={form.disputeWindowHours} onChange={(e) => updateField('disputeWindowHours', e.target.value)} placeholder="24" />
-                        <p className={helperClass}>Dispute window after each review decision.</p>
+                        <input className={`${inputClass} ${shouldShowFieldError(form.disputeWindowHours, fieldErrors.disputeWindowHours) ? errorInputClass : ''}`} value={form.disputeWindowHours} onChange={(e) => updateField('disputeWindowHours', e.target.value)} placeholder="24" />
+                        {shouldShowFieldError(form.disputeWindowHours, fieldErrors.disputeWindowHours) ? <p className={fieldErrorClass}>{fieldErrors.disputeWindowHours}</p> : <p className={helperClass}>Dispute window after each review decision.</p>}
                       </div>
                     </div>
                   </div>

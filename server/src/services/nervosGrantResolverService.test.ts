@@ -76,13 +76,13 @@ test('buildNervosGrantAutofillFromTopic extracts source fields, commencement pay
   assert.equal(result.sourceReferenceId, '9879');
   assert.equal(result.sponsorName, 'CKB Community Fund DAO');
   assert.equal(result.deadlineDays, '120');
-  assert.equal(result.milestones.length, 5);
-  assert.equal(result.milestones[0]?.kind, 'COMMENCEMENT');
-  assert.equal(result.milestones[0]?.title, 'Grant Commencement');
-  assert.equal(result.milestones[0]?.sourceBudgetLabel, '$1,500 · 10%');
-  assert.equal(result.milestones[1]?.sourceBudgetLabel, '$3,375 · 22.5%');
+  assert.equal(result.milestones.length, 4);
+  assert.equal(result.milestones[0]?.kind, 'DELIVERABLE');
+  assert.equal(result.milestones[0]?.title, 'Mainnet Ready & Hardware-Backed Security');
+  assert.equal(result.milestones[0]?.sourceBudgetLabel, '$3,375 · 22.5%');
   assert.equal(result.sourceMetadata.upfrontPayment.percentage, '10%');
   assert.equal(result.sourceMetadata.upfrontPayment.amountUsd, '$1,500');
+  assert.equal(result.sourceMetadata.upfrontPayment.amountShannons, null);
   assert.equal(result.sourceMetadata.fundingAddress, null);
   assert.equal(result.sourceMetadata.missingFields.includes('fundingAddress'), true);
 });

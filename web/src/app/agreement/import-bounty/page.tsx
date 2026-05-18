@@ -38,6 +38,7 @@ type GrantAutofillMetadata = {
     percentage?: string | null;
     amountUsd?: string | null;
     label?: string | null;
+    amountShannons?: string | null;
   };
   sourceLastSyncedAt?: string;
   missingFields?: string[];
@@ -440,6 +441,12 @@ export default function ImportBountyPage() {
       }));
       setGrantAutofillMetadata(metadata);
       const quote = await loadCkbPrice();
+      if (metadata?.upfrontPayment && quote) {
+        const commencementEstimate = estimateCkbFromQuote(parseUsdAmount(metadata.upfrontPayment.amountUsd), quote);
+        metadata.upfrontPayment.amountShannons = commencementEstimate
+          ? ckbToShannons(formatEstimatedAmountInput(commencementEstimate)).toString()
+          : null;
+      }
       const milestonesWithEstimates = quote
         ? importedMilestones.map((milestone) => {
             const estimate = estimateCkbFromQuote(milestone.sourceBudgetUsd, quote);
@@ -540,6 +547,11 @@ export default function ImportBountyPage() {
       return;
     }
 
+    if (commencementAmountError) {
+      setError(commencementAmountError);
+      return;
+    }
+
     if (form.payoutNetwork === 'FIBER' && !form.workerFiberPubkey.trim()) {
       setError('Fiber payouts require the worker Fiber public key.');
       return;
@@ -565,7 +577,20 @@ export default function ImportBountyPage() {
         bountyTitle: form.bountyTitle,
         bountyDescription: form.bountyDescription || undefined,
         governanceNotes: form.governanceNotes || undefined,
-        externalMetadataJson: form.externalMetadataJson || undefined,
+        externalMetadataJson: (() => {
+          if (!form.externalMetadataJson) {
+            return undefined;
+          }
+          try {
+            const parsed = JSON.parse(form.externalMetadataJson) as GrantAutofillMetadata;
+            if (parsed?.upfrontPayment) {
+              parsed.upfrontPayment.amountShannons = commencementAmountShannons;
+            }
+            return JSON.stringify(parsed);
+          } catch {
+            return form.externalMetadataJson;
+          }
+        })(),
         agreement: {
           title: form.agreementTitle || form.bountyTitle,
           description: form.agreementDescription || form.bountyDescription,
@@ -592,7 +617,7 @@ export default function ImportBountyPage() {
 
       window.sessionStorage.setItem(
         'pactagent-ui-flash',
-        `Imported grant agreement created successfully. Lock the total ${totalGrantCkb || 0} CKB once funding is ready, then review and release each milestone manually.`,
+        `Imported grant agreement created successfully. Lock the total ${totalGrantCkb || 0} CKB once funding is ready. The commencement fund releases immediately after funding confirms, and the remaining deliverables stay milestone-based for manual review.`,
       );
       router.push(`/agreement/${agreement.id}`);
     } catch (err) {
@@ -610,7 +635,6 @@ export default function ImportBountyPage() {
   const helperClass = 'mt-1 text-xs text-gray-500';
   const fieldErrorClass = 'mt-1 text-xs text-red-300';
   const sectionClass = 'rounded-[28px] border border-agent-border/80 bg-agent-card/60 p-5 shadow-[0_18px_50px_rgba(15,23,42,0.18)]';
-  const totalGrantCkb = milestones.reduce((sum, milestone) => sum + (Number(milestone.amountCkb) || 0), 0);
   const fieldErrors = {
     sourceLabel: !form.sourceLabel.trim() ? 'Choose a short name like "Nervos Grants Round 2" or "XYZ DAO Bounty Board".' : null,
     externalUrl: form.externalUrl.trim() && !isValidHttpUrl(form.externalUrl) ? 'Use a full URL like https://dao.example.com/proposals/42.' : null,
@@ -650,7 +674,15 @@ export default function ImportBountyPage() {
   const importedCommencementUsdAmount = parseUsdAmount(grantAutofillMetadata?.upfrontPayment?.amountUsd);
   const importedCommencementEstimatedCkb = estimateCkbFromUsd(importedCommencementUsdAmount);
   const milestonesWithSourceEstimates = milestones.filter((milestone) => Number.isFinite(milestone.sourceBudgetUsd ?? NaN));
-  const deliverableMilestoneCount = milestones.filter((milestone) => milestone.kind !== 'COMMENCEMENT').length;
+  const commencementAmountShannons = grantAutofillMetadata?.upfrontPayment?.amountShannons || null;
+  const commencementAmountCkb = commencementAmountShannons ? Number(shannonsToCKB(commencementAmountShannons)) : 0;
+  const totalGrantCkb = milestones.reduce((sum, milestone) => sum + (Number(milestone.amountCkb) || 0), 0) + commencementAmountCkb;
+  const commencementAmountError =
+    commencementAmountShannons && Number.isFinite(commencementAmountCkb)
+      ? null
+      : grantAutofillMetadata?.upfrontPayment?.amountUsd
+        ? 'The commencement payment could not be converted into a valid CKB amount yet.'
+        : null;
 
   function shouldShowFieldError(value: string, message: string | null) {
     return Boolean(message && (submitAttempted || value.trim()));
@@ -870,8 +902,16 @@ export default function ImportBountyPage() {
                               Live kickoff estimate: {formatEstimatedCkb(importedCommencementEstimatedCkb)} CKB
                             </p>
                           ) : null}
+                          {commencementAmountShannons ? (
+                            <p className="mt-2 text-xs text-sky-200">
+                              Commencement payout set to {shannonsToCKB(commencementAmountShannons)} CKB and releases immediately after funding confirms.
+                            </p>
+                          ) : null}
+                          {commencementAmountError ? (
+                            <p className="mt-2 text-xs text-red-300">{commencementAmountError}</p>
+                          ) : null}
                           <p className="mt-2 text-xs text-slate-400">
-                            This stays visible as source context. You can use the live estimate or override it manually before creating the agreement.
+                            This is not Milestone 1. It is tracked separately from the deliverable milestones and releases as soon as the funding lock succeeds.
                           </p>
                         </div>
                         <div className="rounded-2xl border border-amber-400/20 bg-slate-950/20 p-4">
@@ -1074,7 +1114,9 @@ export default function ImportBountyPage() {
                         <div className="mt-3 break-words text-[2rem] font-bold leading-tight text-white sm:text-[2.4rem]">
                           {formatLargeCkbAmount(totalGrantCkb)} CKB
                         </div>
-                        <p className="mt-2 text-sm leading-7 text-slate-300">Released progressively, never all at once.</p>
+                        <p className="mt-2 text-sm leading-7 text-slate-300">
+                          Includes {formatLargeCkbAmount(commencementAmountCkb)} CKB commencement funding for immediate release, plus milestone escrow for manual payouts.
+                        </p>
                       </div>
                     </div>
 
@@ -1083,16 +1125,8 @@ export default function ImportBountyPage() {
                   <div key={`${milestone.title}-${index}`} className="rounded-[24px] border border-agent-border bg-agent-card/50 p-5">
                     <div className="mb-5 flex items-center justify-between gap-3">
                       <div>
-                        <h3 className="text-lg font-semibold text-white">
-                          {milestone.kind === 'COMMENCEMENT'
-                            ? 'Commencement Payment'
-                            : `Milestone ${milestones.slice(0, index + 1).filter((item) => item.kind !== 'COMMENCEMENT').length}`}
-                        </h3>
-                        <p className="mt-1 text-xs text-gray-500">
-                          {milestone.kind === 'COMMENCEMENT'
-                            ? `Separate kickoff release imported from the grant’s upfront payment. This is not counted as Milestone 1 of ${deliverableMilestoneCount || 0}.`
-                            : 'Reviewer-approved payout checkpoint'}
-                        </p>
+                        <h3 className="text-lg font-semibold text-white">Milestone {index + 1}</h3>
+                        <p className="mt-1 text-xs text-gray-500">Reviewer-approved payout checkpoint</p>
                       </div>
                       {milestones.length > 1 ? (
                         <button

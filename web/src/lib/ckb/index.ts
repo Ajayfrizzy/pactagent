@@ -197,6 +197,7 @@ export async function sendOnchainEscrowFunding(params: {
   agreement: {
     agreementDigest: string;
     deadlineAt: string;
+    workerAddress: string;
     milestones: Array<{
       id: string;
       title: string;
@@ -207,6 +208,9 @@ export async function sendOnchainEscrowFunding(params: {
     escrowLockCodeHash?: string | null;
     escrowLockHashType?: string | null;
     escrowLockArgs?: string | null;
+    source?: {
+      externalMetadataJson?: string | null;
+    } | null;
   };
   onProgress?: (step: string) => void;
 }) {
@@ -228,6 +232,24 @@ export async function sendOnchainEscrowFunding(params: {
     escrowCellData: string;
     refundTimeoutBlock: string;
   }> = [];
+  let commencementOutputIndex: number | null = null;
+
+  const importedMetadata = (() => {
+    try {
+      return agreement.source?.externalMetadataJson
+        ? JSON.parse(agreement.source.externalMetadataJson) as {
+            upfrontPayment?: {
+              amountShannons?: string | null;
+            } | null;
+          }
+        : null;
+    } catch {
+      return null;
+    }
+  })();
+  const commencementAmount = importedMetadata?.upfrontPayment?.amountShannons
+    ? BigInt(importedMetadata.upfrontPayment.amountShannons)
+    : BigInt(0);
 
   onProgress('Preparing escrow cells...');
   for (const milestone of agreement.milestones) {
@@ -265,6 +287,15 @@ export async function sendOnchainEscrowFunding(params: {
     });
   }
 
+  if (commencementAmount > BigInt(0)) {
+    onProgress('Adding commencement payout...');
+    const worker = await ccc.Address.fromString(agreement.workerAddress, signer.client);
+    commencementOutputIndex = tx.addOutput({
+      lock: worker.script,
+      capacity: commencementAmount,
+    });
+  }
+
   onProgress('Calculating fees...');
   await tx.completeFeeBy(signer);
 
@@ -274,6 +305,7 @@ export async function sendOnchainEscrowFunding(params: {
   return {
     txHash: String(txHash),
     milestoneOutputs,
+    commencementOutputIndex,
   };
 }
 

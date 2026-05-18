@@ -9,7 +9,6 @@ import {
   recordMilestoneSettlementAttempt,
   refundCurrentMilestone,
   reconcileAgreementSettlement,
-  shouldAutoReleaseCurrentCommencementMilestone,
   transitionMilestoneStatus,
   transitionStatus,
 } from '../services/agreementService';
@@ -783,10 +782,7 @@ async function processAgreement(agreement: any): Promise<void> {
           metadata: {
             milestoneId: currentMilestone.id,
             milestoneTitle: currentMilestone.title,
-            trigger:
-              shouldAutoReleaseCurrentCommencementMilestone(agreement)
-                ? 'COMMENCEMENT_AUTO_RELEASE'
-                : 'STANDARD_APPROVAL',
+            trigger: 'STANDARD_APPROVAL',
             ...fiberResult,
           },
         });
@@ -853,10 +849,7 @@ async function processAgreement(agreement: any): Promise<void> {
             milestoneTitle: currentMilestone.title,
             amount: currentMilestone.amount,
             route: 'CKB',
-            trigger:
-              shouldAutoReleaseCurrentCommencementMilestone(agreement)
-                ? 'COMMENCEMENT_AUTO_RELEASE'
-                : 'STANDARD_APPROVAL',
+            trigger: 'STANDARD_APPROVAL',
           },
         });
       }

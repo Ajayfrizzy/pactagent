@@ -52,6 +52,11 @@ function canSignerFundAgreement(signer: ccc.Signer | undefined) {
   return signer?.type === ccc.SignerType.CKB || signer?.type === ccc.SignerType.EVM;
 }
 
+function isLikelyCkbAddress(value: string) {
+  const trimmed = value.trim().toLowerCase();
+  return /^(ckt|ckb)1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]{20,}$/i.test(trimmed);
+}
+
 const TX_HASH_PATTERN = /^0x[a-fA-F0-9]{64}$/;
 
 function getParticipantLabel(
@@ -157,6 +162,10 @@ function describeMissingSourceFields(fields: string[] | null | undefined) {
   }
 
   return `The original forum thread is still missing: ${fields.join(', ')}.`;
+}
+
+function isSponsorControlledImportedAgreement(agreement: any) {
+  return agreement?.source?.sourceType === 'BOUNTY' || agreement?.source?.sourceType === 'DAO';
 }
 
 type LifecycleStepState = 'complete' | 'current' | 'upcoming' | 'blocked';
@@ -1580,6 +1589,7 @@ export default function AgreementDetailPage() {
             refundTimeoutBlock: string;
           }>
         | undefined;
+      let commencementOutputIndex: number | undefined;
 
       if (agreement.escrowModel === 'ONCHAIN_LOCK') {
         const funding = await sendOnchainEscrowFunding({
@@ -1589,6 +1599,7 @@ export default function AgreementDetailPage() {
         });
         txHash = funding.txHash;
         milestoneOutputs = funding.milestoneOutputs;
+        commencementOutputIndex = funding.commencementOutputIndex ?? undefined;
       } else {
         txHash = await sendCapacityTransfer({
           signer,
@@ -1601,7 +1612,7 @@ export default function AgreementDetailPage() {
 
       setFundingStatus('Confirming with server...');
       await withTimeout(
-        api.fundAgreement(id, String(txHash), milestoneOutputs),
+        api.fundAgreement(id, String(txHash), milestoneOutputs, commencementOutputIndex),
         30_000,
         'Timed out confirming the funding with the server. The transaction may have been sent — please refresh the page.',
       );
@@ -1665,8 +1676,8 @@ export default function AgreementDetailPage() {
       return;
     }
 
-    if (disputeResolution === 'SPLIT' && !splitWorkerAmountCkb.trim()) {
-      setError('Enter the worker amount for the split settlement request.');
+    if (disputeResolution === 'SPLIT' && splitWorkerAmountError) {
+      setError(splitWorkerAmountError);
       return;
     }
 
@@ -1894,8 +1905,8 @@ export default function AgreementDetailPage() {
 
     const workerAmount = currentOpenDispute?.splitConsensus?.workerAmount
       || (splitWorkerAmountCkb.trim() ? ckbToShannons(splitWorkerAmountCkb).toString() : '');
-    if (!workerAmount) {
-      setError('Enter the worker amount for the split settlement.');
+    if (splitWorkerAmountError) {
+      setError(splitWorkerAmountError);
       return;
     }
 
@@ -1948,6 +1959,18 @@ export default function AgreementDetailPage() {
 
   async function handleSaveDraft() {
     if (!walletAddress || !draftForm) {
+      return;
+    }
+
+    const firstDraftFieldError = Object.values(draftFieldErrors || {}).find(Boolean);
+    if (firstDraftFieldError) {
+      setError(firstDraftFieldError);
+      return;
+    }
+
+    const firstDraftMilestoneError = draftMilestoneErrors.flatMap((milestone) => Object.values(milestone)).find(Boolean);
+    if (firstDraftMilestoneError) {
+      setError(firstDraftMilestoneError);
       return;
     }
 
@@ -2249,12 +2272,12 @@ export default function AgreementDetailPage() {
     currentMilestone != null &&
     currentMilestone.status === 'PROOF_SUBMITTED' &&
     currentOpenInfoRequests.length > 0;
-  const isImportedBounty = agreement.source?.sourceType === 'BOUNTY';
+  const isImportedGrant = isSponsorControlledImportedAgreement(agreement);
   const canOnchainRefundReview =
     agreement.escrowModel === 'ONCHAIN_LOCK' &&
     currentMilestone != null &&
     isWorker &&
-    !isImportedBounty &&
+    !isImportedGrant &&
     ['PROOF_SUBMITTED', 'UNDER_REVIEW', 'DISPUTED'].includes(currentMilestone.status);
   const fundingPending = agreement.settlementStatus === 'FUNDING_PENDING';
   const payoutPending = agreement.settlementStatus === 'PAYOUT_PENDING';
@@ -2335,6 +2358,28 @@ export default function AgreementDetailPage() {
   const recommendationWaitMessage = recommendationAvailability && !recommendationAvailability.ready
     ? `The AI recommendation unlocks after the ${expectedReplyLabel.toLowerCase()} replies, or after ${recommendationAvailability.responseDeadlineAt.toLocaleString()} if no reply arrives.`
     : null;
+  const splitWorkerAmountError = (() => {
+    if (disputeResolution !== 'SPLIT' && !canProposeSplitSettlement) {
+      return null;
+    }
+
+    const trimmed = splitWorkerAmountCkb.trim();
+    if (!trimmed) {
+      return 'Enter the worker amount for the split settlement.';
+    }
+
+    const parsed = Number(trimmed);
+    const currentMilestoneCkb = currentMilestone ? Number(shannonsToCKB(currentMilestone.amount)) : null;
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return 'Enter a valid worker amount greater than 0.';
+    }
+
+    if (currentMilestoneCkb != null && parsed >= currentMilestoneCkb) {
+      return `Worker amount must be less than the current milestone amount of ${shannonsToCKB(currentMilestone.amount)} CKB.`;
+    }
+
+    return null;
+  })();
   const mutualRefundActionLabel = refundConsensus?.proposedBy
     ? hasApprovedMutualRefund
       ? 'Refund Approval Recorded'
@@ -2406,6 +2451,41 @@ export default function AgreementDetailPage() {
             : settlementStatusMeta.hint
               ? settlementStatusMeta.hint
               : agreementStatusMeta.hint || 'Open the current milestone details and continue the next step.');
+  const draftMinimumMilestoneCapacity = getMinimumMilestoneCapacity({
+    escrowModel: draftForm?.payoutNetwork === 'CKB' && publicConfig?.onchainEscrowReady ? 'ONCHAIN_LOCK' : agreement.escrowModel,
+    payoutNetwork: draftForm?.payoutNetwork || agreement.payoutNetwork,
+    escrowLockCodeHash: agreement.escrowLockCodeHash || publicConfig?.onchainLockCodeHash,
+    escrowLockHashType: agreement.escrowLockHashType || publicConfig?.onchainLockHashType,
+    escrowLockArgs: agreement.escrowLockArgs || (publicConfig?.onchainEscrowReady ? `0x${'00'.repeat(32 * 3)}` : null),
+  });
+  const draftMinimumMilestoneCkb = formatCkbAmount(draftMinimumMilestoneCapacity);
+  const draftFieldErrors = draftForm ? {
+    title: !draftForm.title.trim() ? 'Agreement title is required.' : null,
+    workerAddress:
+      !draftForm.workerAddress.trim()
+        ? 'Worker address is required.'
+        : !isLikelyCkbAddress(draftForm.workerAddress)
+          ? 'Use a valid CKB address starting with ckt1 or ckb1.'
+          : null,
+    description: !draftForm.description.trim() ? 'Agreement description is required.' : null,
+    deadlineAt: !draftForm.deadlineAt ? 'Deadline is required.' : null,
+    disputeWindowHours:
+      !draftForm.disputeWindowHours.trim()
+        ? 'Dispute window is required.'
+        : Number(draftForm.disputeWindowHours) < 1
+          ? 'Dispute window must be at least 1 hour.'
+          : null,
+  } : null;
+  const draftMilestoneErrors = draftMilestones.map((milestone) => ({
+    title: !milestone.title.trim() ? 'Milestone title is required.' : null,
+    description: !milestone.description.trim() ? 'Milestone description is required.' : null,
+    amount:
+      !milestone.amount.trim()
+        ? 'Milestone amount is required.'
+        : BigInt(milestone.amount || '0') < draftMinimumMilestoneCapacity
+          ? `Milestone amount must be at least ${draftMinimumMilestoneCkb} CKB for the current escrow setup.`
+          : null,
+  }));
   const actionPanel = agreement.status === 'DRAFT'
     ? {
         title: isClient ? 'Draft agreement is waiting on you' : 'Draft agreement is waiting on the client',
@@ -2421,7 +2501,7 @@ export default function AgreementDetailPage() {
       : canClientReview && currentMilestone
         ? {
             title: 'Review decision needed now',
-            body: isImportedBounty
+            body: isImportedGrant
               ? `The worker has delivered ${currentMilestone.title}. Review the proof, ask for more information if needed, and approve the milestone when you are satisfied.`
               : `The worker has delivered ${currentMilestone.title}. Approve the payout, reject it, or open a dispute based on the submitted proof.`,
           }
@@ -3568,15 +3648,15 @@ export default function AgreementDetailPage() {
             </CollapsibleSection>
 
             <CollapsibleSection
-              title={isImportedBounty ? 'Reviewer Thread' : 'Agreement Thread'}
+              title={isImportedGrant ? 'Reviewer Thread' : 'Agreement Thread'}
               description={
-                isImportedBounty
-                  ? 'Use this shared thread for direct reviewer and worker conversation about the imported bounty.'
+                isImportedGrant
+                  ? 'Use this shared thread for direct reviewer and worker conversation about the imported grant.'
                   : 'Participant comments and coordination outside the dispute workspace.'
               }
               countLabel={`${displayedAgreementComments.length} messages`}
               storageKey={`agreement:${id}:section:agreement-thread`}
-              defaultExpanded={isImportedBounty}
+              defaultExpanded={isImportedGrant}
             >
               <div className="space-y-3">
                 {displayedAgreementComments.length ? (
@@ -3596,7 +3676,7 @@ export default function AgreementDetailPage() {
                   ))
                 ) : (
                   <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4 text-sm text-gray-400">
-                    {isImportedBounty
+                    {isImportedGrant
                       ? 'No reviewer-worker messages yet. Use this thread for direct conversation about the milestone work.'
                       : 'No messages yet. Use this thread for normal coordination that does not belong in the formal dispute workspace.'}
                   </div>
@@ -3607,7 +3687,7 @@ export default function AgreementDetailPage() {
                 <div className="mt-4">
                   <textarea
                     className="w-full bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-agent-accent min-h-[96px]"
-                    placeholder={isImportedBounty ? 'Send a reviewer / worker message...' : 'Message the other participant...'}
+                    placeholder={isImportedGrant ? 'Send a reviewer / worker message...' : 'Message the other participant...'}
                     value={commentContent}
                     onChange={(e) => setCommentContent(e.target.value)}
                   />
@@ -3800,37 +3880,52 @@ export default function AgreementDetailPage() {
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-2">
-                  <input
-                    className="bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white"
-                    value={draftForm.title}
-                    onChange={(e) => setDraftForm((prev) => prev ? { ...prev, title: e.target.value } : prev)}
-                    placeholder="Agreement title"
-                  />
-                  <input
-                    className="bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white"
-                    value={draftForm.workerAddress}
-                    onChange={(e) => setDraftForm((prev) => prev ? { ...prev, workerAddress: e.target.value } : prev)}
-                    placeholder="Worker address"
-                  />
-                  <textarea
-                    className="md:col-span-2 bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white min-h-[100px]"
-                    value={draftForm.description}
-                    onChange={(e) => setDraftForm((prev) => prev ? { ...prev, description: e.target.value } : prev)}
-                    placeholder="Agreement description"
-                  />
-                  <input
-                    type="datetime-local"
-                    className="bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white"
-                    value={draftForm.deadlineAt}
-                    onChange={(e) => setDraftForm((prev) => prev ? { ...prev, deadlineAt: e.target.value } : prev)}
-                  />
-                  <input
-                    type="number"
-                    className="bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white"
-                    value={draftForm.disputeWindowHours}
-                    onChange={(e) => setDraftForm((prev) => prev ? { ...prev, disputeWindowHours: e.target.value } : prev)}
-                    placeholder="Dispute window (hours)"
-                  />
+                  <div>
+                    <input
+                      className={`w-full bg-agent-bg border rounded-lg px-4 py-2.5 text-sm text-white ${draftFieldErrors?.title ? 'border-red-500/70' : 'border-agent-border'}`}
+                      value={draftForm.title}
+                      onChange={(e) => setDraftForm((prev) => prev ? { ...prev, title: e.target.value } : prev)}
+                      placeholder="Agreement title"
+                    />
+                    {draftFieldErrors?.title ? <p className="mt-1 text-xs text-red-300">{draftFieldErrors.title}</p> : null}
+                  </div>
+                  <div>
+                    <input
+                      className={`w-full bg-agent-bg border rounded-lg px-4 py-2.5 text-sm text-white ${draftFieldErrors?.workerAddress ? 'border-red-500/70' : 'border-agent-border'}`}
+                      value={draftForm.workerAddress}
+                      onChange={(e) => setDraftForm((prev) => prev ? { ...prev, workerAddress: e.target.value } : prev)}
+                      placeholder="Worker address"
+                    />
+                    {draftFieldErrors?.workerAddress ? <p className="mt-1 text-xs text-red-300">{draftFieldErrors.workerAddress}</p> : null}
+                  </div>
+                  <div className="md:col-span-2">
+                    <textarea
+                      className={`w-full min-h-[100px] bg-agent-bg border rounded-lg px-4 py-2.5 text-sm text-white ${draftFieldErrors?.description ? 'border-red-500/70' : 'border-agent-border'}`}
+                      value={draftForm.description}
+                      onChange={(e) => setDraftForm((prev) => prev ? { ...prev, description: e.target.value } : prev)}
+                      placeholder="Agreement description"
+                    />
+                    {draftFieldErrors?.description ? <p className="mt-1 text-xs text-red-300">{draftFieldErrors.description}</p> : null}
+                  </div>
+                  <div>
+                    <input
+                      type="datetime-local"
+                      className={`w-full bg-agent-bg border rounded-lg px-4 py-2.5 text-sm text-white ${draftFieldErrors?.deadlineAt ? 'border-red-500/70' : 'border-agent-border'}`}
+                      value={draftForm.deadlineAt}
+                      onChange={(e) => setDraftForm((prev) => prev ? { ...prev, deadlineAt: e.target.value } : prev)}
+                    />
+                    {draftFieldErrors?.deadlineAt ? <p className="mt-1 text-xs text-red-300">{draftFieldErrors.deadlineAt}</p> : null}
+                  </div>
+                  <div>
+                    <input
+                      type="number"
+                      className={`w-full bg-agent-bg border rounded-lg px-4 py-2.5 text-sm text-white ${draftFieldErrors?.disputeWindowHours ? 'border-red-500/70' : 'border-agent-border'}`}
+                      value={draftForm.disputeWindowHours}
+                      onChange={(e) => setDraftForm((prev) => prev ? { ...prev, disputeWindowHours: e.target.value } : prev)}
+                      placeholder="Dispute window (hours)"
+                    />
+                    {draftFieldErrors?.disputeWindowHours ? <p className="mt-1 text-xs text-red-300">{draftFieldErrors.disputeWindowHours}</p> : null}
+                  </div>
                 </div>
 
                 <div className="mt-4 space-y-3">
@@ -3866,24 +3961,37 @@ export default function AgreementDetailPage() {
                         </div>
                       </div>
                       <div className="grid gap-3 md:grid-cols-2">
-                        <input
-                          className="bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white"
-                          value={milestone.title}
-                          onChange={(e) => setDraftMilestones((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, title: e.target.value } : item))}
-                          placeholder="Milestone title"
-                        />
-                        <input
-                          className="bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white"
-                          value={shannonsToCKB(milestone.amount)}
-                          onChange={(e) => setDraftMilestones((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, amount: ckbToShannons(e.target.value || '0').toString() } : item))}
-                          placeholder="Amount in CKB"
-                        />
-                        <textarea
-                          className="md:col-span-2 bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white min-h-[80px]"
-                          value={milestone.description}
-                          onChange={(e) => setDraftMilestones((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, description: e.target.value } : item))}
-                          placeholder="Milestone description"
-                        />
+                        <div>
+                          <input
+                            className={`w-full bg-agent-bg border rounded-lg px-4 py-2.5 text-sm text-white ${draftMilestoneErrors[index]?.title ? 'border-red-500/70' : 'border-agent-border'}`}
+                            value={milestone.title}
+                            onChange={(e) => setDraftMilestones((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, title: e.target.value } : item))}
+                            placeholder="Milestone title"
+                          />
+                          {draftMilestoneErrors[index]?.title ? <p className="mt-1 text-xs text-red-300">{draftMilestoneErrors[index]?.title}</p> : null}
+                        </div>
+                        <div>
+                          <input
+                            className={`w-full bg-agent-bg border rounded-lg px-4 py-2.5 text-sm text-white ${draftMilestoneErrors[index]?.amount ? 'border-red-500/70' : 'border-agent-border'}`}
+                            value={shannonsToCKB(milestone.amount)}
+                            onChange={(e) => setDraftMilestones((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, amount: ckbToShannons(e.target.value || '0').toString() } : item))}
+                            placeholder={`Amount in CKB (min ${draftMinimumMilestoneCkb})`}
+                          />
+                          {draftMilestoneErrors[index]?.amount ? (
+                            <p className="mt-1 text-xs text-red-300">{draftMilestoneErrors[index]?.amount}</p>
+                          ) : (
+                            <p className="mt-1 text-xs text-gray-500">Minimum {draftMinimumMilestoneCkb} CKB for the current escrow setup.</p>
+                          )}
+                        </div>
+                        <div className="md:col-span-2">
+                          <textarea
+                            className={`w-full min-h-[80px] bg-agent-bg border rounded-lg px-4 py-2.5 text-sm text-white ${draftMilestoneErrors[index]?.description ? 'border-red-500/70' : 'border-agent-border'}`}
+                            value={milestone.description}
+                            onChange={(e) => setDraftMilestones((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, description: e.target.value } : item))}
+                            placeholder="Milestone description"
+                          />
+                          {draftMilestoneErrors[index]?.description ? <p className="mt-1 text-xs text-red-300">{draftMilestoneErrors[index]?.description}</p> : null}
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -3931,7 +4039,9 @@ export default function AgreementDetailPage() {
                   Lock and Fund Agreement
                 </h3>
                 <p className="text-sm text-gray-400 mb-4">
-                  Lock {shannonsToCKB(agreement.amount)} CKB once, then the agent will release milestone payouts as work is approved.
+                  {isImportedGrant
+                    ? `Lock ${shannonsToCKB(agreement.amount)} CKB once. Any commencement fund releases immediately after funding confirms, and the remaining deliverables stay milestone-based for manual review.`
+                    : `Lock ${shannonsToCKB(agreement.amount)} CKB once, then the agent will release milestone payouts as work is approved.`}
                 </p>
                 <div className="mb-4 rounded-lg border border-agent-border bg-agent-bg/60 px-3 py-2 text-xs text-gray-400">
                   Funds will be sent to the agreement escrow destination:
@@ -4159,7 +4269,7 @@ export default function AgreementDetailPage() {
                       ? `Sign the on-chain payout resolution for ${currentMilestone.title}.`
                       : currentMilestone.status === 'PROOF_SUBMITTED'
                         ? `The worker has submitted proof for ${currentMilestone.title}. Payout is already available while PactAgent continues the background review.`
-                        : isImportedBounty
+                        : isImportedGrant
                         ? `Review ${currentMilestone.title}, message the worker for missing context when needed, and approve the payout only after manual review is complete.`
                         : `Approve payout for ${currentMilestone.title}, or open a dispute below. Refunds only happen after both client and worker agree inside the dispute thread.`}
                 </p>
@@ -4172,7 +4282,7 @@ export default function AgreementDetailPage() {
                       }}
                     />
                   </div>
-                  {!isImportedBounty ? (
+                  {!isImportedGrant ? (
                     <div className="mb-4 rounded-xl border border-agent-border bg-agent-bg/60 p-4">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div>
@@ -4296,52 +4406,42 @@ export default function AgreementDetailPage() {
                         </>
                       )}
                     </button>
+                    {canOnchainRefundReview ? (
+                      <button
+                        onClick={() => handleReviewAction('REJECT')}
+                        disabled={!!actionLoading}
+                        className="flex min-w-[170px] items-center justify-center gap-1.5 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                      >
+                        {rejectLoading ? (
+                          <>
+                            <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                            Refunding...
+                          </>
+                        ) : (
+                          <>
+                            <XCircleIcon className="w-4 h-4" />
+                            Sign Milestone Refund Transaction
+                          </>
+                        )}
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               )}
 
-            {isImportedBounty && currentMilestone && (isClient || isWorker) ? (
+            {isImportedGrant && currentMilestone && (isClient || isWorker) ? (
               <div className="bg-agent-card border border-sky-800/40 rounded-xl p-6">
                 <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
                   <ClipboardDocumentCheckIcon className="w-5 h-5 text-sky-300" />
                   Reviewer Follow-up Thread
                 </h3>
                 <p className="text-sm text-gray-400">
-                  Imported bounties use this thread for direct reviewer and worker follow-up. Formal review requests stay summarized above when they exist.
+                  Imported grants use this thread for direct reviewer and worker follow-up. Formal review requests stay summarized above when they exist.
                 </p>
               </div>
             ) : null}
 
-            {canOnchainRefundReview && currentMilestone && !isImportedBounty && (
-              <div className="bg-agent-card border border-red-800/40 rounded-xl p-6">
-                <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
-                  <XCircleIcon className="w-5 h-5 text-red-400" />
-                  Refund Current Milestone
-                </h3>
-                <p className="text-sm text-gray-400 mb-4">
-                  Sign the on-chain refund resolution for {currentMilestone.title}. This sends the milestone amount back to the client from the escrow cell.
-                </p>
-                <button
-                  onClick={() => handleReviewAction('REJECT')}
-                  disabled={!!actionLoading}
-                  className="flex w-full min-w-[170px] items-center justify-center gap-1.5 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 sm:w-auto"
-                >
-                  {rejectLoading ? (
-                    <>
-                      <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                      Refunding...
-                    </>
-                  ) : (
-                    <>
-                      <XCircleIcon className="w-4 h-4" />
-                      Sign Milestone Refund Transaction
-                    </>
-                  )}
-                </button>
-              </div>
-            )}
-
-            {['FUNDED', 'PROOF_SUBMITTED', 'UNDER_REVIEW'].includes(agreement.status) && currentMilestone && !isImportedBounty && (
+            {['FUNDED', 'PROOF_SUBMITTED', 'UNDER_REVIEW'].includes(agreement.status) && currentMilestone && !isImportedGrant && (
               <div className="bg-agent-card border border-red-800/30 rounded-xl p-6">
                 <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
                   <ExclamationTriangleIcon className="w-5 h-5 text-orange-400" />
@@ -4373,15 +4473,20 @@ export default function AgreementDetailPage() {
                     <option value="SPLIT">Request Split Settlement</option>
                   </select>
                   {disputeResolution === 'SPLIT' ? (
-                    <input
-                      type="number"
-                      className="bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-red-500"
-                      placeholder="Worker amount in CKB"
-                      value={splitWorkerAmountCkb}
-                      onChange={(e) => setSplitWorkerAmountCkb(e.target.value)}
-                      min="0"
-                      step="any"
-                    />
+                    <div>
+                      <input
+                        type="number"
+                        className={`w-full bg-agent-bg border rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-red-500 ${splitWorkerAmountError ? 'border-red-500/70' : 'border-agent-border'}`}
+                        placeholder="Worker amount in CKB"
+                        value={splitWorkerAmountCkb}
+                        onChange={(e) => setSplitWorkerAmountCkb(e.target.value)}
+                        min="0"
+                        step="any"
+                      />
+                      {splitWorkerAmountError ? (
+                        <p className="mt-1 text-xs text-red-300">{splitWorkerAmountError}</p>
+                      ) : null}
+                    </div>
                   ) : null}
                 </div>
                 <div className="mb-3 flex gap-2">
@@ -4434,7 +4539,7 @@ export default function AgreementDetailPage() {
               </div>
             )}
 
-            {agreement.status === 'DISPUTED' && currentMilestone && currentOpenDispute && !isImportedBounty && (
+            {agreement.status === 'DISPUTED' && currentMilestone && currentOpenDispute && !isImportedGrant && (
               <div className="bg-agent-card border border-purple-800/50 rounded-xl p-6">
                 <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
                   <div>
@@ -4549,15 +4654,20 @@ export default function AgreementDetailPage() {
                       </div>
 
                       {canProposeSplitSettlement ? (
-                        <input
-                          type="number"
-                          className="mb-3 w-full bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500"
-                          placeholder="Worker amount in CKB"
-                          value={splitWorkerAmountCkb}
-                          onChange={(e) => setSplitWorkerAmountCkb(e.target.value)}
-                          min="0"
-                          step="any"
-                        />
+                        <div className="mb-3">
+                          <input
+                            type="number"
+                            className={`w-full bg-agent-bg border rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500 ${splitWorkerAmountError ? 'border-red-500/70' : 'border-agent-border'}`}
+                            placeholder="Worker amount in CKB"
+                            value={splitWorkerAmountCkb}
+                            onChange={(e) => setSplitWorkerAmountCkb(e.target.value)}
+                            min="0"
+                            step="any"
+                          />
+                          {splitWorkerAmountError ? (
+                            <p className="mt-1 text-xs text-red-300">{splitWorkerAmountError}</p>
+                          ) : null}
+                        </div>
                       ) : null}
 
                       {splitConsensus?.proposedBy ? (
