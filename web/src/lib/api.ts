@@ -780,6 +780,49 @@ export async function fetchFiberAdminChannels() {
   return request<any>('/fiber/channels');
 }
 
+export async function fetchFiberDiagnostics() {
+  return request<{
+    status: string;
+    summary: string;
+    interpretation: string;
+    evidenceReasons: string[];
+    config: {
+      fiberEnabled: boolean;
+      fiberNodeUrl: string;
+      hasApiKey: boolean;
+    };
+    live: {
+      healthy: boolean;
+      nodeInfo: any | null;
+      nodePublicKey: string | null;
+      peerCount: number;
+      openChannelCount: number;
+      pendingChannelCount: number;
+      channels: Array<{
+        channelId: string;
+        peerId: string;
+        stateName: string;
+        localBalance: string;
+        remoteBalance: string;
+        outboundReady: boolean;
+      }>;
+      usableOutboundChannelCount: number;
+    };
+    history: {
+      agreementsConfiguredForFiber: number;
+      settlementsOnFiber: number;
+      confirmedFiberSettlements: number;
+      attemptedFiberPayoutLogs: number;
+      confirmedFiberPayoutLogs: number;
+      fallbackReleaseLogs: number;
+      lastConfirmedFiberSettlementAt: string | null;
+      lastFallbackAt: string | null;
+      likelyNeverPaymentCapable: boolean;
+      evidence: string[];
+    };
+  }>('/fiber-diagnostics');
+}
+
 export async function fetchConfig() {
   return request<any>('/config');
 }

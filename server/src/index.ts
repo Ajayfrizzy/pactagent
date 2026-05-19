@@ -4,6 +4,7 @@ import http from 'http';
 import { config } from './config';
 import agreementRoutes from './routes/agreements';
 import authRoutes from './routes/auth';
+import fiberDiagnosticsRoutes from './routes/fiberDiagnostics';
 import fiberRoutes from './routes/fiber';
 import inviteRoutes from './routes/invites';
 import integrationRoutes from './routes/integrations';
@@ -44,6 +45,7 @@ app.use('/api/webhooks', webhookRoutes);
 app.use('/api/agreements', agreementRoutes);
 app.use('/api/logs', logRoutes);
 app.use('/api/fiber', fiberRoutes);
+app.use('/api/fiber-diagnostics', fiberDiagnosticsRoutes);
 
 app.get('/api/health', (_req, res) => {
   res.json({ success: true, data: { status: 'ok', timestamp: new Date().toISOString() } });

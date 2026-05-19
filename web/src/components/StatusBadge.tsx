@@ -60,6 +60,13 @@ const STATUS_COLORS: Record<string, StatusAppearance> = {
   REVIEWED: { bg: 'bg-blue-950/60', text: 'text-blue-300', dot: 'bg-blue-400', label: 'Reviewed' },
   PUBLISHED: { bg: 'bg-emerald-950/60', text: 'text-emerald-300', dot: 'bg-emerald-400', label: 'Published' },
   NOT_CONFIGURED: { bg: 'bg-zinc-800/60', text: 'text-zinc-300', dot: 'bg-zinc-400', label: 'Not Configured' },
+  DISABLED: { bg: 'bg-zinc-800/60', text: 'text-zinc-300', dot: 'bg-zinc-400', label: 'Disabled' },
+  UNREACHABLE: { bg: 'bg-rose-900/50', text: 'text-rose-300', dot: 'bg-rose-400', label: 'Unreachable' },
+  HEALTHY_NO_CHANNELS: { bg: 'bg-amber-950/60', text: 'text-amber-300', dot: 'bg-amber-400', label: 'Healthy, No Channels' },
+  HEALTHY_NO_LIQUIDITY: { bg: 'bg-orange-950/60', text: 'text-orange-300', dot: 'bg-orange-400', label: 'Healthy, No Liquidity' },
+  READY_UNPROVEN: { bg: 'bg-sky-950/60', text: 'text-sky-300', dot: 'bg-sky-400', label: 'Ready, Unproven' },
+  PAYMENT_PROVEN: { bg: 'bg-emerald-950/60', text: 'text-emerald-300', dot: 'bg-emerald-400', label: 'Payment Proven' },
+  HISTORICALLY_FALLBACK_ONLY: { bg: 'bg-fuchsia-950/60', text: 'text-fuchsia-300', dot: 'bg-fuchsia-400', label: 'Fallback Only History' },
 };
 
 function prettifyStatus(status: string) {
