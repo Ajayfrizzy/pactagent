@@ -6,12 +6,12 @@ import { NavbarMenu } from '@/components/NavbarMenu';
 import { AgentLogPanel } from '@/components/AgentLogPanel';
 import { StatusBadge, NetworkBadge, getStatusMeta } from '@/components/StatusBadge';
 import { WalletOnboardingCard } from '@/components/WalletOnboardingCard';
+import { BrandLogo } from '@/components/BrandLogo';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useStore } from '@/lib/store';
 import { createInvite, fetchAgreements } from '@/lib/api';
 import { shannonsToCKB } from '@/lib/ckb';
 import {
-  AgentIcon,
   ArrowLeftIcon,
   PlusIcon,
   DocumentTextIcon,
@@ -200,10 +200,7 @@ export default function DashboardPage() {
     <div className="min-h-screen">
       <nav className="sticky top-0 z-50 border-b border-agent-border bg-agent-card/50 backdrop-blur-sm">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-          <Link href="/" className="flex min-w-0 items-center gap-2">
-            <AgentIcon className="h-5 w-5 shrink-0 text-agent-accent" />
-            <span className="truncate text-lg font-bold text-white">PactAgent</span>
-          </Link>
+          <BrandLogo />
           <NavbarMenu>
             <Link href="/" className="text-sm text-gray-400 transition-colors hover:text-white">
               Home

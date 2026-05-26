@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ccc } from '@ckb-ccc/connector-react';
 import { NavbarMenu } from '@/components/NavbarMenu';
 import { WalletOnboardingCard } from '@/components/WalletOnboardingCard';
+import { BrandLogo } from '@/components/BrandLogo';
 import { useStore } from '@/lib/store';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { createAgreement, fetchConfig } from '@/lib/api';
@@ -13,7 +14,7 @@ import {
   formatCkbAmount,
   getMinimumMilestoneCapacity,
 } from '@/lib/ckb';
-import { AgentIcon, ArrowLeftIcon, DocumentTextIcon, PlusIcon, XCircleIcon } from '@/components/Icons';
+import { ArrowLeftIcon, DocumentTextIcon, PlusIcon, XCircleIcon } from '@/components/Icons';
 
 interface MilestoneDraft {
   title: string;
@@ -387,10 +388,7 @@ export default function NewAgreementPage() {
       <nav className="sticky top-0 z-50 border-b border-agent-border bg-agent-card/50 backdrop-blur-sm">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
-            <Link href="/" className="flex min-w-0 items-center gap-2">
-              <AgentIcon className="h-5 w-5 shrink-0 text-agent-accent" />
-              <span className="truncate text-lg font-bold text-white">PactAgent</span>
-            </Link>
+            <BrandLogo />
             <span className="text-gray-600">/</span>
             <span className="truncate text-sm text-gray-400">New Agreement</span>
           </div>

@@ -5,9 +5,10 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useStore } from '@/lib/store';
 import { acceptInvite, fetchInvitePreview } from '@/lib/api';
-import { AgentIcon, ArrowLeftIcon, LinkIcon, RocketLaunchIcon } from '@/components/Icons';
+import { ArrowLeftIcon, LinkIcon, RocketLaunchIcon } from '@/components/Icons';
 import { NavbarMenu } from '@/components/NavbarMenu';
 import { WalletOnboardingCard } from '@/components/WalletOnboardingCard';
+import { BrandLogo } from '@/components/BrandLogo';
 import { shannonsToCKB } from '@/lib/ckb';
 
 export default function InviteLandingPage() {
@@ -55,10 +56,7 @@ export default function InviteLandingPage() {
     <div className="min-h-screen">
       <nav className="sticky top-0 z-50 border-b border-agent-border bg-agent-card/50 backdrop-blur-sm">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-          <Link href="/" className="flex min-w-0 items-center gap-2">
-            <AgentIcon className="h-5 w-5 shrink-0 text-agent-accent" />
-            <span className="truncate text-lg font-bold text-white">PactAgent</span>
-          </Link>
+          <BrandLogo />
           <NavbarMenu />
         </div>
       </nav>

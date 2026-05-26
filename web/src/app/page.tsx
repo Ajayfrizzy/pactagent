@@ -6,11 +6,11 @@ import { WalletConnect } from '@/components/WalletConnect';
 import { AgentLogPanel } from '@/components/AgentLogPanel';
 import { NavbarMenu } from '@/components/NavbarMenu';
 import { WalletOnboardingCard } from '@/components/WalletOnboardingCard';
+import { BrandLogo } from '@/components/BrandLogo';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useStore } from '@/lib/store';
 import { fetchAgreements } from '@/lib/api';
 import {
-  AgentIcon,
   EyeIcon,
   CpuChipIcon,
   BoltIcon,
@@ -52,11 +52,7 @@ export default function HomePage() {
     <div className="min-h-screen">
       <nav className="sticky top-0 z-50 border-b border-agent-border bg-agent-card/50 backdrop-blur-sm">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-          <div className="flex min-w-0 items-center gap-3">
-            <AgentIcon className="h-6 w-6 shrink-0 text-agent-accent" />
-            <span className="truncate text-lg font-bold text-white">PactAgent</span>
-            <span className="hidden rounded bg-agent-bg px-2 py-0.5 text-xs text-gray-500 sm:inline-block">CKB Testnet</span>
-          </div>
+          <BrandLogo />
           <NavbarMenu>
             {walletAddress ? (
               <>

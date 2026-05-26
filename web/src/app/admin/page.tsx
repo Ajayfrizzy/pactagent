@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { WalletConnect } from '@/components/WalletConnect';
 import { NavbarMenu } from '@/components/NavbarMenu';
+import { BrandLogo } from '@/components/BrandLogo';
 import { StatusBadge, NetworkBadge } from '@/components/StatusBadge';
 import { useStore } from '@/lib/store';
 import {
@@ -18,7 +19,7 @@ import {
   syncAgreementSource,
   updateAgreementSourcePublishState,
 } from '@/lib/api';
-import { AgentIcon, ArrowLeftIcon, ShieldCheckIcon } from '@/components/Icons';
+import { ArrowLeftIcon, ShieldCheckIcon } from '@/components/Icons';
 
 export default function AdminPage() {
   const authToken = useStore((s) => s.authToken);
@@ -295,10 +296,7 @@ export default function AdminPage() {
       <nav className="sticky top-0 z-50 border-b border-agent-border bg-agent-card/50 backdrop-blur-sm">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
-            <Link href="/" className="flex min-w-0 items-center gap-2">
-              <AgentIcon className="h-5 w-5 shrink-0 text-agent-accent" />
-              <span className="truncate text-lg font-bold text-white">PactAgent</span>
-            </Link>
+            <BrandLogo />
             <span className="text-gray-600">/</span>
             <span className="truncate text-sm text-gray-400">Admin</span>
           </div>
