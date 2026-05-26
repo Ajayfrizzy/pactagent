@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { NavbarMenu } from '@/components/NavbarMenu';
 import { AgentLogPanel } from '@/components/AgentLogPanel';
 import { StatusBadge, NetworkBadge, getStatusMeta } from '@/components/StatusBadge';
+import { WalletOnboardingCard } from '@/components/WalletOnboardingCard';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useStore } from '@/lib/store';
 import { createInvite, fetchAgreements } from '@/lib/api';
@@ -120,6 +121,9 @@ export default function DashboardPage() {
   const agreementsNeedingAttention = agreements.filter((agreement) =>
     ['UNDER_REVIEW', 'DISPUTED', 'PROOF_SUBMITTED', 'FAILED'].includes(agreement.status)
   ).length;
+  const priorityAgreements = agreements.filter((agreement) =>
+    ['PROOF_SUBMITTED', 'UNDER_REVIEW', 'DISPUTED', 'FAILED', 'DRAFT'].includes(agreement.status)
+  );
   const grantAgreements = agreements.filter((agreement) => Boolean(agreement.source)).length;
   const lifecycleLanes = useMemo(
     () => [
@@ -231,34 +235,41 @@ export default function DashboardPage() {
           </Link>
         </section>
 
+        {!authToken ? (
+          <WalletOnboardingCard
+            title="Unlock your dashboard"
+            description="Your dashboard, invites, webhooks, and agreement actions are all tied to your signed-in wallet."
+          />
+        ) : null}
+
         <section className="rounded-3xl border border-agent-border bg-agent-card/80 p-5 shadow-[0_24px_60px_rgba(15,23,42,0.28)] sm:p-6 md:p-8">
           <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
             <div className="max-w-2xl">
               <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-agent-border bg-agent-bg/70 px-3 py-1 text-xs uppercase tracking-[0.2em] text-agent-accent">
                 <span className="h-2 w-2 animate-pulse rounded-full bg-agent-accent" />
-                Mission Control
+                Action Overview
               </div>
-              <h1 className="mb-3 text-2xl font-bold text-white sm:text-3xl md:text-4xl">Milestone escrow at a glance</h1>
+              <h1 className="mb-3 text-2xl font-bold text-white sm:text-3xl md:text-4xl">What needs your attention right now</h1>
               <p className="text-sm text-gray-400 md:text-base">
-                Track funding, proof review, disputes, and settlement activity from one place while the agent keeps each agreement moving.
+                Start with urgent agreements, then drop into lifecycle views, settings, and activity when you need more context.
               </p>
-              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              <div className="mt-5 grid gap-3 sm:grid-cols-3">
                 <div className="rounded-2xl border border-agent-border bg-agent-bg/60 p-4">
-                  <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Direct Agreement Mode</div>
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-amber-300">Needs review</div>
                   <p className="mt-2 text-sm text-gray-300">
-                    Create bilateral agreements directly in PactAgent when you already know the client and worker.
+                    {stats.reviewCount} agreement{stats.reviewCount === 1 ? '' : 's'} are waiting for a payout or dispute decision.
                   </p>
                 </div>
                 <div className="rounded-2xl border border-agent-border bg-agent-bg/60 p-4">
-                  <div className="text-[11px] uppercase tracking-[0.16em] text-fuchsia-300">Grant / Bounty Mode</div>
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-sky-300">In progress</div>
                   <p className="mt-2 text-sm text-gray-300">
-                    Import ecosystem work, lock treasury funds once, and release each approved milestone with source attribution intact.
+                    {stats.activeCount} agreement{stats.activeCount === 1 ? '' : 's'} are funded and moving through delivery.
                   </p>
                 </div>
-                <div className="rounded-2xl border border-agent-border bg-agent-bg/60 p-4 sm:col-span-2">
-                  <div className="text-[11px] uppercase tracking-[0.16em] text-orange-300">CKBoost Handoff</div>
+                <div className="rounded-2xl border border-agent-border bg-agent-bg/60 p-4">
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-orange-300">Imported work</div>
                   <p className="mt-2 text-sm text-gray-300">
-                    Convert CKBoost campaigns into formal PactAgent grants while preserving contributor reputation, campaign history, and syncable external IDs.
+                    {grantAgreements} agreement{grantAgreements === 1 ? '' : 's'} came from DAO, bounty, or CKBoost sources.
                   </p>
                 </div>
               </div>
@@ -287,6 +298,55 @@ export default function DashboardPage() {
             </div>
           </div>
         </section>
+
+        {authToken && priorityAgreements.length > 0 ? (
+          <section className="rounded-3xl border border-agent-border bg-agent-card/75 p-5 sm:p-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Priority Queue</div>
+                <h2 className="mt-2 text-xl font-semibold text-white">Start here</h2>
+                <p className="mt-1 text-sm text-gray-400">
+                  These agreements are closest to needing a concrete decision, funding step, or participant handoff.
+                </p>
+              </div>
+              <Link
+                href="/agreement/new"
+                className="inline-flex items-center justify-center rounded-xl border border-agent-accent/35 bg-agent-accent/10 px-4 py-2.5 text-sm font-medium text-agent-accent hover:bg-agent-accent/20"
+              >
+                Create another agreement
+              </Link>
+            </div>
+
+            <div className="mt-5 grid gap-4 lg:grid-cols-2">
+              {priorityAgreements.slice(0, 4).map((agreement) => (
+                <Link
+                  key={agreement.id}
+                  href={`/agreement/${agreement.id}`}
+                  className="rounded-2xl border border-agent-border bg-agent-bg/45 p-4 transition-colors hover:border-agent-accent/40"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-white">{agreement.title}</div>
+                      <p className="mt-1 text-xs text-gray-500">{agreement.id.slice(0, 8)}...</p>
+                    </div>
+                    <StatusBadge status={agreement.status} />
+                  </div>
+                  <div className="mt-3 rounded-xl border border-agent-border bg-agent-card/60 px-3 py-2.5">
+                    <div className="text-[11px] uppercase tracking-[0.14em] text-gray-500">Do this next</div>
+                    <div className="mt-1 text-sm text-white">
+                      {agreement.nextParticipantAction || getStatusMeta(agreement.status).hint || 'Open the agreement to continue the next step.'}
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-400">
+                    <NetworkBadge network={agreement.payoutNetwork} />
+                    <span>{shannonsToCKB(agreement.amount)} CKB</span>
+                    <span>{agreement.milestones?.length || 0} milestones</span>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         <section className="rounded-3xl border border-agent-border bg-agent-card/70 p-5 sm:p-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -374,13 +434,10 @@ export default function DashboardPage() {
                   Loading agreements...
                 </div>
               ) : !authToken ? (
-                <div className="rounded-2xl border border-agent-border bg-agent-card p-12 text-center">
-                  <DocumentTextIcon className="mx-auto mb-4 h-10 w-10 text-gray-600" />
-                  <h3 className="mb-2 font-semibold text-white">Connect and finish wallet sign-in</h3>
-                  <p className="text-sm text-gray-400">
-                    Your dashboard, invites, webhooks, and agreement actions are all tied to your authenticated wallet session.
-                  </p>
-                </div>
+                <WalletOnboardingCard
+                  title="Finish wallet access before using the dashboard"
+                  description="Once your wallet is connected and signed in, this page turns into your action list for agreements, invites, webhooks, and profile settings."
+                />
               ) : error ? (
                 <div className="rounded-2xl border border-red-800 bg-red-900/30 p-6 text-sm text-red-200">
                   {error}

@@ -65,11 +65,11 @@ export function WalletConnect() {
   const connectionLabel = hasAuthenticatedSession
     ? hasLiveSigner
       ? 'Ready to use'
-      : 'Session active'
+      : 'Wallet needs reconnecting'
     : hasLiveSigner
       ? authStatus === 'error'
-        ? 'Wallet auth needs attention'
-        : 'Finish wallet sign-in'
+        ? 'Sign-in needs attention'
+        : 'Approve wallet sign-in'
       : 'Reconnect wallet';
   const statusDotClass = hasAuthenticatedSession
     ? hasLiveSigner
@@ -80,9 +80,14 @@ export function WalletConnect() {
         ? 'bg-red-400'
         : 'bg-amber-400'
       : 'bg-slate-500';
+  const readinessPills = [
+    { label: 'Wallet linked', active: Boolean(displayAddress) },
+    { label: 'Session signed', active: hasAuthenticatedSession },
+    { label: 'Signer ready', active: hasAuthenticatedSession && hasLiveSigner },
+  ];
 
   function formatAuthError(error: unknown) {
-    const fallback = 'Wallet authentication failed.';
+    const fallback = 'Wallet sign-in failed.';
     const message = error instanceof Error ? error.message : String(error || fallback);
     const normalized = message.toLowerCase();
 
@@ -93,7 +98,7 @@ export function WalletConnect() {
       || normalized.includes('canceled')
       || normalized.includes('declined')
     ) {
-      return 'Wallet connected, but sign-in was not completed. Try again or disconnect.';
+      return 'Your wallet connected, but sign-in was not completed. Try again or reconnect.';
     }
 
     return message || fallback;
@@ -347,17 +352,17 @@ export function WalletConnect() {
   const authHint = hasAuthenticatedSession
     ? hasLiveSigner
       ? walletSummary || 'Wallet connected and ready for agreement actions.'
-      : 'Your API session is still active, but you need to reconnect the wallet signer before signing transactions.'
+      : 'You are still signed in, but your wallet needs to reconnect before you can approve payments or other onchain actions.'
     : hasLiveSigner
       ? authError
         ? authError
-        : 'Approve the PactAgent sign-in message in your wallet to finish authentication.'
-      : 'Connect a CCC-compatible wallet, then approve the PactAgent sign-in message.';
+        : 'Approve the sign-in request in your wallet to continue.'
+      : 'Connect a compatible wallet, then approve the sign-in request.';
 
   if (displayAddress) {
     return (
       <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-3">
-        <div className={`flex min-w-0 items-center gap-2 rounded-lg border px-3 py-2 sm:py-1.5 ${
+        <div className={`flex min-w-0 flex-1 items-start gap-3 rounded-xl border px-3 py-2.5 sm:py-2 ${
           hasAuthenticatedSession
             ? 'border-agent-border bg-agent-card'
             : authStatus === 'error'
@@ -365,18 +370,32 @@ export function WalletConnect() {
               : 'border-amber-400/30 bg-amber-950/10'
         }`}>
           <div
-            className={`h-2 w-2 shrink-0 rounded-full ${statusDotClass}`}
+            className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${statusDotClass}`}
           />
           <div className="flex min-w-0 flex-col">
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {readinessPills.map((pill) => (
+                <span
+                  key={pill.label}
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                    pill.active
+                      ? 'bg-emerald-500/15 text-emerald-200'
+                      : 'bg-agent-bg/70 text-gray-500'
+                  }`}
+                >
+                  {pill.label}
+                </span>
+              ))}
+            </div>
             <span className="truncate text-xs font-mono text-gray-300">
               {displayAddress.slice(0, 12)}...{displayAddress.slice(-8)}
             </span>
-            <span className={`text-[10px] ${
+            <span className={`mt-1 text-[10px] font-medium ${
               hasAuthenticatedSession ? 'text-gray-500' : 'text-gray-300'
             }`}>
               {connectionLabel}
             </span>
-            <span className={`text-[10px] ${
+            <span className={`mt-1 text-[10px] ${
               hasAuthenticatedSession ? 'text-gray-500' : authStatus === 'error' ? 'text-red-200' : 'text-gray-400'
             }`}>
               {authHint}
@@ -390,7 +409,7 @@ export function WalletConnect() {
               disabled={working || authStatus === 'authenticating'}
               className="rounded-md border border-agent-accent/50 px-3 py-1.5 text-xs font-medium text-agent-accent transition-colors hover:bg-agent-accent/10 disabled:opacity-50"
             >
-              {authStatus === 'authenticating' ? 'Awaiting Signature...' : authError ? 'Retry Wallet Sign-In' : 'Finish Wallet Sign-In'}
+              {authStatus === 'authenticating' ? 'Waiting For Approval...' : authError ? 'Try Sign-In Again' : 'Approve Sign-In'}
             </button>
           ) : null}
           <button
@@ -410,7 +429,7 @@ export function WalletConnect() {
       <button
         onClick={handleConnect}
         disabled={working || authStatus === 'authenticating'}
-        className="flex w-full items-center justify-center gap-2 rounded-lg bg-agent-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-600 disabled:opacity-50 sm:w-auto"
+        className="flex w-full items-center justify-center gap-2 rounded-xl bg-agent-accent px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-600 disabled:opacity-50 sm:w-auto"
       >
         {working || authStatus === 'authenticating' ? (
           <>
@@ -424,8 +443,13 @@ export function WalletConnect() {
           </>
         )}
       </button>
+      <div className="flex flex-wrap gap-1.5 text-[10px] text-gray-500">
+        <span className="rounded-full bg-agent-card/80 px-2 py-0.5">1. Connect wallet</span>
+        <span className="rounded-full bg-agent-card/80 px-2 py-0.5">2. Approve sign-in</span>
+        <span className="rounded-full bg-agent-card/80 px-2 py-0.5">3. Start using PactAgent</span>
+      </div>
       <span className={`text-[11px] ${authError ? 'text-red-300' : 'text-gray-500'}`}>
-        {authError || 'Connect first, then approve the signed challenge to unlock agreements, webhooks, and profile settings.'}
+        {authError || 'Connect your wallet, then approve the sign-in request to unlock agreements, invites, webhooks, and profile settings.'}
       </span>
     </div>
   );

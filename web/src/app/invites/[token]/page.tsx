@@ -7,6 +7,8 @@ import { useStore } from '@/lib/store';
 import { acceptInvite, fetchInvitePreview } from '@/lib/api';
 import { AgentIcon, ArrowLeftIcon, LinkIcon, RocketLaunchIcon } from '@/components/Icons';
 import { NavbarMenu } from '@/components/NavbarMenu';
+import { WalletOnboardingCard } from '@/components/WalletOnboardingCard';
+import { shannonsToCKB } from '@/lib/ckb';
 
 export default function InviteLandingPage() {
   const params = useParams();
@@ -109,9 +111,32 @@ export default function InviteLandingPage() {
                   <div key={`${milestone.title}-${index}`} className="rounded-lg border border-agent-border bg-agent-card/60 p-4">
                     <div className="text-sm font-medium text-white">{milestone.title}</div>
                     <div className="mt-1 text-sm text-gray-400">{milestone.description}</div>
-                    <div className="mt-2 text-xs uppercase tracking-wide text-gray-500">{milestone.amount} shannons</div>
+                    <div className="mt-2 text-xs uppercase tracking-wide text-gray-500">
+                      {shannonsToCKB(milestone.amount)} CKB
+                    </div>
                   </div>
                 ))}
+              </div>
+            </div>
+
+            <div className="mt-6 grid gap-4 md:grid-cols-3">
+              <div className="rounded-xl border border-agent-border bg-agent-bg/50 p-4">
+                <div className="text-xs uppercase tracking-wide text-gray-500">After You Accept</div>
+                <p className="mt-2 text-sm text-gray-300">
+                  The agreement opens under your wallet identity so you can inspect the milestone plan and participant roles immediately.
+                </p>
+              </div>
+              <div className="rounded-xl border border-agent-border bg-agent-bg/50 p-4">
+                <div className="text-xs uppercase tracking-wide text-gray-500">What To Verify</div>
+                <p className="mt-2 text-sm text-gray-300">
+                  Review the scope, milestone descriptions, payout amounts, and deadline before taking on the work.
+                </p>
+              </div>
+              <div className="rounded-xl border border-agent-border bg-agent-bg/50 p-4">
+                <div className="text-xs uppercase tracking-wide text-gray-500">Typical Next Step</div>
+                <p className="mt-2 text-sm text-gray-300">
+                  Clients usually fund first. Workers then submit proof milestone by milestone and wait for review or payout.
+                </p>
               </div>
             </div>
 
@@ -119,7 +144,13 @@ export default function InviteLandingPage() {
 
             <div className="mt-6 flex flex-col gap-3 sm:flex-row">
               {!authToken ? (
-                <div className="text-sm text-gray-400">Connect and sign in first to accept this invite.</div>
+                <div className="w-full">
+                  <WalletOnboardingCard
+                    title="Connect your wallet before accepting this invite"
+                    description="Invite acceptance is wallet-based, so PactAgent needs your connected wallet and sign-in approval before it can attach this agreement to you."
+                    className="border-agent-border bg-agent-bg/30"
+                  />
+                </div>
               ) : (
                 <button type="button" onClick={handleAccept} disabled={accepting || invite.isExpired} className="rounded-xl bg-agent-accent px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-70">
                   {invite.isExpired ? 'Invite Unavailable' : accepting ? 'Accepting...' : 'Accept Invite'}
