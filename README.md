@@ -62,8 +62,10 @@ What is already implemented:
 - wallet-signature authentication with JWT-backed API sessions
 - protected agreement and participant actions
 - milestone agreement creation
-- real CKB funding from the client wallet to a treasury wallet
-- real treasury-driven payout and refund attempts on CKB
+- deployed on-chain milestone escrow lock contract (`pact_escrow_lock`)
+- real on-chain CKB milestone escrow funding with one escrow cell per milestone
+- manual on-chain escrow payout and refund transaction signing paths for CKB
+- treasury-driven funding and settlement path for agreements that still use `TREASURY_BRIDGE`
 - Fiber payout attempt path with CKB fallback
 - live agent logs and agreement updates via WebSocket
 - dispute creation and follow-up evidence submission
@@ -80,14 +82,11 @@ What is already implemented:
 - CKBoost import, campaign-link auto-fill, contributor snapshots, event history, webhook ingestion, and outbound lifecycle notifications
 - Prisma + PostgreSQL persistence, ready for Supabase
 
-What is intentionally not implemented yet:
-- Phase 7 premium automation packaging
-- workspace/DAO/sponsor feature gating
-- automation usage metering and billing-oriented event packaging
-
 Important architecture note:
 
-PactAgent currently uses real CKB transfers for funding and settlement, but the agreement state machine itself is still off-chain. Agreement state, milestones, proofs, disputes, and logs are stored in PostgreSQL through Prisma. There is no custom CKB escrow script or full on-chain contract state yet.
+PactAgent now includes a real on-chain CKB escrow lock for milestone funding and settlement on CKB L1. Each milestone can be funded into its own escrow cell, and payout / refund resolution is enforced by the on-chain `pact_escrow_lock` script.
+
+At the same time, the broader agreement coordination layer is still off-chain. Agreement metadata, participant roles, proofs, disputes, review records, logs, and lifecycle orchestration are stored in PostgreSQL through Prisma and coordinated by the backend worker. In other words: escrow settlement on CKB is on-chain, while the surrounding agreement workflow remains application-managed.
 
 ## User Flows
 
@@ -256,8 +255,9 @@ PactAgent currently uses:
 - CKB RPC node access
   - configurable for testnet or mainnet
 - real CKB L1 transfers
-  - client wallet funds the agreement by sending capacity to a treasury address
-  - treasury wallet sends payout or refund transactions
+  - client wallet can fund milestone escrow cells on-chain through the Pact escrow lock
+  - on-chain escrow payout and refund transactions can be signed manually against funded milestone cells
+  - treasury wallet still supports the `TREASURY_BRIDGE` settlement path where used
 - Fiber JSON-RPC integration
   - node health checks
   - node info
@@ -267,15 +267,16 @@ PactAgent currently uses:
   - keysend-style payout attempts
 
 How settlement works today:
-- the client funds the agreement by transferring CKB to a treasury wallet
-- the agreement stores the funding transaction hash
-- when a milestone is approved, the server attempts settlement
-- if Fiber is enabled and appropriate for the agreement, the server attempts Fiber payout first
-- if Fiber is unavailable or unsuitable, the server falls back to a treasury-driven CKB transfer
-- the settlement reference is saved on the agreement
+- for `ONCHAIN_LOCK` agreements, the client funds one escrow cell per milestone on CKB
+- the agreement stores the funding transaction hash, milestone output indexes, escrow cell data, and refund timeout metadata
+- when a milestone is approved, PactAgent prepares the milestone for manual on-chain payout settlement
+- when a refund is needed, PactAgent supports manual on-chain refund settlement for escrow-backed milestones
+- for `TREASURY_BRIDGE` agreements, the treasury-driven settlement path still exists and remains server-managed
+- if Fiber is enabled and appropriate for a treasury-bridge agreement, the server attempts Fiber payout first
+- if Fiber is unavailable or unsuitable, the server falls back to a CKB transfer
+- settlement references and audit history are saved on the agreement
 
 What is not yet implemented:
-- custom on-chain escrow locks
 - on-chain dispute logic
 - fully on-chain agreement state
 - Perun integration
@@ -640,7 +641,7 @@ The app will be available at:
 ## Important Notes For Running The App
 
 - the treasury wallet must actually hold enough CKB to send payouts and refunds
-- funding is currently sent to the treasury wallet, not into a custom escrow lock script
+- `ONCHAIN_LOCK` agreements fund milestone escrow cells directly on-chain, while `TREASURY_BRIDGE` agreements still use the treasury-managed path
 - the frontend validates a minimum 61 CKB output requirement for CKB transaction outputs
 - Fiber settlement still depends on a reachable and healthy Fiber backend
 - agreement routes are protected and require an authenticated wallet session

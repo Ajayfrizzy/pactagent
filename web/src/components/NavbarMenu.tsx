@@ -16,6 +16,8 @@ export function NavbarMenu({ children }: { children?: ReactNode }) {
     <>
       <div className="hidden md:flex items-center gap-4">
         {children}
+        <LinkButton href="/settings/profile" label="Profile" />
+        <LinkButton href="/settings/webhooks" label="Webhooks" />
         <WalletConnect />
       </div>
 
@@ -48,6 +50,8 @@ export function NavbarMenu({ children }: { children?: ReactNode }) {
               {children ? (
                 <div className="mb-4 flex flex-col items-stretch gap-2 border-b border-white/10 pb-4 text-sm">
                   {children}
+                  <LinkButton href="/settings/profile" label="Profile" />
+                  <LinkButton href="/settings/webhooks" label="Webhooks" />
                 </div>
               ) : null}
               <div className="flex flex-col items-stretch gap-3">
@@ -58,5 +62,13 @@ export function NavbarMenu({ children }: { children?: ReactNode }) {
         )}
       </div>
     </>
+  );
+}
+
+function LinkButton({ href, label }: { href: string; label: string }) {
+  return (
+    <a href={href} className="text-sm text-gray-400 transition-colors hover:text-white">
+      {label}
+    </a>
   );
 }

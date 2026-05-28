@@ -133,7 +133,7 @@ export function AgentLogPanel({ agreementId, allowedAgreementIds, publicFeed = f
             <div className={`h-2.5 w-2.5 rounded-full ${wsConnected ? 'bg-green-400 agent-active' : 'bg-red-400'}`} />
             <div className="flex items-center gap-1.5">
               <AgentIcon className="h-4 w-4 text-agent-accent" />
-              <h3 className="text-xs font-semibold text-white sm:text-sm">Agent Log Panel</h3>
+              <h3 className="text-xs font-semibold text-white sm:text-sm">Live Activity Feed</h3>
             </div>
             <span className="pl-1 text-[11px] text-gray-500 sm:pl-2 sm:text-xs">
               {wsConnected ? 'Live' : 'Reconnecting...'}

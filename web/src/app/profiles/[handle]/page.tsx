@@ -64,8 +64,22 @@ export default function PublicProfilePage() {
               <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
                 <div className="max-w-2xl">
                   <div className="mb-3 text-xs uppercase tracking-[0.18em] text-agent-accent">Nervos Marketplace Profile</div>
-                  <h1 className="text-3xl font-bold text-white">{profile.displayName || profile.handle}</h1>
-                  <p className="mt-1 text-sm text-gray-500">@{profile.handle}</p>
+                  <div className="mb-4 flex items-center gap-4">
+                    <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-agent-border bg-agent-bg/60">
+                      {profile.avatarUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={profile.avatarUrl} alt="" className="h-full w-full object-cover" />
+                      ) : (
+                        <span className="text-xl font-semibold text-gray-400">
+                          {(profile.displayName || profile.handle || 'P').trim().charAt(0).toUpperCase()}
+                        </span>
+                      )}
+                    </div>
+                    <div>
+                      <h1 className="text-3xl font-bold text-white">{profile.displayName || profile.handle}</h1>
+                      <p className="mt-1 text-sm text-gray-500">@{profile.handle}</p>
+                    </div>
+                  </div>
                   <p className="mt-4 whitespace-pre-wrap text-sm text-gray-300">{profile.bio || 'No bio yet.'}</p>
                   <div className="mt-4 flex flex-wrap gap-2">
                     {(profile.skills || []).map((skill: string) => (
@@ -80,6 +94,9 @@ export default function PublicProfilePage() {
                     <TrophyIcon className="h-4 w-4 text-amber-300" />
                     Reputation Snapshot
                   </div>
+                  <p className="mb-4 text-sm text-gray-400">
+                    This snapshot helps counterparties judge whether this profile reliably completes work, avoids disputes, and closes payouts cleanly.
+                  </p>
                   <div className="grid gap-3 sm:grid-cols-2">
                     {[
                       ['Completed', profile.reputation?.completedAgreements || 0],
@@ -97,6 +114,14 @@ export default function PublicProfilePage() {
               </div>
 
               <div className="mt-6 grid gap-4 md:grid-cols-2">
+                <div className="rounded-xl border border-agent-border bg-agent-bg/50 p-4">
+                  <div className="text-xs uppercase tracking-wide text-gray-500">Why this profile is useful</div>
+                  <div className="mt-2 space-y-2 text-sm text-gray-300">
+                    <p>Shows who is behind a wallet before an invite is accepted.</p>
+                    <p>Gives grant operators and collaborators more context than a raw address alone.</p>
+                    <p>Lets repeat counterparties build continuity across multiple agreements.</p>
+                  </div>
+                </div>
                 <div className="rounded-xl border border-agent-border bg-agent-bg/50 p-4">
                   <div className="text-xs uppercase tracking-wide text-gray-500">Fiber Public Key</div>
                   <div className="mt-2 break-all text-sm text-gray-300">{profile.fiberPubkey || 'Not published'}</div>

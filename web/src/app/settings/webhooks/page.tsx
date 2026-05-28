@@ -24,6 +24,33 @@ const EVENT_OPTIONS = [
   'source.sync_changed',
 ];
 
+const EVENT_LABELS: Record<string, { title: string; description: string }> = {
+  'agreement.created': { title: 'Agreement created', description: 'A new agreement draft was created.' },
+  'agreement.funded': { title: 'Agreement funded', description: 'The agreement escrow or treasury funding step completed.' },
+  'agreement.completed': { title: 'Agreement completed', description: 'All agreement work finished successfully.' },
+  'agreement.refunded': { title: 'Agreement refunded', description: 'Funds were returned instead of being paid out.' },
+  'agreement.expired': { title: 'Agreement expired', description: 'The agreement reached its deadline without a normal completion path.' },
+  'agreement.proof_submitted': { title: 'Proof submitted', description: 'A worker submitted proof for milestone review.' },
+  'review.action_taken': { title: 'Review action taken', description: 'A reviewer approved, rejected, or otherwise acted on a review step.' },
+  'dispute.opened': { title: 'Dispute opened', description: 'A dispute started and now needs attention.' },
+  'dispute.updated': { title: 'Dispute updated', description: 'A dispute received new evidence or another state change.' },
+  'settlement.pending': { title: 'Settlement pending', description: 'A payout, refund, or split has been prepared and is waiting to complete.' },
+  'settlement.confirmed': { title: 'Settlement confirmed', description: 'A payout, refund, or split was confirmed successfully.' },
+  'settlement.failed': { title: 'Settlement failed', description: 'A payout, refund, or split attempt failed and may need retry or intervention.' },
+  'source.sync_changed': { title: 'Source sync changed', description: 'An imported source thread or external record was updated.' },
+};
+
+const SAMPLE_PAYLOAD = `{
+  "eventType": "agreement.funded",
+  "agreementId": "agr_123",
+  "occurredAt": "2026-05-27T12:00:00.000Z",
+  "data": {
+    "title": "Treasury Design Sprint",
+    "payoutNetwork": "CKB",
+    "status": "FUNDED"
+  }
+}`;
+
 function isValidWebhookUrl(value: string) {
   try {
     const parsed = new URL(value.trim());
@@ -43,6 +70,7 @@ export default function WebhookSettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [copiedSample, setCopiedSample] = useState(false);
   const [form, setForm] = useState({
     label: '',
     targetUrl: '',
@@ -126,6 +154,12 @@ export default function WebhookSettingsPage() {
     }
   }
 
+  async function handleCopySamplePayload() {
+    await navigator.clipboard.writeText(SAMPLE_PAYLOAD);
+    setCopiedSample(true);
+    window.setTimeout(() => setCopiedSample(false), 2500);
+  }
+
   const inputClass =
     'w-full rounded-lg border border-agent-border bg-agent-bg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:border-agent-accent focus:outline-none';
   const errorInputClass = 'border-red-500/70 focus:border-red-400';
@@ -195,6 +229,15 @@ export default function WebhookSettingsPage() {
               <div className="mt-4 rounded-xl border border-agent-border bg-agent-card/70 p-3 text-xs text-gray-400">
                 PactAgent sends signed JSON payloads with headers like `X-PactAgent-Event` and `X-PactAgent-Signature`. Use a test receiver first if you just want to inspect the payload.
               </div>
+              <div className="mt-4 rounded-xl border border-agent-border bg-agent-card/70 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-semibold text-white">Sample payload</div>
+                  <button type="button" onClick={() => void handleCopySamplePayload()} className="rounded-lg border border-agent-border px-3 py-1.5 text-xs text-gray-300 hover:text-white">
+                    {copiedSample ? 'Copied' : 'Copy JSON'}
+                  </button>
+                </div>
+                <pre className="mt-3 overflow-x-auto rounded-lg bg-agent-bg p-3 text-[11px] text-gray-300">{SAMPLE_PAYLOAD}</pre>
+              </div>
             </div>
           </div>
         </section>
@@ -256,7 +299,10 @@ export default function WebhookSettingsPage() {
                           }))
                         }
                       />
-                      {eventType}
+                      <span>
+                        <span className="block text-sm text-white">{EVENT_LABELS[eventType]?.title || eventType}</span>
+                        <span className="block text-xs text-gray-500">{EVENT_LABELS[eventType]?.description || eventType}</span>
+                      </span>
                     </label>
                   ))}
                 </div>
@@ -269,6 +315,12 @@ export default function WebhookSettingsPage() {
                   <div className="text-sm font-medium text-white">Good first test</div>
                   <p className="mt-1 text-sm text-gray-400">
                     Use a temporary receiver like `webhook.site`, create an endpoint here, then trigger funding, proof submission, or settlement to inspect the incoming JSON body.
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-agent-border bg-agent-bg/50 p-4">
+                  <div className="text-sm font-medium text-white">Recommended next step</div>
+                  <p className="mt-1 text-sm text-gray-400">
+                    Start with `Agreement funded`, `Proof submitted`, and `Settlement confirmed`. Those three usually cover the most useful operator alerts before you subscribe to every lifecycle event.
                   </p>
                 </div>
                 {success ? <div className="rounded-xl border border-emerald-800 bg-emerald-900/20 p-4 text-sm text-emerald-200">{success}</div> : null}
@@ -297,7 +349,7 @@ export default function WebhookSettingsPage() {
                       <div className="mt-2 flex flex-wrap gap-2">
                         {(endpoint.eventTypes || []).slice(0, 3).map((eventType: string) => (
                           <span key={eventType} className="rounded-full border border-agent-border bg-agent-card/70 px-2 py-1 text-[10px] text-gray-400">
-                            {eventType}
+                            {EVENT_LABELS[eventType]?.title || eventType}
                           </span>
                         ))}
                         {(endpoint.eventTypes || []).length > 3 ? (
@@ -318,7 +370,8 @@ export default function WebhookSettingsPage() {
                     <div key={delivery.id} className="rounded-xl border border-agent-border bg-agent-bg/50 p-4">
                       <div className="flex items-center justify-between gap-4">
                         <div>
-                          <div className="text-sm font-medium text-white">{delivery.eventType}</div>
+                          <div className="text-sm font-medium text-white">{EVENT_LABELS[delivery.eventType]?.title || delivery.eventType}</div>
+                          <div className="mt-1 text-xs text-gray-500">{EVENT_LABELS[delivery.eventType]?.description || delivery.eventType}</div>
                           <div className="mt-1 text-xs text-gray-500">{new Date(delivery.createdAt).toLocaleString()}</div>
                         </div>
                         <div className="text-xs uppercase tracking-wide text-gray-400">{delivery.status}</div>
