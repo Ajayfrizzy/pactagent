@@ -5,12 +5,167 @@
 :root {
   --background: #0f172a;
   --foreground: #f8fafc;
+  --surface: rgba(30, 41, 59, 0.8);
+  --surface-soft: rgba(15, 23, 42, 0.55);
+  --surface-strong: rgba(15, 23, 42, 0.82);
+  --border: rgba(51, 65, 85, 0.9);
+  --border-strong: rgba(59, 130, 246, 0.3);
+  --accent: #3b82f6;
+}
+
+html {
+  color-scheme: dark;
 }
 
 body {
-  background: var(--background);
+  background:
+    radial-gradient(circle at top left, rgba(59, 130, 246, 0.12), transparent 28%),
+    radial-gradient(circle at top right, rgba(14, 165, 233, 0.08), transparent 24%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 1));
   color: var(--foreground);
   font-family: system-ui, -apple-system, sans-serif;
+}
+
+::selection {
+  background: rgba(59, 130, 246, 0.28);
+  color: #f8fafc;
+}
+
+@layer components {
+  .app-nav {
+    @apply sticky top-0 z-50 border-b border-agent-border backdrop-blur-md;
+    background: rgba(30, 41, 59, 0.64);
+  }
+
+  .app-nav-inner {
+    @apply mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6;
+  }
+
+  .app-nav-link {
+    @apply text-sm text-gray-400 transition-colors hover:text-white;
+  }
+
+  .app-nav-link-accent {
+    @apply text-sm text-agent-accent transition-colors hover:text-blue-300;
+  }
+
+  .page-back-link {
+    @apply inline-flex items-center gap-2 text-sm text-gray-300 transition-colors hover:text-white;
+  }
+
+  .ui-panel {
+    @apply rounded-3xl border border-agent-border bg-agent-card/80;
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
+  }
+
+  .ui-panel-flat {
+    @apply rounded-2xl border border-agent-border bg-agent-card/70;
+  }
+
+  .ui-panel-soft {
+    @apply rounded-2xl border border-agent-border bg-agent-bg/55;
+  }
+
+  .ui-panel-raised {
+    @apply rounded-2xl border border-agent-border;
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.88), rgba(30, 41, 59, 0.92));
+    box-shadow: 0 14px 35px rgba(15, 23, 42, 0.2);
+  }
+
+  .ui-kicker {
+    @apply inline-flex items-center gap-2 rounded-full border border-agent-border bg-agent-bg/70 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-agent-accent;
+  }
+
+  .ui-chip {
+    @apply inline-flex items-center gap-2 rounded-full border border-agent-border bg-agent-card/70 px-3 py-1 text-xs text-gray-300;
+  }
+
+  .ui-chip-muted {
+    @apply inline-flex items-center gap-2 rounded-full border border-agent-border bg-agent-bg/70 px-2.5 py-1 text-[11px] uppercase tracking-[0.16em] text-gray-300;
+  }
+
+  .ui-button-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-agent-accent px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .ui-button-primary-sm {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-agent-accent px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .ui-button-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-agent-border bg-agent-bg/40 px-5 py-3 text-sm font-medium text-gray-200 transition-colors hover:border-agent-accent/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .ui-button-secondary-sm {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-agent-border bg-agent-bg/40 px-4 py-2.5 text-sm font-medium text-gray-200 transition-colors hover:border-agent-accent/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .ui-button-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-agent-accent/35 bg-agent-accent/10 px-4 py-2.5 text-sm font-medium text-agent-accent transition-colors hover:bg-agent-accent/20 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .ui-button-ghost-danger {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-red-400/30 bg-red-950/10 px-4 py-2.5 text-sm font-medium text-red-200 transition-colors hover:bg-red-950/20 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .ui-button-plain {
+    @apply text-sm text-gray-500 transition-colors hover:text-gray-300 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .ui-input {
+    @apply w-full rounded-xl border border-agent-border bg-agent-bg px-4 py-2.5 text-sm text-white placeholder-gray-500 transition-colors focus:border-agent-accent focus:outline-none;
+  }
+
+  .ui-input-error {
+    @apply border-red-500/70 focus:border-red-400;
+  }
+
+  .ui-label {
+    @apply mb-1.5 block text-sm font-medium text-gray-300;
+  }
+
+  .ui-helper {
+    @apply mt-1.5 text-xs text-gray-500;
+  }
+
+  .ui-error-text {
+    @apply mt-1.5 text-xs text-red-300;
+  }
+
+  .ui-alert-error {
+    @apply rounded-xl border border-red-800 bg-red-900/30 p-4 text-sm text-red-200;
+  }
+
+  .ui-alert-success {
+    @apply rounded-xl border border-emerald-800 bg-emerald-900/20 p-4 text-sm text-emerald-200;
+  }
+
+  .ui-alert-warning {
+    @apply rounded-xl border border-yellow-800 bg-yellow-900/20 p-4 text-sm text-yellow-200;
+  }
+
+  .ui-mobile-panel {
+    @apply rounded-2xl border border-agent-accent/35 bg-slate-900/95 p-4 ring-1 ring-white/10 backdrop-blur;
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.55);
+  }
+
+  .ui-icon-button {
+    @apply inline-flex h-11 w-11 items-center justify-center rounded-xl border text-white transition-all;
+    border-color: rgba(59, 130, 246, 0.4);
+    background: rgba(15, 23, 42, 0.9);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
+  }
+
+  .ui-icon-button:hover {
+    border-color: rgba(59, 130, 246, 0.8);
+    background: rgba(15, 23, 42, 0.96);
+  }
+
+  .ui-icon-button[data-open='true'] {
+    border-color: rgba(59, 130, 246, 0.8);
+    background: rgba(59, 130, 246, 0.18);
+    box-shadow: 0 0 24px rgba(59, 130, 246, 0.35);
+  }
 }
 
 /* Custom scrollbar for Agent Log Panel */

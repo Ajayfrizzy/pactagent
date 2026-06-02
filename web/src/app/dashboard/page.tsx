@@ -21,7 +21,147 @@ import {
   ClipboardDocumentCheckIcon,
   ShieldCheckIcon,
   RocketLaunchIcon,
+  ExclamationTriangleIcon,
+  ClockIcon,
+  SparklesIcon,
+  BoltIcon,
+  LinkIcon,
 } from '@/components/Icons';
+
+type AgreementRecord = {
+  id: string;
+  title: string;
+  description: string;
+  clientAddress: string;
+  workerAddress: string;
+  amount: string;
+  deadlineAt: string;
+  reviewerMode: string;
+  payoutNetwork: string;
+  settlementStatus?: string | null;
+  status: string;
+  nextParticipantAction?: string | null;
+  workflowStage?: string;
+  source?: {
+    sourceType: string;
+    sourceLabel: string;
+    sponsorName?: string | null;
+  } | null;
+  milestones?: Array<{ status: string }>;
+};
+
+type DashboardFilter = 'ALL' | 'ACTION' | 'IN_FLIGHT' | 'DONE' | 'IMPORTED';
+
+type ActionLane = {
+  key: 'urgent' | 'attention' | 'in_flight' | 'done';
+  label: string;
+  title: string;
+  description: string;
+  count: number;
+  accentClass: string;
+  toneClass: string;
+  agreements: AgreementRecord[];
+};
+
+type HighlightCard = {
+  label: string;
+  value: string;
+  hint: string;
+  icon: React.FC<{ className?: string }>;
+  chipClass: string;
+  accentClass: string;
+};
+
+const FILTER_OPTIONS: Array<{
+  key: DashboardFilter;
+  label: string;
+  description: string;
+}> = [
+  { key: 'ALL', label: 'All agreements', description: 'Everything in your workspace' },
+  { key: 'ACTION', label: 'Needs action', description: 'Draft, proof, review, or failed states' },
+  { key: 'IN_FLIGHT', label: 'In flight', description: 'Funded work currently moving' },
+  { key: 'DONE', label: 'Settled / closed', description: 'Paid, refunded, or expired agreements' },
+  { key: 'IMPORTED', label: 'Imported', description: 'DAO, bounty, and CKBoost sourced work' },
+];
+
+function getAgreementPriorityScore(agreement: AgreementRecord) {
+  switch (agreement.status) {
+    case 'FAILED':
+      return 100;
+    case 'DISPUTED':
+      return 95;
+    case 'UNDER_REVIEW':
+      return 90;
+    case 'PROOF_SUBMITTED':
+      return 82;
+    case 'DRAFT':
+      return agreement.settlementStatus === 'FUNDING_PENDING' ? 78 : 72;
+    case 'FUNDED':
+      return 60;
+    case 'APPROVED':
+      return 52;
+    case 'PAID':
+      return 18;
+    case 'REFUNDED':
+      return 16;
+    case 'EXPIRED':
+      return 12;
+    default:
+      return 30;
+  }
+}
+
+function getAgreementLane(agreement: AgreementRecord): ActionLane['key'] {
+  if (['FAILED', 'DISPUTED', 'UNDER_REVIEW'].includes(agreement.status)) {
+    return 'urgent';
+  }
+
+  if (['PROOF_SUBMITTED', 'DRAFT'].includes(agreement.status) || agreement.settlementStatus === 'FUNDING_PENDING') {
+    return 'attention';
+  }
+
+  if (['FUNDED', 'APPROVED'].includes(agreement.status) || ['PAYOUT_PENDING', 'REFUND_PENDING', 'SPLIT_PENDING'].includes(agreement.settlementStatus || '')) {
+    return 'in_flight';
+  }
+
+  return 'done';
+}
+
+function getAgreementRole(agreement: AgreementRecord, walletAddress: string | null) {
+  if (!walletAddress) {
+    return 'Observer';
+  }
+
+  if (walletAddress === agreement.clientAddress) {
+    return 'Client Operator';
+  }
+
+  if (walletAddress === agreement.workerAddress) {
+    return 'Worker / Builder';
+  }
+
+  return 'Observer';
+}
+
+function getModeLabel(agreement: AgreementRecord) {
+  return agreement.source ? `${agreement.source.sourceType} Grant Mode` : 'Direct Agreement Mode';
+}
+
+function matchesFilter(agreement: AgreementRecord, filter: DashboardFilter) {
+  switch (filter) {
+    case 'ACTION':
+      return ['FAILED', 'DISPUTED', 'UNDER_REVIEW', 'PROOF_SUBMITTED', 'DRAFT'].includes(agreement.status) || agreement.settlementStatus === 'FUNDING_PENDING';
+    case 'IN_FLIGHT':
+      return ['FUNDED', 'APPROVED'].includes(agreement.status) || ['PAYOUT_PENDING', 'REFUND_PENDING', 'SPLIT_PENDING'].includes(agreement.settlementStatus || '');
+    case 'DONE':
+      return ['PAID', 'REFUNDED', 'EXPIRED'].includes(agreement.status);
+    case 'IMPORTED':
+      return Boolean(agreement.source);
+    case 'ALL':
+    default:
+      return true;
+  }
+}
 
 export default function DashboardPage() {
   useWebSocket();
@@ -29,10 +169,11 @@ export default function DashboardPage() {
   const authToken = useStore((s) => s.authToken);
   const isAdmin = useStore((s) => s.isAdmin);
   const updateCount = useStore((s) => s.agreementUpdateCount);
-  const [agreements, setAgreements] = useState<any[]>([]);
+  const [agreements, setAgreements] = useState<AgreementRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [inviteMessage, setInviteMessage] = useState<string | null>(null);
+  const [activeFilter, setActiveFilter] = useState<DashboardFilter>('ALL');
 
   useEffect(() => {
     async function load() {
@@ -59,99 +200,142 @@ export default function DashboardPage() {
     void load();
   }, [authToken, walletAddress, updateCount]);
 
+  const sortedAgreements = useMemo(
+    () => [...agreements].sort((left, right) => {
+      const priorityDelta = getAgreementPriorityScore(right) - getAgreementPriorityScore(left);
+      if (priorityDelta !== 0) {
+        return priorityDelta;
+      }
+
+      return new Date(right.deadlineAt).getTime() - new Date(left.deadlineAt).getTime();
+    }),
+    [agreements],
+  );
+
   const stats = useMemo(() => {
-    const totalEscrow = agreements.reduce(
-      (sum, agreement) => sum + Number(agreement.amount || 0),
-      0
-    );
-    const activeCount = agreements.filter((agreement) =>
-      ['FUNDED', 'PROOF_SUBMITTED', 'UNDER_REVIEW', 'DISPUTED'].includes(agreement.status)
-    ).length;
-    const reviewCount = agreements.filter((agreement) =>
-      ['UNDER_REVIEW', 'DISPUTED'].includes(agreement.status)
-    ).length;
+    const totalEscrow = agreements.reduce((sum, agreement) => sum + Number(agreement.amount || 0), 0);
+    const activeCount = agreements.filter((agreement) => ['FUNDED', 'PROOF_SUBMITTED', 'UNDER_REVIEW', 'DISPUTED', 'APPROVED'].includes(agreement.status)).length;
+    const reviewCount = agreements.filter((agreement) => ['UNDER_REVIEW', 'DISPUTED'].includes(agreement.status)).length;
     const completedCount = agreements.filter((agreement) => agreement.status === 'PAID').length;
+    const urgentCount = agreements.filter((agreement) => getAgreementLane(agreement) === 'urgent').length;
+    const attentionCount = agreements.filter((agreement) => getAgreementLane(agreement) === 'attention').length;
+    const grantAgreements = agreements.filter((agreement) => Boolean(agreement.source)).length;
 
     return {
       totalEscrow,
       activeCount,
       reviewCount,
       completedCount,
+      urgentCount,
+      attentionCount,
+      grantAgreements,
     };
   }, [agreements]);
 
-  const glanceCards = useMemo(
+  const highlightCards = useMemo<HighlightCard[]>(
     () => [
       {
-        label: 'Agreements',
-        value: String(agreements.length),
-        hint: 'Total contracts tracked',
-        icon: ClipboardDocumentCheckIcon,
-        accent: 'text-sky-300',
-        chip: 'bg-sky-500/15 border-sky-400/20',
+        label: 'Urgent decisions',
+        value: String(stats.urgentCount),
+        hint: 'Disputes, failed settlement, or review bottlenecks',
+        icon: ExclamationTriangleIcon,
+        chipClass: 'border-rose-400/30 bg-rose-500/10',
+        accentClass: 'text-rose-200',
       },
       {
-        label: 'Active Escrows',
-        value: String(stats.activeCount),
-        hint: 'Currently in motion',
-        icon: RocketLaunchIcon,
-        accent: 'text-emerald-300',
-        chip: 'bg-emerald-500/15 border-emerald-400/20',
+        label: 'Needs action soon',
+        value: String(stats.attentionCount),
+        hint: 'Drafts, proof handoffs, and funding follow-through',
+        icon: ClockIcon,
+        chipClass: 'border-amber-400/30 bg-amber-500/10',
+        accentClass: 'text-amber-200',
       },
       {
-        label: 'Needs Review',
-        value: String(stats.reviewCount),
-        hint: 'Awaiting a decision',
-        icon: ScaleIcon,
-        accent: 'text-amber-300',
-        chip: 'bg-amber-500/15 border-amber-400/20',
-      },
-      {
-        label: 'Escrowed Value',
-        value: `${shannonsToCKB(stats.totalEscrow)} CKB`,
-        hint: 'Locked across milestones',
+        label: 'Active value',
+        value: `${shannonsToCKB(String(stats.totalEscrow))} CKB`,
+        hint: 'Value currently routed through your agreements',
         icon: CurrencyDollarIcon,
-        accent: 'text-violet-300',
-        chip: 'bg-violet-500/15 border-violet-400/20',
+        chipClass: 'border-emerald-400/30 bg-emerald-500/10',
+        accentClass: 'text-emerald-200',
+      },
+      {
+        label: 'Imported work',
+        value: String(stats.grantAgreements),
+        hint: 'DAO, bounty, and CKBoost sourced agreements',
+        icon: SparklesIcon,
+        chipClass: 'border-fuchsia-400/30 bg-fuchsia-500/10',
+        accentClass: 'text-fuchsia-200',
       },
     ],
-    [agreements.length, stats.activeCount, stats.reviewCount, stats.totalEscrow]
+    [stats.attentionCount, stats.grantAgreements, stats.totalEscrow, stats.urgentCount],
   );
 
-  const agreementsNeedingAttention = agreements.filter((agreement) =>
-    ['UNDER_REVIEW', 'DISPUTED', 'PROOF_SUBMITTED', 'FAILED'].includes(agreement.status)
-  ).length;
-  const priorityAgreements = agreements.filter((agreement) =>
-    ['PROOF_SUBMITTED', 'UNDER_REVIEW', 'DISPUTED', 'FAILED', 'DRAFT'].includes(agreement.status)
+  const topAgreement = sortedAgreements[0] || null;
+
+  const actionLanes = useMemo<ActionLane[]>(
+    () => {
+      const urgent = sortedAgreements.filter((agreement) => getAgreementLane(agreement) === 'urgent').slice(0, 3);
+      const attention = sortedAgreements.filter((agreement) => getAgreementLane(agreement) === 'attention').slice(0, 4);
+      const inFlight = sortedAgreements.filter((agreement) => getAgreementLane(agreement) === 'in_flight').slice(0, 4);
+      const done = sortedAgreements.filter((agreement) => getAgreementLane(agreement) === 'done').slice(0, 3);
+
+      return [
+        {
+          key: 'urgent',
+          label: 'Act now',
+          title: 'Decisions that can block trust or settlement',
+          description: 'Open these first. They are the agreements most likely to stall a payout, review, or dispute process.',
+          count: urgent.length,
+          accentClass: 'text-rose-200',
+          toneClass: 'border-rose-400/25 bg-rose-950/12',
+          agreements: urgent,
+        },
+        {
+          key: 'attention',
+          label: 'Next up',
+          title: 'Near-term tasks waiting for a human follow-through',
+          description: 'These are not broken yet, but they need your next move to keep work flowing.',
+          count: attention.length,
+          accentClass: 'text-amber-200',
+          toneClass: 'border-amber-400/20 bg-amber-950/10',
+          agreements: attention,
+        },
+        {
+          key: 'in_flight',
+          label: 'In motion',
+          title: 'Agreements progressing without immediate risk',
+          description: 'Work is underway, funded, or settling. Use these for situational awareness instead of urgent triage.',
+          count: inFlight.length,
+          accentClass: 'text-sky-200',
+          toneClass: 'border-sky-400/20 bg-sky-950/10',
+          agreements: inFlight,
+        },
+        {
+          key: 'done',
+          label: 'Closed out',
+          title: 'Settled or finished agreements',
+          description: 'These are useful for audit history, reputation, and confirming what has already landed.',
+          count: done.length,
+          accentClass: 'text-emerald-200',
+          toneClass: 'border-emerald-400/20 bg-emerald-950/10',
+          agreements: done,
+        },
+      ];
+    },
+    [sortedAgreements],
   );
-  const grantAgreements = agreements.filter((agreement) => Boolean(agreement.source)).length;
-  const lifecycleLanes = useMemo(
-    () => [
-      {
-        label: 'Draft & Funding',
-        value: agreements.filter((agreement) => agreement.status === 'DRAFT' || agreement.settlementStatus === 'FUNDING_PENDING').length,
-        hint: 'Still being finalized or funded',
-      },
-      {
-        label: 'Delivery',
-        value: agreements.filter((agreement) => ['FUNDED', 'PROOF_SUBMITTED'].includes(agreement.status)).length,
-        hint: 'Work is underway or proof just landed',
-      },
-      {
-        label: 'Review & Dispute',
-        value: agreements.filter((agreement) => ['UNDER_REVIEW', 'DISPUTED'].includes(agreement.status)).length,
-        hint: 'A human decision is required',
-      },
-      {
-        label: 'Settlement & Done',
-        value: agreements.filter((agreement) => ['PAID', 'REFUNDED', 'EXPIRED'].includes(agreement.status) || ['PAYOUT_PENDING', 'REFUND_PENDING', 'SPLIT_PENDING'].includes(agreement.settlementStatus || '')).length,
-        hint: 'Payout, refund, or closure in progress',
-      },
-    ],
+
+  const filteredAgreements = useMemo(
+    () => sortedAgreements.filter((agreement) => matchesFilter(agreement, activeFilter)),
+    [activeFilter, sortedAgreements],
+  );
+
+  const visibleAgreementIds = useMemo(
+    () => agreements.map((agreement) => agreement.id),
     [agreements],
   );
 
-  async function handleCreateInvite(event: React.MouseEvent, agreement: any) {
+  async function handleCreateInvite(event: React.MouseEvent, agreement: AgreementRecord) {
     event.preventDefault();
     event.stopPropagation();
 
@@ -172,17 +356,15 @@ export default function DashboardPage() {
           title: agreement.title,
           description: agreement.description,
           deadlineAt: agreement.deadlineAt,
-          disputeWindowSecs: agreement.disputeWindowSecs,
-          proofType: agreement.proofType,
+          disputeWindowSecs: 86400,
+          proofType: 'URL',
           reviewerMode: agreement.reviewerMode,
-          releaseMode: agreement.releaseMode,
+          releaseMode: 'PARTIAL',
           payoutNetwork: agreement.payoutNetwork,
-          escrowModel: agreement.escrowModel,
-          workerFiberPubkey: agreement.workerFiberPubkey || undefined,
-          milestones: (agreement.milestones || []).map((milestone: any) => ({
-            title: milestone.title,
-            description: milestone.description,
-            amount: milestone.amount,
+          milestones: (agreement.milestones || []).map((milestone, index) => ({
+            title: `Milestone ${index + 1}`,
+            description: `Imported from ${agreement.title}`,
+            amount: '0',
           })),
         },
       });
@@ -198,38 +380,32 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen">
-      <nav className="sticky top-0 z-50 border-b border-agent-border bg-agent-card/50 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+      <nav className="app-nav">
+        <div className="app-nav-inner">
           <BrandLogo />
           <NavbarMenu>
-            <Link href="/" className="text-sm text-gray-400 transition-colors hover:text-white">
-              Home
-            </Link>
-            {isAdmin ? (
-              <Link href="/admin" className="text-sm text-agent-accent transition-colors hover:text-blue-300">
-                Admin
-              </Link>
-            ) : null}
+            <Link href="/" className="app-nav-link">Home</Link>
+            {isAdmin ? <Link href="/admin" className="app-nav-link-accent">Admin</Link> : null}
           </NavbarMenu>
         </div>
       </nav>
 
       <div className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6">
         <section className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <Link
-            href="/"
-            className="inline-flex items-center gap-3 text-sm text-gray-300 transition-colors hover:text-white"
-          >
+          <Link href="/" className="page-back-link gap-3">
             <ArrowLeftIcon className="h-5 w-5" />
             Back to Home
           </Link>
-          <Link
-            href="/agreement/new"
-            className="inline-flex items-center justify-center gap-2 self-start rounded-xl bg-agent-accent px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-600 sm:self-auto"
-          >
-            <PlusIcon className="h-4 w-4" />
-            New Agreement
-          </Link>
+          <div className="flex flex-wrap gap-3">
+            <Link href="/agreement/import-ckboost" className="ui-button-ghost">
+              <BoltIcon className="h-4 w-4" />
+              Create from CKBoost
+            </Link>
+            <Link href="/agreement/new" className="ui-button-primary-sm">
+              <PlusIcon className="h-4 w-4" />
+              New Agreement
+            </Link>
+          </div>
         </section>
 
         {!authToken ? (
@@ -239,192 +415,243 @@ export default function DashboardPage() {
           />
         ) : null}
 
-        <section className="rounded-3xl border border-agent-border bg-agent-card/80 p-5 shadow-[0_24px_60px_rgba(15,23,42,0.28)] sm:p-6 md:p-8">
-          <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
-            <div className="max-w-2xl">
-              <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-agent-border bg-agent-bg/70 px-3 py-1 text-xs uppercase tracking-[0.2em] text-agent-accent">
+        <section className="ui-panel overflow-hidden p-6 md:p-8">
+          <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+            <div>
+              <div className="ui-kicker mb-4">
                 <span className="h-2 w-2 animate-pulse rounded-full bg-agent-accent" />
-                Action Overview
+                Command Center
               </div>
-              <h1 className="mb-3 text-2xl font-bold text-white sm:text-3xl md:text-4xl">What needs your attention right now</h1>
-              <p className="text-sm text-gray-400 md:text-base">
-                Start with urgent agreements, then drop into lifecycle views, settings, and activity when you need more context.
+              <h1 className="text-3xl font-bold text-white sm:text-4xl">Run your agreement queue from one place</h1>
+              <p className="mt-3 max-w-3xl text-sm text-gray-400 md:text-base">
+                This dashboard now prioritizes what is stuck, what needs a decision, and what can safely wait. Start with the featured agreement, then use the action lanes to keep the rest of the workspace moving.
               </p>
-              <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                <div className="rounded-2xl border border-agent-border bg-agent-bg/60 p-4">
-                  <div className="text-[11px] uppercase tracking-[0.16em] text-amber-300">Needs review</div>
-                  <p className="mt-2 text-sm text-gray-300">
-                    {stats.reviewCount} agreement{stats.reviewCount === 1 ? '' : 's'} are waiting for a payout or dispute decision.
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-agent-border bg-agent-bg/60 p-4">
-                  <div className="text-[11px] uppercase tracking-[0.16em] text-sky-300">In progress</div>
-                  <p className="mt-2 text-sm text-gray-300">
-                    {stats.activeCount} agreement{stats.activeCount === 1 ? '' : 's'} are funded and moving through delivery.
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-agent-border bg-agent-bg/60 p-4">
-                  <div className="text-[11px] uppercase tracking-[0.16em] text-orange-300">Imported work</div>
-                  <p className="mt-2 text-sm text-gray-300">
-                    {grantAgreements} agreement{grantAgreements === 1 ? '' : 's'} came from DAO, bounty, or CKBoost sources.
-                  </p>
-                </div>
+
+              <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {highlightCards.map((card) => {
+                  const Icon = card.icon;
+                  return (
+                    <div key={card.label} className="ui-panel-raised p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">{card.label}</div>
+                          <div className="mt-2 text-2xl font-semibold text-white">{card.value}</div>
+                        </div>
+                        <div className={`flex h-11 w-11 items-center justify-center rounded-2xl border ${card.chipClass}`}>
+                          <Icon className={`h-5 w-5 ${card.accentClass}`} />
+                        </div>
+                      </div>
+                      <p className="mt-3 text-sm text-gray-400">{card.hint}</p>
+                    </div>
+                  );
+                })}
               </div>
             </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:min-w-[470px] xl:max-w-[520px] xl:flex-1">
-              {glanceCards.map((card) => {
-                const Icon = card.icon;
-                return (
-                  <div
-                    key={card.label}
-                    className="rounded-2xl border border-agent-border bg-gradient-to-br from-agent-bg/85 to-agent-card/90 p-4 shadow-[0_14px_35px_rgba(15,23,42,0.2)]"
-                  >
-                    <div className="mb-4 flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">{card.label}</div>
-                        <div className="mt-2 text-xl font-semibold text-white sm:text-2xl">{card.value}</div>
-                      </div>
-                      <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border ${card.chip}`}>
-                        <Icon className={`h-5 w-5 ${card.accent}`} />
-                      </div>
-                    </div>
-                    <p className="text-sm text-gray-400">{card.hint}</p>
+
+            <div className="ui-panel-soft p-5">
+              <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Workspace Snapshot</div>
+              <div className="mt-4 space-y-4">
+                <div className="flex items-start justify-between gap-3 rounded-2xl border border-agent-border bg-agent-card/65 p-4">
+                  <div>
+                    <div className="text-sm font-semibold text-white">Review pressure</div>
+                    <p className="mt-1 text-sm text-gray-400">
+                      {stats.reviewCount} agreement{stats.reviewCount === 1 ? '' : 's'} currently need payout, review, or dispute judgment.
+                    </p>
                   </div>
-                );
-              })}
+                  <ScaleIcon className="h-5 w-5 text-amber-300" />
+                </div>
+                <div className="flex items-start justify-between gap-3 rounded-2xl border border-agent-border bg-agent-card/65 p-4">
+                  <div>
+                    <div className="text-sm font-semibold text-white">Delivery underway</div>
+                    <p className="mt-1 text-sm text-gray-400">
+                      {stats.activeCount} agreement{stats.activeCount === 1 ? '' : 's'} are currently funded or moving through proof and settlement.
+                    </p>
+                  </div>
+                  <RocketLaunchIcon className="h-5 w-5 text-sky-300" />
+                </div>
+                <div className="flex items-start justify-between gap-3 rounded-2xl border border-agent-border bg-agent-card/65 p-4">
+                  <div>
+                    <div className="text-sm font-semibold text-white">Reputation history</div>
+                    <p className="mt-1 text-sm text-gray-400">
+                      {stats.completedCount} agreement{stats.completedCount === 1 ? '' : 's'} have fully settled and now count toward your operating history.
+                    </p>
+                  </div>
+                  <CheckCircleIcon className="h-5 w-5 text-emerald-300" />
+                </div>
+                <div className="rounded-2xl border border-agent-border bg-agent-bg/70 p-4 text-sm text-gray-300">
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-gray-500">Connected wallet</div>
+                  <div className="mt-2 break-all font-mono text-xs text-white">
+                    {walletAddress || 'Connect to unlock agreement actions'}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </section>
 
-        {authToken && priorityAgreements.length > 0 ? (
-          <section className="rounded-3xl border border-agent-border bg-agent-card/75 p-5 sm:p-6">
+        {authToken && topAgreement ? (
+          <section className="ui-panel p-6">
+            <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+              <div className="max-w-3xl">
+                <div className="ui-kicker mb-3 border-agent-accent/35 bg-agent-accent/10">
+                  <ShieldCheckIcon className="h-4 w-4" />
+                  Featured Agreement
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <StatusBadge status={topAgreement.status} />
+                  <StatusBadge status={topAgreement.settlementStatus || 'UNFUNDED'} />
+                  <span className="ui-chip-muted">{getAgreementRole(topAgreement, walletAddress)}</span>
+                  <span className="ui-chip-muted">{getModeLabel(topAgreement)}</span>
+                </div>
+                <h2 className="mt-4 text-2xl font-semibold text-white">{topAgreement.title}</h2>
+                <p className="mt-3 text-sm text-gray-400">
+                  {topAgreement.nextParticipantAction || getStatusMeta(topAgreement.status).hint || 'Open this agreement to continue the next meaningful step.'}
+                </p>
+                <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                  <div className="ui-panel-soft p-4">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-gray-500">Escrowed amount</div>
+                    <div className="mt-2 text-lg font-semibold text-white">{shannonsToCKB(topAgreement.amount)} CKB</div>
+                  </div>
+                  <div className="ui-panel-soft p-4">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-gray-500">Deadline</div>
+                    <div className="mt-2 text-lg font-semibold text-white">{new Date(topAgreement.deadlineAt).toLocaleDateString()}</div>
+                  </div>
+                  <div className="ui-panel-soft p-4">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-gray-500">Review mode</div>
+                    <div className="mt-2 text-lg font-semibold text-white">{topAgreement.reviewerMode}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="ui-panel-soft w-full max-w-md p-5">
+                <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Recommended next move</div>
+                <p className="mt-3 text-sm text-gray-300">
+                  Use the primary action first, then return here to work through the next lane in order.
+                </p>
+                <div className="mt-5 flex flex-col gap-3">
+                  <Link href={`/agreement/${topAgreement.id}`} className="ui-button-primary">
+                    <ClipboardDocumentCheckIcon className="h-4 w-4" />
+                    Open Featured Agreement
+                  </Link>
+                  {topAgreement.status === 'DRAFT' ? (
+                    <button
+                      type="button"
+                      onClick={(event) => void handleCreateInvite(event, topAgreement)}
+                      className="ui-button-ghost"
+                    >
+                      <LinkIcon className="h-4 w-4" />
+                      Copy Worker Invite
+                    </button>
+                  ) : null}
+                  <Link href="/agreement/new" className="ui-button-secondary">
+                    <PlusIcon className="h-4 w-4" />
+                    Start Another Agreement
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {authToken ? (
+          <section className="ui-panel p-6">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Priority Queue</div>
-                <h2 className="mt-2 text-xl font-semibold text-white">Start here</h2>
+                <div className="ui-kicker mb-2">Action Lanes</div>
+                <h2 className="text-2xl font-semibold text-white">Work through the queue in the right order</h2>
                 <p className="mt-1 text-sm text-gray-400">
-                  These agreements are closest to needing a concrete decision, funding step, or participant handoff.
+                  The lanes below separate blocked work from healthy in-flight work so you can protect flow first, then optimize throughput.
                 </p>
               </div>
-              <Link
-                href="/agreement/new"
-                className="inline-flex items-center justify-center rounded-xl border border-agent-accent/35 bg-agent-accent/10 px-4 py-2.5 text-sm font-medium text-agent-accent hover:bg-agent-accent/20"
-              >
-                Create another agreement
-              </Link>
             </div>
 
-            <div className="mt-5 grid gap-4 lg:grid-cols-2">
-              {priorityAgreements.slice(0, 4).map((agreement) => (
-                <Link
-                  key={agreement.id}
-                  href={`/agreement/${agreement.id}`}
-                  className="rounded-2xl border border-agent-border bg-agent-bg/45 p-4 transition-colors hover:border-agent-accent/40"
-                >
+            <div className="mt-6 grid gap-4 xl:grid-cols-2">
+              {actionLanes.map((lane) => (
+                <div key={lane.key} className={`rounded-3xl border p-5 ${lane.toneClass}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <div className="text-sm font-semibold text-white">{agreement.title}</div>
-                      <p className="mt-1 text-xs text-gray-500">{agreement.id.slice(0, 8)}...</p>
+                      <div className={`text-[11px] uppercase tracking-[0.18em] ${lane.accentClass}`}>{lane.label}</div>
+                      <h3 className="mt-2 text-lg font-semibold text-white">{lane.title}</h3>
                     </div>
-                    <StatusBadge status={agreement.status} />
-                  </div>
-                  <div className="mt-3 rounded-xl border border-agent-border bg-agent-card/60 px-3 py-2.5">
-                    <div className="text-[11px] uppercase tracking-[0.14em] text-gray-500">Do this next</div>
-                    <div className="mt-1 text-sm text-white">
-                      {agreement.nextParticipantAction || getStatusMeta(agreement.status).hint || 'Open the agreement to continue the next step.'}
+                    <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-sm font-semibold text-white">
+                      {lane.count}
                     </div>
                   </div>
-                  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-400">
-                    <NetworkBadge network={agreement.payoutNetwork} />
-                    <span>{shannonsToCKB(agreement.amount)} CKB</span>
-                    <span>{agreement.milestones?.length || 0} milestones</span>
+                  <p className="mt-2 text-sm text-gray-400">{lane.description}</p>
+
+                  <div className="mt-4 space-y-3">
+                    {lane.agreements.length ? lane.agreements.map((agreement) => (
+                      <Link
+                        key={`${lane.key}-${agreement.id}`}
+                        href={`/agreement/${agreement.id}`}
+                        className="block rounded-2xl border border-agent-border bg-agent-card/70 p-4 transition-colors hover:border-agent-accent/40"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-semibold text-white">{agreement.title}</div>
+                            <p className="mt-1 text-xs text-gray-500">{agreement.id.slice(0, 8)}...</p>
+                          </div>
+                          <StatusBadge status={agreement.status} />
+                        </div>
+                        <div className="mt-3 rounded-xl border border-agent-border bg-agent-bg/55 px-3 py-2.5">
+                          <div className="text-[11px] uppercase tracking-[0.14em] text-gray-500">Do this next</div>
+                          <div className="mt-1 text-sm text-white">
+                            {agreement.nextParticipantAction || getStatusMeta(agreement.status).hint || 'Open the agreement to continue the next step.'}
+                          </div>
+                        </div>
+                        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-400">
+                          <NetworkBadge network={agreement.payoutNetwork} />
+                          <span>{shannonsToCKB(agreement.amount)} CKB</span>
+                          <span>{agreement.milestones?.length || 0} milestones</span>
+                        </div>
+                      </Link>
+                    )) : (
+                      <div className="rounded-2xl border border-agent-border bg-agent-bg/45 p-4 text-sm text-gray-400">
+                        No agreements currently fall into this lane.
+                      </div>
+                    )}
                   </div>
-                </Link>
+                </div>
               ))}
             </div>
           </section>
         ) : null}
 
-        <section className="rounded-3xl border border-agent-border bg-agent-card/70 p-5 sm:p-6">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div className="max-w-2xl">
-              <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Lifecycle Lanes</div>
-              <h2 className="mt-2 text-xl font-semibold text-white">See where agreements are clustered right now</h2>
-              <p className="mt-1 text-sm text-gray-400">
-                PactAgent now reads as an operating system for agreement progression. These lanes show whether your work is still being drafted, delivered, reviewed, or settled.
-              </p>
-            </div>
-            <div className="rounded-2xl border border-agent-border bg-agent-bg/60 px-4 py-3 text-sm text-gray-300">
-              <div className="text-[11px] uppercase tracking-[0.16em] text-gray-500">Imported grants / bounties</div>
-              <div className="mt-2 text-xl font-semibold text-white">{grantAgreements}</div>
-            </div>
-          </div>
-
-          <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            {lifecycleLanes.map((lane) => (
-              <div key={lane.label} className="rounded-2xl border border-agent-border bg-agent-bg/55 p-4">
-                <div className="text-[11px] uppercase tracking-[0.16em] text-gray-500">{lane.label}</div>
-                <div className="mt-2 text-2xl font-semibold text-white">{lane.value}</div>
-                <p className="mt-2 text-sm text-gray-400">{lane.hint}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <div className="grid grid-cols-1 gap-8 xl:grid-cols-3">
-          <div className="space-y-6 xl:col-span-2">
-            <section className="rounded-2xl border border-agent-border bg-agent-card/70 p-5">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <h2 className="text-lg font-bold text-white sm:text-xl">Dashboard</h2>
-              </div>
-                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <p className="mt-1 text-sm text-gray-400">
-                      Your current operating snapshot for every active agreement.
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-3 text-sm">
-                    <div className="min-w-[180px] rounded-xl border border-agent-border bg-agent-bg/60 px-4 py-3">
-                      <div className="mb-1 text-xs uppercase tracking-wide text-gray-500">Completed payouts</div>
-                      <div className="flex items-center gap-2 font-medium text-white">
-                        <CheckCircleIcon className="h-4 w-4 text-green-400" />
-                        {stats.completedCount} settled agreements
-                      </div>
-                    </div>
-                    <div className="min-w-[180px] rounded-xl border border-agent-border bg-agent-bg/60 px-4 py-3">
-                      <div className="mb-1 text-xs uppercase tracking-wide text-gray-500">Needs attention</div>
-                      <div className="flex items-center gap-2 font-medium text-white">
-                        <ShieldCheckIcon className="h-4 w-4 text-amber-300" />
-                        {agreementsNeedingAttention} agreements
-                      </div>
-                    </div>
-                    <div className="min-w-[180px] rounded-xl border border-agent-border bg-agent-bg/60 px-4 py-3">
-                      <div className="mb-1 text-xs uppercase tracking-wide text-gray-500">Connected wallet</div>
-                      <div className="break-all font-mono text-xs text-white">
-                        {walletAddress || 'Connect to unlock agreement actions'}
-                      </div>
-                    </div>
-                    <Link
-                      href="/agreement/import-ckboost"
-                      className="inline-flex min-w-[180px] items-center justify-center rounded-xl border border-orange-500/30 bg-orange-500/10 px-4 py-3 text-sm font-medium text-orange-200 transition-colors hover:bg-orange-500/20"
-                    >
-                      Create from CKBoost
-                    </Link>
-                  </div>
+        <div className="grid grid-cols-1 gap-8 xl:grid-cols-[1.5fr_0.9fr]">
+          <div className="space-y-6">
+            <section className="ui-panel p-6">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <div className="ui-kicker mb-2">Agreement List</div>
+                  <h2 className="text-2xl font-semibold text-white">Browse the whole workspace with intent</h2>
+                  <p className="mt-1 text-sm text-gray-400">
+                    Filter by action state when you need to focus, then drop into any agreement for detailed review, proof, settlement, or dispute handling.
+                  </p>
                 </div>
+                <div className="flex flex-wrap gap-2">
+                  {FILTER_OPTIONS.map((filter) => (
+                    <button
+                      key={filter.key}
+                      type="button"
+                      onClick={() => setActiveFilter(filter.key)}
+                      className={activeFilter === filter.key ? 'ui-button-primary-sm' : 'ui-button-secondary-sm'}
+                    >
+                      {filter.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-3 text-sm text-gray-400">
+                {FILTER_OPTIONS.map((filter) => (
+                  <div key={`desc-${filter.key}`} className={`rounded-full border px-3 py-1 ${activeFilter === filter.key ? 'border-agent-accent/30 bg-agent-accent/10 text-agent-accent' : 'border-agent-border bg-agent-bg/50'}`}>
+                    {filter.description}
+                  </div>
+                ))}
+              </div>
             </section>
 
             <section>
-              <div className="mb-4 flex items-center justify-between gap-4">
-                <h2 className="text-lg font-bold text-white sm:text-xl">Your Agreements</h2>
-                <Link
-                  href="/agreement/new"
-                  className="text-sm text-agent-accent transition-colors hover:text-blue-300"
-                >
-                  Create another
-                </Link>
-              </div>
-
               {loading ? (
                 <div className="flex items-center justify-center rounded-2xl border border-agent-border bg-agent-card/60 py-20 text-gray-500">
                   <div className="mr-3 h-6 w-6 animate-spin rounded-full border-2 border-agent-accent border-t-transparent" />
@@ -436,140 +663,134 @@ export default function DashboardPage() {
                   description="Once your wallet is connected and signed in, this page turns into your action list for agreements, invites, webhooks, and profile settings."
                 />
               ) : error ? (
-                <div className="rounded-2xl border border-red-800 bg-red-900/30 p-6 text-sm text-red-200">
-                  {error}
-                </div>
-              ) : agreements.length === 0 ? (
-                <div className="rounded-2xl border border-agent-border bg-agent-card p-12 text-center">
+                <div className="ui-alert-error rounded-2xl p-6">{error}</div>
+              ) : filteredAgreements.length === 0 ? (
+                <div className="ui-panel p-12 text-center">
                   <DocumentTextIcon className="mx-auto mb-4 h-10 w-10 text-gray-600" />
-                  <h3 className="mb-2 font-semibold text-white">No agreements yet</h3>
-                  <p className="mb-3 text-sm text-gray-400">
-                    Start with a direct milestone agreement, or import a DAO / bounty grant and fund the full milestone plan from one place.
+                  <h3 className="mb-2 font-semibold text-white">
+                    {agreements.length ? 'No agreements match this filter' : 'No agreements yet'}
+                  </h3>
+                  <p className="mb-4 text-sm text-gray-400">
+                    {agreements.length
+                      ? 'Try another filter or create a new agreement to add more work into the queue.'
+                      : 'Start with a direct milestone agreement, or import DAO / bounty work and let PactAgent organize the full lifecycle from there.'}
                   </p>
-                  <div className="mb-6 flex flex-wrap items-center justify-center gap-3 text-xs text-gray-500">
-                    <span className="rounded-full border border-agent-border px-3 py-1">1. Define milestones</span>
-                    <span className="rounded-full border border-agent-border px-3 py-1">2. Fund once</span>
-                    <span className="rounded-full border border-agent-border px-3 py-1">3. Review and release</span>
-                  </div>
                   <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
-                    <Link
-                      href="/agreement/new"
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-agent-accent px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-600"
-                    >
+                    <Link href="/agreement/new" className="ui-button-primary-sm px-6">
                       <PlusIcon className="h-4 w-4" />
                       Create Agreement
                     </Link>
-                    <Link
-                      href="/agreement/import-bounty"
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-agent-border px-6 py-2.5 text-sm font-medium text-gray-200 transition-colors hover:bg-agent-bg"
-                    >
+                    <Link href="/agreement/import-bounty" className="ui-button-secondary-sm px-6">
                       Import DAO / Bounty
-                    </Link>
-                    <Link
-                      href="/agreement/import-ckboost"
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-orange-500/30 px-6 py-2.5 text-sm font-medium text-orange-200 transition-colors hover:bg-orange-500/10"
-                    >
-                      Create from CKBoost
                     </Link>
                   </div>
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {inviteMessage ? (
-                    <div className="rounded-xl border border-emerald-800 bg-emerald-900/20 p-4 text-sm text-emerald-200">
-                      {inviteMessage}
-                    </div>
-                  ) : null}
-                  {agreements.map((ag) => {
-                    const paidMilestones =
-                      ag.milestones?.filter((milestone: any) => milestone.status === 'PAID').length ?? 0;
-                    const totalMilestones = ag.milestones?.length ?? 0;
+                  {inviteMessage ? <div className="ui-alert-success">{inviteMessage}</div> : null}
+                  {filteredAgreements.map((agreement) => {
+                    const paidMilestones = agreement.milestones?.filter((milestone) => milestone.status === 'PAID').length ?? 0;
+                    const totalMilestones = agreement.milestones?.length ?? 0;
                     const milestoneProgress = totalMilestones ? Math.round((paidMilestones / totalMilestones) * 100) : 0;
-                    const primaryStatus = getStatusMeta(ag.status);
-                    const settlementStatus = getStatusMeta(ag.settlementStatus || 'UNFUNDED');
-                    const viewerRole = walletAddress === ag.clientAddress ? 'Client Operator' : walletAddress === ag.workerAddress ? 'Worker / Builder' : 'Observer';
-                    const modeLabel = ag.source ? `${ag.source.sourceType} Grant Mode` : 'Direct Agreement Mode';
+                    const primaryStatus = getStatusMeta(agreement.status);
+                    const settlementStatus = getStatusMeta(agreement.settlementStatus || 'UNFUNDED');
+                    const viewerRole = getAgreementRole(agreement, walletAddress);
+                    const modeLabel = getModeLabel(agreement);
 
                     return (
                       <Link
-                        key={ag.id}
-                        href={`/agreement/${ag.id}`}
-                        className="group block rounded-2xl border border-agent-border bg-agent-card p-5 transition-all hover:border-agent-accent/50"
+                        key={agreement.id}
+                        href={`/agreement/${agreement.id}`}
+                        className="group block rounded-3xl border border-agent-border bg-agent-card p-5 transition-all hover:border-agent-accent/45"
                       >
-                        <div className="mb-3 flex items-start justify-between gap-4">
-                          <div>
-                            <div className="mb-2 flex flex-wrap items-center gap-2">
+                        <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+                          <div className="min-w-0 flex-1">
+                            <div className="mb-3 flex flex-wrap items-center gap-2">
                               <span className={`rounded-full border px-2.5 py-1 text-[11px] uppercase tracking-[0.16em] ${
-                                ag.source
+                                agreement.source
                                   ? 'border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-200'
                                   : 'border-sky-500/30 bg-sky-500/10 text-sky-200'
                               }`}>
                                 {modeLabel}
                               </span>
-                              <span className="rounded-full border border-agent-border bg-agent-bg/70 px-2.5 py-1 text-[11px] uppercase tracking-[0.16em] text-gray-300">
-                                {viewerRole}
-                              </span>
+                              <span className="ui-chip-muted">{viewerRole}</span>
+                              {agreement.workflowStage ? <span className="ui-chip-muted">{agreement.workflowStage}</span> : null}
                             </div>
-                            <h3 className="font-semibold text-white transition-colors group-hover:text-agent-accent">
-                              {ag.title}
-                            </h3>
-                            <p className="mt-1 text-xs text-gray-500">{ag.id.slice(0, 8)}...</p>
-                          </div>
-                          <div className="flex flex-col items-end gap-2">
-                            <StatusBadge status={ag.status} />
-                            <StatusBadge status={ag.settlementStatus || 'UNFUNDED'} />
-                          </div>
-                        </div>
-                        <p className="mb-4 line-clamp-2 text-sm text-gray-400">{ag.description}</p>
-                        <div className="mb-4 rounded-xl border border-agent-border bg-agent-bg/50 px-4 py-3">
-                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                            <div>
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <h3 className="text-lg font-semibold text-white transition-colors group-hover:text-agent-accent">
+                                  {agreement.title}
+                                </h3>
+                                <p className="mt-1 text-xs text-gray-500">{agreement.id.slice(0, 8)}...</p>
+                              </div>
+                              <div className="flex flex-wrap gap-2 xl:justify-end">
+                                <StatusBadge status={agreement.status} />
+                                <StatusBadge status={agreement.settlementStatus || 'UNFUNDED'} />
+                              </div>
+                            </div>
+
+                            <p className="mt-4 line-clamp-2 text-sm text-gray-400">{agreement.description}</p>
+
+                            <div className="mt-4 rounded-2xl border border-agent-border bg-agent-bg/50 px-4 py-3">
                               <div className="text-[11px] uppercase tracking-[0.14em] text-gray-500">What happens next</div>
-                              <div className="mt-1 text-sm text-white">{ag.nextParticipantAction || primaryStatus.hint || 'Open the agreement to continue the next step.'}</div>
-                            </div>
-                            <div className="text-right text-xs text-gray-400">
-                              <div>{primaryStatus.label}</div>
-                              <div>{settlementStatus.label}</div>
+                              <div className="mt-1 text-sm text-white">
+                                {agreement.nextParticipantAction || primaryStatus.hint || 'Open the agreement to continue the next step.'}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                        <div className="mb-4">
-                          <div className="mb-2 flex items-center justify-between text-xs text-gray-500">
-                            <span>Milestone progress</span>
-                            <span>{paidMilestones}/{totalMilestones} paid</span>
+
+                          <div className="w-full xl:max-w-[19rem]">
+                            <div className="rounded-2xl border border-agent-border bg-agent-bg/55 p-4">
+                              <div className="mb-3 flex items-center justify-between text-xs text-gray-500">
+                                <span>Milestone progress</span>
+                                <span>{paidMilestones}/{totalMilestones} paid</span>
+                              </div>
+                              <div className="h-2 rounded-full bg-agent-bg/80">
+                                <div
+                                  className="h-2 rounded-full bg-agent-accent transition-[width]"
+                                  style={{ width: `${milestoneProgress}%` }}
+                                />
+                              </div>
+                              <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-gray-400">
+                                <div>
+                                  <div className="text-[11px] uppercase tracking-[0.14em] text-gray-500">Value</div>
+                                  <div className="mt-1 font-mono text-white">{shannonsToCKB(agreement.amount)} CKB</div>
+                                </div>
+                                <div>
+                                  <div className="text-[11px] uppercase tracking-[0.14em] text-gray-500">Deadline</div>
+                                  <div className="mt-1 text-white">{new Date(agreement.deadlineAt).toLocaleDateString()}</div>
+                                </div>
+                                <div>
+                                  <div className="text-[11px] uppercase tracking-[0.14em] text-gray-500">Settlement</div>
+                                  <div className="mt-1 text-white">{settlementStatus.label}</div>
+                                </div>
+                                <div>
+                                  <div className="text-[11px] uppercase tracking-[0.14em] text-gray-500">Payout</div>
+                                  <div className="mt-1"><NetworkBadge network={agreement.payoutNetwork} /></div>
+                                </div>
+                              </div>
+                            </div>
                           </div>
-                          <div className="h-2 rounded-full bg-agent-bg/80">
-                            <div
-                              className="h-2 rounded-full bg-agent-accent transition-[width]"
-                              style={{ width: `${milestoneProgress}%` }}
-                            />
-                          </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-3 text-xs text-gray-500 md:grid-cols-5">
-                          <span className="font-mono text-gray-300">{shannonsToCKB(ag.amount)} CKB</span>
-                          <NetworkBadge network={ag.payoutNetwork} />
-                          <span>
-                            Milestones {paidMilestones}/{totalMilestones}
-                          </span>
-                          <span>{ag.reviewerMode} review</span>
-                          <span>{new Date(ag.deadlineAt).toLocaleDateString()}</span>
-                        </div>
-                        {ag.source ? (
-                          <div className="mt-4 rounded-xl border border-agent-border bg-agent-bg/50 px-4 py-3 text-xs text-gray-400">
-                            Imported from <span className="font-medium text-white">{ag.source.sourceLabel}</span>
-                            {ag.source.sponsorName ? ` · sponsored by ${ag.source.sponsorName}` : ''}.
+
+                        {agreement.source ? (
+                          <div className="mt-4 rounded-2xl border border-agent-border bg-agent-bg/45 px-4 py-3 text-xs text-gray-400">
+                            Imported from <span className="font-medium text-white">{agreement.source.sourceLabel}</span>
+                            {agreement.source.sponsorName ? ` · sponsored by ${agreement.source.sponsorName}` : ''}.
                           </div>
                         ) : null}
-                        {ag.status === 'DRAFT' ? (
-                          <div className="mt-4 flex flex-wrap gap-3">
+
+                        {agreement.status === 'DRAFT' ? (
+                          <div className="mt-4 flex flex-wrap items-center gap-3">
                             <button
                               type="button"
-                              onClick={(event) => void handleCreateInvite(event, ag)}
-                              className="rounded-lg border border-agent-accent/40 bg-agent-accent/10 px-3 py-2 text-xs font-medium text-agent-accent hover:bg-agent-accent/20"
+                              onClick={(event) => void handleCreateInvite(event, agreement)}
+                              className="ui-button-ghost"
                             >
-                              Create and Copy Worker Invite
+                              <LinkIcon className="h-4 w-4" />
+                              Copy Worker Invite
                             </button>
-                            <span className="self-center text-xs text-gray-500">
+                            <span className="text-xs text-gray-500">
                               Generates a shareable invite link and copies it to your clipboard automatically.
                             </span>
                           </div>
@@ -583,35 +804,55 @@ export default function DashboardPage() {
           </div>
 
           <div className="space-y-6">
-            <section className="rounded-2xl border border-agent-border bg-agent-card/70 p-4 sm:p-5">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <h2 className="text-lg font-bold text-white sm:text-xl">Operations</h2>
-              </div>
-                <div className="mb-4 rounded-xl border border-agent-border bg-agent-bg/50 p-4">
-                  <h3 className="text-sm font-semibold text-white">Marketplace Setup</h3>
-                  <p className="mt-2 text-xs text-gray-400">
-                    Configure the surfaces that help people discover, trust, and integrate your agreements.
+            <section className="ui-panel p-5">
+              <div className="ui-kicker mb-3">Operations</div>
+              <h2 className="text-xl font-semibold text-white">Support the workspace around the agreements</h2>
+              <p className="mt-2 text-sm text-gray-400">
+                These actions improve trust, visibility, and integrations around the contract flow itself.
+              </p>
+
+              <div className="mt-5 space-y-3">
+                <div className="ui-panel-soft p-4">
+                  <h3 className="text-sm font-semibold text-white">Marketplace setup</h3>
+                  <p className="mt-2 text-sm text-gray-400">
+                    Make it easier for counterparties and external systems to trust and connect to your operation.
                   </p>
                   <div className="mt-3 flex flex-wrap gap-3 text-sm">
-                    <Link href="/settings/profile" className="text-agent-accent hover:text-blue-300">
-                      Edit public profile
-                    </Link>
-                    <Link href="/settings/webhooks" className="text-agent-accent hover:text-blue-300">
-                      Manage webhooks
-                    </Link>
-                    <Link href="/agreement/import-bounty" className="text-agent-accent hover:text-blue-300">
-                      Import DAO / bounty
-                    </Link>
+                    <Link href="/settings/profile" className="app-nav-link-accent">Edit public profile</Link>
+                    <Link href="/settings/webhooks" className="app-nav-link-accent">Manage webhooks</Link>
+                    <Link href="/agreement/import-bounty" className="app-nav-link-accent">Import DAO / bounty</Link>
                   </div>
                 </div>
-                <h2 className="mb-3 flex items-center gap-2 text-base font-semibold text-white sm:text-lg">
-                  <span className="h-2 w-2 animate-pulse rounded-full bg-green-400" />
-                  Agent Activity
-                </h2>
-                <p className="mb-4 text-sm text-gray-400">
-                  Live operational logs from the agreement watcher, reviewer, and settlement routines.
-                </p>
-                <AgentLogPanel allowedAgreementIds={agreements.map((agreement) => agreement.id)} />
+
+                <div className="ui-panel-soft p-4">
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-gray-500">Quick reads</div>
+                  <div className="mt-3 space-y-3 text-sm text-gray-400">
+                    <div className="flex items-start gap-3">
+                      <ClipboardDocumentCheckIcon className="mt-0.5 h-4 w-4 text-sky-300" />
+                      <span>Use draft agreements to align scope first, then fund once the milestone plan is stable.</span>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <ScaleIcon className="mt-0.5 h-4 w-4 text-amber-300" />
+                      <span>Review and dispute states deserve the fastest turnaround because they directly affect trust.</span>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <CurrencyDollarIcon className="mt-0.5 h-4 w-4 text-emerald-300" />
+                      <span>Paid and refunded agreements are useful history, but they should not compete with active decisions.</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="ui-panel p-5">
+              <div className="mb-4 flex items-center gap-2 text-white">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-green-400" />
+                <h2 className="text-lg font-semibold">Agent Activity</h2>
+              </div>
+              <p className="mb-4 text-sm text-gray-400">
+                Live operational logs from the agreement watcher, reviewer, and settlement routines.
+              </p>
+              <AgentLogPanel allowedAgreementIds={visibleAgreementIds} />
             </section>
           </div>
         </div>

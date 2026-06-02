@@ -126,7 +126,7 @@ export function AgentLogPanel({ agreementId, allowedAgreementIds, publicFeed = f
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   return (
-    <div className="overflow-hidden rounded-xl border border-agent-border bg-agent-card">
+    <div className="ui-panel-flat overflow-hidden">
       <div className="border-b border-agent-border bg-agent-bg/50 px-4 py-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -144,10 +144,10 @@ export function AgentLogPanel({ agreementId, allowedAgreementIds, publicFeed = f
               <button
                 key={level}
                 onClick={() => setFilter(level)}
-                className={`rounded px-2 py-0.5 text-[10px] font-mono transition-colors ${
+                className={`rounded-full px-2.5 py-1 text-[10px] font-mono transition-colors ${
                   filter === level
                     ? 'bg-agent-accent text-white'
-                    : 'bg-agent-bg text-gray-400 hover:text-gray-200'
+                    : 'bg-agent-bg/70 text-gray-400 hover:text-gray-200'
                 }`}
               >
                 {level}

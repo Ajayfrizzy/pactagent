@@ -50,22 +50,12 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen">
-      <nav className="sticky top-0 z-50 border-b border-agent-border bg-agent-card/50 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+      <nav className="app-nav">
+        <div className="app-nav-inner">
           <BrandLogo />
           <NavbarMenu>
-            {walletAddress ? (
-              <>
-                <Link href="/dashboard" className="text-sm text-gray-400 transition-colors hover:text-white">
-                  Dashboard
-                </Link>
-                {isAdmin ? (
-                  <Link href="/admin" className="text-sm text-agent-accent transition-colors hover:text-blue-300">
-                    Admin
-                  </Link>
-                ) : null}
-              </>
-            ) : null}
+            {walletAddress ? <Link href="/dashboard" className="app-nav-link">Dashboard</Link> : null}
+            {walletAddress && isAdmin ? <Link href="/admin" className="app-nav-link-accent">Admin</Link> : null}
           </NavbarMenu>
         </div>
       </nav>
@@ -94,13 +84,13 @@ export default function HomePage() {
                     <>
                       <Link
                         href="/dashboard"
-                        className="inline-flex items-center justify-center rounded-xl bg-agent-accent px-6 py-3 font-medium text-white transition-colors hover:bg-blue-600"
+                        className="ui-button-primary"
                       >
                         Open Dashboard
                       </Link>
                       <Link
                         href="/agreement/new"
-                        className="inline-flex items-center justify-center rounded-xl border border-agent-border bg-agent-bg/50 px-6 py-3 font-medium text-white transition-colors hover:border-agent-accent"
+                        className="ui-button-secondary"
                       >
                         Create Agreement
                       </Link>

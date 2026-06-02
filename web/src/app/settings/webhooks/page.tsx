@@ -160,11 +160,10 @@ export default function WebhookSettingsPage() {
     window.setTimeout(() => setCopiedSample(false), 2500);
   }
 
-  const inputClass =
-    'w-full rounded-lg border border-agent-border bg-agent-bg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:border-agent-accent focus:outline-none';
-  const errorInputClass = 'border-red-500/70 focus:border-red-400';
-  const helperClass = 'mt-1 text-xs text-gray-500';
-  const fieldErrorClass = 'mt-1 text-xs text-red-300';
+  const inputClass = 'ui-input';
+  const errorInputClass = 'ui-input-error';
+  const helperClass = 'ui-helper';
+  const fieldErrorClass = 'ui-error-text';
   const labelError = !form.label.trim() && submitAttempted
     ? 'Optional, but adding a label makes it easier to tell endpoints apart later.'
     : null;
@@ -176,27 +175,25 @@ export default function WebhookSettingsPage() {
 
   return (
     <div className="min-h-screen">
-      <nav className="sticky top-0 z-50 border-b border-agent-border bg-agent-card/50 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+      <nav className="app-nav">
+        <div className="app-nav-inner">
           <BrandLogo />
           <NavbarMenu>
-            <Link href="/dashboard" className="text-sm text-gray-400 transition-colors hover:text-white">
-              Dashboard
-            </Link>
+            <Link href="/dashboard" className="app-nav-link">Dashboard</Link>
           </NavbarMenu>
         </div>
       </nav>
 
       <div className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6">
-        <Link href="/dashboard" className="inline-flex items-center gap-2 text-sm text-gray-400 hover:text-white">
+        <Link href="/dashboard" className="page-back-link text-gray-400">
           <ArrowLeftIcon className="h-4 w-4" />
           Back to dashboard
         </Link>
 
-        <section className="rounded-3xl border border-agent-border bg-gradient-to-br from-agent-card/95 via-agent-card/85 to-agent-bg/95 p-6 shadow-[0_24px_70px_rgba(15,23,42,0.28)]">
+        <section className="ui-panel p-6">
           <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
             <div>
-              <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-agent-border bg-agent-bg/60 px-3 py-1 text-[11px] uppercase tracking-[0.16em] text-agent-accent">
+              <div className="ui-kicker mb-2">
                 <BoltIcon className="h-4 w-4" />
                 Integrations
               </div>
@@ -219,20 +216,20 @@ export default function WebhookSettingsPage() {
                 </div>
               </div>
             </div>
-            <div className="rounded-2xl border border-agent-border bg-agent-bg/55 p-5">
+            <div className="ui-panel-soft p-5">
               <div className="text-sm font-semibold text-white">What kind of link works?</div>
               <ul className="mt-3 space-y-2 text-sm text-gray-400">
                 <li>`https://yourapp.com/api/pactagent/webhook`</li>
                 <li>`https://webhook.site/your-test-id`</li>
                 <li>`https://hooks.zapier.com/...`</li>
               </ul>
-              <div className="mt-4 rounded-xl border border-agent-border bg-agent-card/70 p-3 text-xs text-gray-400">
+              <div className="ui-panel-flat mt-4 p-3 text-xs text-gray-400">
                 PactAgent sends signed JSON payloads with headers like `X-PactAgent-Event` and `X-PactAgent-Signature`. Use a test receiver first if you just want to inspect the payload.
               </div>
-              <div className="mt-4 rounded-xl border border-agent-border bg-agent-card/70 p-4">
+              <div className="ui-panel-flat mt-4 p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-sm font-semibold text-white">Sample payload</div>
-                  <button type="button" onClick={() => void handleCopySamplePayload()} className="rounded-lg border border-agent-border px-3 py-1.5 text-xs text-gray-300 hover:text-white">
+                  <button type="button" onClick={() => void handleCopySamplePayload()} className="ui-button-secondary-sm rounded-lg px-3 py-1.5 text-xs">
                     {copiedSample ? 'Copied' : 'Copy JSON'}
                   </button>
                 </div>
@@ -243,7 +240,7 @@ export default function WebhookSettingsPage() {
         </section>
 
         <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-          <section className="rounded-3xl border border-agent-border bg-agent-card/90 p-6 shadow-[0_18px_50px_rgba(15,23,42,0.22)]">
+          <section className="ui-panel p-6">
             <div className="mb-6">
               <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Create Endpoint</div>
               <h2 className="mt-2 text-xl font-bold text-white">Tell PactAgent where to send events</h2>
@@ -311,28 +308,28 @@ export default function WebhookSettingsPage() {
                 ) : (
                   <p className={helperClass}>Pick only the lifecycle events this endpoint actually needs.</p>
                 )}
-                <div className="rounded-2xl border border-agent-border bg-agent-bg/50 p-4">
+                <div className="ui-panel-soft p-4">
                   <div className="text-sm font-medium text-white">Good first test</div>
                   <p className="mt-1 text-sm text-gray-400">
                     Use a temporary receiver like `webhook.site`, create an endpoint here, then trigger funding, proof submission, or settlement to inspect the incoming JSON body.
                   </p>
                 </div>
-                <div className="rounded-2xl border border-agent-border bg-agent-bg/50 p-4">
+                <div className="ui-panel-soft p-4">
                   <div className="text-sm font-medium text-white">Recommended next step</div>
                   <p className="mt-1 text-sm text-gray-400">
                     Start with `Agreement funded`, `Proof submitted`, and `Settlement confirmed`. Those three usually cover the most useful operator alerts before you subscribe to every lifecycle event.
                   </p>
                 </div>
-                {success ? <div className="rounded-xl border border-emerald-800 bg-emerald-900/20 p-4 text-sm text-emerald-200">{success}</div> : null}
-                {error ? <div className="rounded-xl border border-red-800 bg-red-900/30 p-4 text-sm text-red-200">{error}</div> : null}
-                <button type="submit" disabled={saving || !form.eventTypes.length} className="w-full rounded-xl bg-agent-accent px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto">
+                {success ? <div className="ui-alert-success">{success}</div> : null}
+                {error ? <div className="ui-alert-error">{error}</div> : null}
+                <button type="submit" disabled={saving || !form.eventTypes.length} className="ui-button-primary-sm w-full sm:w-auto">
                   {saving ? 'Creating...' : 'Create Webhook'}
                 </button>
               </form>
             )}
           </section>
 
-          <section className="rounded-3xl border border-agent-border bg-agent-card/90 p-6 shadow-[0_18px_50px_rgba(15,23,42,0.22)]">
+          <section className="ui-panel p-6">
             <div className="mb-5 flex items-center gap-2 text-white">
               <LinkIcon className="h-4 w-4 text-agent-accent" />
               Endpoint Activity
@@ -360,7 +357,7 @@ export default function WebhookSettingsPage() {
                       </div>
                     </button>
                   )) : (
-                    <div className="rounded-xl border border-agent-border bg-agent-bg/50 p-4 text-sm text-gray-400">
+                    <div className="ui-panel-soft p-4 text-sm text-gray-400">
                       No webhook endpoints yet. Add one on the left, then trigger an agreement event to start building a delivery history here.
                     </div>
                   )}

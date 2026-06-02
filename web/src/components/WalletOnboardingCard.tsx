@@ -51,10 +51,10 @@ export function WalletOnboardingCard({
   const currentStepIndex = hasAuthenticatedSession ? 2 : hasSigner ? 1 : 0;
 
   return (
-    <section className={`rounded-3xl border border-agent-border bg-agent-card/85 p-6 shadow-[0_22px_60px_rgba(15,23,42,0.24)] ${className}`.trim()}>
+    <section className={`ui-panel p-6 ${className}`.trim()}>
       <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
         <div className="max-w-2xl">
-          <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-agent-accent/30 bg-agent-accent/10 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-agent-accent">
+          <div className="ui-kicker mb-3 border-agent-accent/30 bg-agent-accent/10">
             <AgentIcon className="h-4 w-4" />
             Wallet Access
           </div>
@@ -62,7 +62,7 @@ export function WalletOnboardingCard({
           <p className="mt-2 text-sm text-gray-300">{description}</p>
         </div>
 
-        <div className="rounded-2xl border border-agent-border bg-agent-bg/55 p-4 lg:w-[20rem]">
+        <div className="ui-panel-soft p-4 lg:w-[20rem]">
           <div className="text-[11px] uppercase tracking-[0.16em] text-gray-500">Current state</div>
           <div className="mt-2 text-sm font-medium text-white">
             {hasAuthenticatedSession

@@ -407,7 +407,7 @@ export function WalletConnect() {
             <button
               onClick={handleRetryAuthentication}
               disabled={working || authStatus === 'authenticating'}
-              className="rounded-md border border-agent-accent/50 px-3 py-1.5 text-xs font-medium text-agent-accent transition-colors hover:bg-agent-accent/10 disabled:opacity-50"
+              className="ui-button-ghost rounded-md px-3 py-1.5 text-xs"
             >
               {authStatus === 'authenticating' ? 'Waiting For Approval...' : authError ? 'Try Sign-In Again' : 'Approve Sign-In'}
             </button>
@@ -415,7 +415,7 @@ export function WalletConnect() {
           <button
             onClick={handleDisconnect}
             disabled={working}
-            className="self-start text-xs text-gray-500 transition-colors hover:text-gray-300 disabled:opacity-50 sm:self-auto"
+            className="ui-button-plain self-start text-xs sm:self-auto"
           >
             Disconnect
           </button>
@@ -429,7 +429,7 @@ export function WalletConnect() {
       <button
         onClick={handleConnect}
         disabled={working || authStatus === 'authenticating'}
-        className="flex w-full items-center justify-center gap-2 rounded-xl bg-agent-accent px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-600 disabled:opacity-50 sm:w-auto"
+        className="ui-button-primary-sm flex w-full sm:w-auto"
       >
         {working || authStatus === 'authenticating' ? (
           <>
@@ -444,9 +444,9 @@ export function WalletConnect() {
         )}
       </button>
       <div className="flex flex-wrap gap-1.5 text-[10px] text-gray-500">
-        <span className="rounded-full bg-agent-card/80 px-2 py-0.5">1. Connect wallet</span>
-        <span className="rounded-full bg-agent-card/80 px-2 py-0.5">2. Approve sign-in</span>
-        <span className="rounded-full bg-agent-card/80 px-2 py-0.5">3. Start using PactAgent</span>
+        <span className="ui-chip-muted px-2 py-0.5 normal-case tracking-normal">1. Connect wallet</span>
+        <span className="ui-chip-muted px-2 py-0.5 normal-case tracking-normal">2. Approve sign-in</span>
+        <span className="ui-chip-muted px-2 py-0.5 normal-case tracking-normal">3. Start using PactAgent</span>
       </div>
       <span className={`text-[11px] ${authError ? 'text-red-300' : 'text-gray-500'}`}>
         {authError || 'Connect your wallet, then approve the sign-in request to unlock agreements, invites, webhooks, and profile settings.'}

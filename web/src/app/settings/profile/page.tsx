@@ -116,32 +116,29 @@ export default function ProfileSettingsPage() {
     }
   }
 
-  const inputClass =
-    'w-full rounded-lg border border-agent-border bg-agent-bg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:border-agent-accent focus:outline-none';
+  const inputClass = 'ui-input';
 
   return (
     <div className="min-h-screen">
-      <nav className="sticky top-0 z-50 border-b border-agent-border bg-agent-card/50 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+      <nav className="app-nav">
+        <div className="app-nav-inner">
           <BrandLogo />
           <NavbarMenu>
-            <Link href="/dashboard" className="text-sm text-gray-400 transition-colors hover:text-white">
-              Dashboard
-            </Link>
+            <Link href="/dashboard" className="app-nav-link">Dashboard</Link>
           </NavbarMenu>
         </div>
       </nav>
 
       <div className="mx-auto max-w-4xl space-y-6 px-4 py-8 sm:px-6">
-        <Link href="/dashboard" className="inline-flex items-center gap-2 text-sm text-gray-400 hover:text-white">
+        <Link href="/dashboard" className="page-back-link text-gray-400">
           <ArrowLeftIcon className="h-4 w-4" />
           Back to dashboard
         </Link>
 
-        <section className="rounded-3xl border border-agent-border bg-agent-card/80 p-6">
+        <section className="ui-panel p-6">
           <div className="mb-6 flex items-start justify-between gap-4">
             <div>
-              <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-agent-border bg-agent-bg/60 px-3 py-1 text-xs uppercase tracking-[0.16em] text-agent-accent">
+              <div className="ui-kicker mb-2">
                 <ShieldCheckIcon className="h-4 w-4" />
                 Public Identity
               </div>
@@ -151,7 +148,7 @@ export default function ProfileSettingsPage() {
               </p>
             </div>
             {profile?.handle ? (
-              <Link href={`/profiles/${profile.handle}`} className="text-sm text-agent-accent hover:text-blue-300">
+              <Link href={`/profiles/${profile.handle}`} className="app-nav-link-accent">
                 View public profile
               </Link>
             ) : null}
@@ -160,7 +157,7 @@ export default function ProfileSettingsPage() {
           {loading ? (
             <div className="text-sm text-gray-400">Loading profile...</div>
           ) : !authToken ? (
-            <div className="rounded-xl border border-agent-border bg-agent-bg/50 p-4 text-sm text-gray-300">
+            <div className="ui-panel-soft p-4 text-sm text-gray-300">
               Connect and sign in to manage your profile.
             </div>
           ) : (
@@ -169,61 +166,61 @@ export default function ProfileSettingsPage() {
                 <div className="space-y-5">
                   <div className="grid gap-5 md:grid-cols-2">
                     <label className="block">
-                      <span className="mb-1.5 block text-sm text-gray-300">Handle</span>
+                      <span className="ui-label">Handle</span>
                       <input
-                        className={`${inputClass} ${handleError ? 'border-red-500/70 focus:border-red-400' : ''}`}
+                        className={`${inputClass} ${handleError ? 'ui-input-error' : ''}`}
                         value={form.handle}
                         onChange={(e) => setForm((prev) => ({ ...prev, handle: e.target.value }))}
                         placeholder="pact-operator"
                         autoCapitalize="none"
                         spellCheck={false}
                       />
-                      <p className={`mt-1 text-xs ${handleError ? 'text-red-300' : 'text-gray-500'}`}>
+                      <p className={handleError ? 'ui-error-text' : 'ui-helper'}>
                         {handleError || 'This becomes your public profile URL and should be easy to remember.'}
                       </p>
                     </label>
                     <label className="block">
-                      <span className="mb-1.5 block text-sm text-gray-300">Display Name</span>
+                      <span className="ui-label">Display Name</span>
                       <input className={inputClass} value={form.displayName} onChange={(e) => setForm((prev) => ({ ...prev, displayName: e.target.value }))} placeholder="Oluwaseun" />
                     </label>
                   </div>
 
                   <label className="block">
-                    <span className="mb-1.5 block text-sm text-gray-300">Bio</span>
+                    <span className="ui-label">Bio</span>
                     <textarea className={`${inputClass} min-h-28`} value={form.bio} onChange={(e) => setForm((prev) => ({ ...prev, bio: e.target.value }))} placeholder="What kind of agreements do you usually run or review?" />
                   </label>
 
                   <div className="grid gap-5 md:grid-cols-2">
                     <label className="block">
-                      <span className="mb-1.5 block text-sm text-gray-300">Avatar URL</span>
+                      <span className="ui-label">Avatar URL</span>
                       <input className={inputClass} value={form.avatarUrl} onChange={(e) => setForm((prev) => ({ ...prev, avatarUrl: e.target.value }))} placeholder="https://example.com/avatar.png" />
-                      <p className="mt-1 text-xs text-gray-500">Optional. Use a square image URL so your profile looks more trustworthy in invite and public views.</p>
+                      <p className="ui-helper">Optional. Use a square image URL so your profile looks more trustworthy in invite and public views.</p>
                     </label>
                     <label className="block">
-                      <span className="mb-1.5 block text-sm text-gray-300">Profile Visibility</span>
+                      <span className="ui-label">Profile Visibility</span>
                       <select className={inputClass} value={form.visibility} onChange={(e) => setForm((prev) => ({ ...prev, visibility: e.target.value }))}>
                         <option value="PUBLIC">Public</option>
                         <option value="PRIVATE">Private</option>
                       </select>
-                      <p className="mt-1 text-xs text-gray-500">Public profiles help counterparties verify who they are working with before accepting an invite.</p>
+                      <p className="ui-helper">Public profiles help counterparties verify who they are working with before accepting an invite.</p>
                     </label>
                   </div>
 
                   <div className="grid gap-5 md:grid-cols-2">
                     <label className="block">
-                      <span className="mb-1.5 block text-sm text-gray-300">Fiber Public Key</span>
+                      <span className="ui-label">Fiber Public Key</span>
                       <input className={inputClass} value={form.fiberPubkey} onChange={(e) => setForm((prev) => ({ ...prev, fiberPubkey: e.target.value }))} />
                     </label>
                     <label className="block">
-                      <span className="mb-1.5 block text-sm text-gray-300">Skills</span>
+                      <span className="ui-label">Skills</span>
                       <input className={inputClass} value={form.skills} onChange={(e) => setForm((prev) => ({ ...prev, skills: e.target.value }))} placeholder="Escrow design, DAO ops, smart contracts" />
                     </label>
                   </div>
 
                   <label className="block">
-                    <span className="mb-1.5 block text-sm text-gray-300">Links</span>
+                    <span className="ui-label">Links</span>
                     <textarea className={`${inputClass} min-h-28`} value={form.links} onChange={(e) => setForm((prev) => ({ ...prev, links: e.target.value }))} placeholder="Portfolio|https://example.com&#10;GitHub|https://github.com/name" />
-                    <p className="mt-1 text-xs text-gray-500">One link per line. Use `Label|URL` if you want a custom title instead of the raw URL.</p>
+                    <p className="ui-helper">One link per line. Use `Label|URL` if you want a custom title instead of the raw URL.</p>
                   </label>
                 </div>
 
@@ -306,10 +303,10 @@ export default function ProfileSettingsPage() {
                 </div>
               ) : null}
 
-              {error ? <div className="rounded-xl border border-red-800 bg-red-900/30 p-4 text-sm text-red-200">{error}</div> : null}
-              {success ? <div className="rounded-xl border border-emerald-800 bg-emerald-900/20 p-4 text-sm text-emerald-200">{success}</div> : null}
+              {error ? <div className="ui-alert-error">{error}</div> : null}
+              {success ? <div className="ui-alert-success">{success}</div> : null}
 
-              <button type="submit" disabled={saving} className="rounded-xl bg-agent-accent px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-70">
+              <button type="submit" disabled={saving} className="ui-button-primary-sm">
                 {saving ? 'Saving...' : 'Save Profile'}
               </button>
             </form>

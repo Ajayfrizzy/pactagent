@@ -14,7 +14,7 @@ export function NavbarMenu({ children }: { children?: ReactNode }) {
 
   return (
     <>
-      <div className="hidden md:flex items-center gap-4">
+      <div className="hidden items-center gap-4 md:flex">
         {children}
         <LinkButton href="/settings/profile" label="Profile" />
         <LinkButton href="/settings/webhooks" label="Webhooks" />
@@ -26,11 +26,8 @@ export function NavbarMenu({ children }: { children?: ReactNode }) {
           type="button"
           aria-label={open ? 'Close navigation menu' : 'Open navigation menu'}
           onClick={() => setOpen((value) => !value)}
-          className={`relative z-50 inline-flex h-11 w-11 items-center justify-center rounded-xl border text-white shadow-lg shadow-black/30 transition-all ${
-            open
-              ? 'border-agent-accent/80 bg-agent-accent/20 shadow-[0_0_24px_rgba(59,130,246,0.35)]'
-              : 'border-agent-accent/40 bg-slate-900/90 hover:border-agent-accent hover:bg-slate-900'
-          }`}
+          data-open={open ? 'true' : 'false'}
+          className="ui-icon-button relative z-50"
         >
           {open ? (
             <svg className="h-6 w-6 drop-shadow-[0_0_6px_rgba(255,255,255,0.45)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -46,7 +43,7 @@ export function NavbarMenu({ children }: { children?: ReactNode }) {
         {open && (
           <>
             <div className="fixed inset-0 z-40 bg-slate-950/45 backdrop-blur-[2px]" onClick={() => setOpen(false)} aria-hidden="true" />
-            <div className="absolute right-0 top-full z-50 mt-3 w-[min(18rem,calc(100vw-2rem))] rounded-2xl border border-agent-accent/35 bg-slate-900/95 p-4 shadow-[0_24px_60px_rgba(15,23,42,0.55)] ring-1 ring-white/10 backdrop-blur">
+            <div className="ui-mobile-panel absolute right-0 top-full z-50 mt-3 w-[min(18rem,calc(100vw-2rem))]">
               {children ? (
                 <div className="mb-4 flex flex-col items-stretch gap-2 border-b border-white/10 pb-4 text-sm">
                   {children}
@@ -67,7 +64,7 @@ export function NavbarMenu({ children }: { children?: ReactNode }) {
 
 function LinkButton({ href, label }: { href: string; label: string }) {
   return (
-    <a href={href} className="text-sm text-gray-400 transition-colors hover:text-white">
+    <a href={href} className="app-nav-link">
       {label}
     </a>
   );

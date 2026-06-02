@@ -27,7 +27,7 @@ export function BrandLogo({
         priority
       />
       {badgeLabel ? (
-        <span className="hidden rounded-full border border-agent-border bg-agent-bg/80 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.14em] text-gray-400 sm:inline-flex">
+        <span className="ui-chip-muted hidden sm:inline-flex">
           {badgeLabel}
         </span>
       ) : null}
