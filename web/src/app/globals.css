@@ -3,14 +3,14 @@
 @tailwind utilities;
 
 :root {
-  --background: #0f172a;
-  --foreground: #f8fafc;
-  --surface: rgba(30, 41, 59, 0.8);
-  --surface-soft: rgba(15, 23, 42, 0.55);
-  --surface-strong: rgba(15, 23, 42, 0.82);
-  --border: rgba(51, 65, 85, 0.9);
-  --border-strong: rgba(59, 130, 246, 0.3);
-  --accent: #3b82f6;
+  --background: #0a0f17;
+  --foreground: #f3f7fb;
+  --surface: rgba(20, 29, 41, 0.84);
+  --surface-soft: rgba(10, 15, 23, 0.62);
+  --surface-strong: rgba(8, 12, 19, 0.9);
+  --border: rgba(86, 104, 129, 0.42);
+  --border-strong: rgba(56, 189, 248, 0.36);
+  --accent: #38bdf8;
 }
 
 html {
@@ -19,11 +19,11 @@ html {
 
 body {
   background:
-    radial-gradient(circle at top left, rgba(59, 130, 246, 0.12), transparent 28%),
-    radial-gradient(circle at top right, rgba(14, 165, 233, 0.08), transparent 24%),
-    linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 1));
+    radial-gradient(circle at top left, rgba(56, 189, 248, 0.13), transparent 26%),
+    radial-gradient(circle at top right, rgba(16, 185, 129, 0.08), transparent 22%),
+    linear-gradient(180deg, rgba(7, 10, 17, 0.98), rgba(10, 15, 23, 1));
   color: var(--foreground);
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif;
 }
 
 ::selection {
@@ -33,20 +33,23 @@ body {
 
 @layer components {
   .app-nav {
-    @apply sticky top-0 z-50 border-b border-agent-border backdrop-blur-md;
-    background: rgba(30, 41, 59, 0.64);
+    @apply sticky top-0 z-50 border-b border-agent-border backdrop-blur-xl;
+    background:
+      linear-gradient(180deg, rgba(8,12,19,0.92), rgba(8,12,19,0.82)),
+      radial-gradient(circle at top left, rgba(56,189,248,0.08), transparent 36%);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.24);
   }
 
   .app-nav-inner {
-    @apply mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6;
+    @apply mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3.5 sm:px-6;
   }
 
   .app-nav-link {
-    @apply text-sm text-gray-400 transition-colors hover:text-white;
+    @apply inline-flex items-center rounded-full px-4 py-2.5 text-sm text-gray-300 transition-all hover:bg-white/5 hover:text-white;
   }
 
   .app-nav-link-accent {
-    @apply text-sm text-agent-accent transition-colors hover:text-blue-300;
+    @apply inline-flex items-center rounded-full px-4 py-2.5 text-sm text-agent-accent transition-all hover:bg-agent-accent/10 hover:text-cyan-200;
   }
 
   .page-back-link {
@@ -55,7 +58,7 @@ body {
 
   .ui-panel {
     @apply rounded-3xl border border-agent-border bg-agent-card/80;
-    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
+    box-shadow: 0 24px 60px rgba(4, 8, 15, 0.38);
   }
 
   .ui-panel-flat {
@@ -68,8 +71,8 @@ body {
 
   .ui-panel-raised {
     @apply rounded-2xl border border-agent-border;
-    background: linear-gradient(135deg, rgba(15, 23, 42, 0.88), rgba(30, 41, 59, 0.92));
-    box-shadow: 0 14px 35px rgba(15, 23, 42, 0.2);
+    background: linear-gradient(135deg, rgba(8, 12, 19, 0.96), rgba(20, 29, 41, 0.94));
+    box-shadow: 0 14px 35px rgba(3, 8, 16, 0.3);
   }
 
   .ui-kicker {

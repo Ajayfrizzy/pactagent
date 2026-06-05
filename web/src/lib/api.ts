@@ -29,7 +29,7 @@ function getCacheTtlMs(path: string, method: string) {
   }
 
   if (path === '/integrations/market/ckb-price') {
-    return 60_000;
+    return 1_000;
   }
 
   if (path === '/health') {
@@ -200,6 +200,7 @@ export async function importBountyAgreement(data: {
       title: string;
       description: string;
       amount: string;
+      targetUsd?: number;
     }>;
   };
 }) {
@@ -234,97 +235,6 @@ export async function fetchBountyGrantAutofill(data: {
     }>;
     sourceMetadata: Record<string, unknown>;
   }>('/agreements/import-bounty/autofill', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
-}
-
-export async function importCkboostAgreement(data: {
-  campaign: {
-    id: string;
-    title: string;
-    url: string;
-    description?: string;
-    sponsorName?: string;
-    governanceThreadUrl?: string;
-    questBundleTitle?: string;
-    proofExternalId?: string;
-    approvedProofSummary?: string;
-    approvedProofUrl?: string;
-  };
-  sponsor?: {
-    walletAddress?: string;
-    displayName?: string;
-  };
-  contributor: {
-    profileId?: string;
-    contributorExternalId?: string;
-    walletAddress: string;
-    handle?: string;
-    displayName?: string;
-    profileUrl?: string;
-    campaignParticipationCount?: number;
-    approvedSubmissionCount?: number;
-    rejectedSubmissionCount?: number;
-    approvalRate?: number;
-    leaderboardRank?: number;
-    totalPoints?: number;
-    totalTipsReceived?: string;
-    campaignHistory?: string[];
-    stats?: Record<string, unknown>;
-  };
-  agreement: {
-    title: string;
-    description: string;
-    clientAddress: string;
-    createdByAddress?: string;
-    deadlineAt: string;
-    disputeWindowSecs: number;
-    proofType: 'URL' | 'TEXT' | 'FILE_HASH';
-    payoutNetwork: 'CKB' | 'FIBER';
-    escrowModel?: 'TREASURY_BRIDGE' | 'ONCHAIN_LOCK';
-    workerFiberPubkey?: string;
-    milestones: Array<{
-      title: string;
-      description: string;
-      amount: string;
-    }>;
-  };
-}) {
-  return request<any>('/integrations/ckboost/import', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
-}
-
-export async function fetchCkboostCampaignAutofill(data: {
-  campaignLink: string;
-}) {
-  return request<{
-    campaignId: string;
-    campaignUrl: string;
-    campaignTitle: string;
-    campaignDescription: string;
-    questBundleTitle?: string;
-    agreementTitle: string;
-    agreementDescription: string;
-    governanceThreadUrl?: string;
-    sponsorName?: string;
-    rules: string[];
-    milestones: Array<{
-      title: string;
-      description: string;
-      amountCkb: string;
-    }>;
-    stats: {
-      participantsCount: number;
-      totalCompletions: number;
-      questCount: number;
-      totalPoints: number;
-      startsAt?: string;
-      endsAt?: string;
-    };
-  }>('/integrations/ckboost/autofill', {
     method: 'POST',
     body: JSON.stringify(data),
   });
@@ -378,6 +288,7 @@ export async function cancelDraftAgreement(id: string) {
 export async function fundAgreement(
   id: string,
   txHash: string,
+  amount?: string,
   milestoneOutputs?: Array<{
     milestoneId: string;
     outputIndex: number;
@@ -388,7 +299,18 @@ export async function fundAgreement(
 ) {
   return request<any>(`/agreements/${id}/fund`, {
     method: 'POST',
-    body: JSON.stringify({ txHash, milestoneOutputs, commencementOutputIndex }),
+    body: JSON.stringify({ txHash, amount, milestoneOutputs, commencementOutputIndex }),
+  });
+}
+
+export async function topUpImportedGrantReserve(
+  id: string,
+  txHash: string,
+  amount: string,
+) {
+  return request<any>(`/agreements/${id}/reserve/top-up`, {
+    method: 'POST',
+    body: JSON.stringify({ txHash, amount }),
   });
 }
 

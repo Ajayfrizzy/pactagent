@@ -51,6 +51,16 @@ export enum EscrowModel {
   ONCHAIN_LOCK = 'ONCHAIN_LOCK',
 }
 
+export enum PricingMode {
+  FIXED_CKB = 'FIXED_CKB',
+  USD_EQUIVALENT = 'USD_EQUIVALENT',
+}
+
+export enum ReserveHealthStatus {
+  HEALTHY = 'HEALTHY',
+  TOP_UP_REQUIRED = 'TOP_UP_REQUIRED',
+}
+
 export enum SettlementStatus {
   UNFUNDED = 'UNFUNDED',
   FUNDING_PENDING = 'FUNDING_PENDING',

@@ -76,8 +76,6 @@ app.get('/api/config', async (_req, res) => {
       forumPublishEnabled: config.forumPublishEnabled,
       forumPublishProvider: config.forumPublishProvider,
       forumPublishReady,
-      ckboostSyncEnabled: config.ckboostSyncEnabled,
-      ckboostWebhookConfigured: Boolean(config.ckboostWebhookUrl),
       treasuryAddress,
       onchainEscrowEnabled: config.onchainEscrowEnabled,
       onchainEscrowReady: isOnchainEscrowReady(),

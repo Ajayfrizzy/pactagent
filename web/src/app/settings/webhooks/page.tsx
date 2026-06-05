@@ -172,6 +172,27 @@ export default function WebhookSettingsPage() {
     : !isValidWebhookUrl(form.targetUrl)
       ? 'Use a full URL such as https://example.com/api/pactagent/webhook.'
       : null;
+  const deliveryHealthSummary = deliveries.length
+    ? deliveries.some((delivery) => delivery.status === 'FAILED')
+      ? 'At least one recent delivery failed and needs attention.'
+      : deliveries.some((delivery) => delivery.status === 'PENDING')
+        ? 'Some deliveries are still pending or waiting to retry.'
+        : 'Recent deliveries look healthy.'
+    : 'No deliveries yet. Trigger an agreement event to test the connection.';
+  const endpointTrustNotes = [
+    {
+      label: 'Safe first test',
+      detail: 'Use a temporary receiver like webhook.site before wiring this into a production automation.',
+    },
+    {
+      label: 'Best starting events',
+      detail: 'Agreement funded, proof submitted, and settlement confirmed usually give the best operational value early.',
+    },
+    {
+      label: 'What success looks like',
+      detail: 'A good endpoint should accept the payload quickly and log enough context for you to trace the event later.',
+    },
+  ];
 
   return (
     <div className="min-h-screen">
@@ -250,7 +271,14 @@ export default function WebhookSettingsPage() {
             {!authToken ? (
               <div className="text-sm text-gray-400">Connect and sign in to manage webhook endpoints.</div>
             ) : (
-              <form onSubmit={handleSubmit} className="space-y-4">
+              <form onSubmit={handleSubmit} className="space-y-5">
+                <div className="ui-panel-soft p-4">
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Why this matters</div>
+                  <p className="mt-2 text-sm text-gray-300">
+                    Webhooks turn PactAgent from a standalone interface into part of your operating stack. The cleaner this setup is, the easier it becomes to trigger bots, treasury alerts, dashboards, or grant reporting flows with confidence.
+                  </p>
+                </div>
+
                 <div>
                   <input
                     className={inputClass}
@@ -308,17 +336,13 @@ export default function WebhookSettingsPage() {
                 ) : (
                   <p className={helperClass}>Pick only the lifecycle events this endpoint actually needs.</p>
                 )}
-                <div className="ui-panel-soft p-4">
-                  <div className="text-sm font-medium text-white">Good first test</div>
-                  <p className="mt-1 text-sm text-gray-400">
-                    Use a temporary receiver like `webhook.site`, create an endpoint here, then trigger funding, proof submission, or settlement to inspect the incoming JSON body.
-                  </p>
-                </div>
-                <div className="ui-panel-soft p-4">
-                  <div className="text-sm font-medium text-white">Recommended next step</div>
-                  <p className="mt-1 text-sm text-gray-400">
-                    Start with `Agreement funded`, `Proof submitted`, and `Settlement confirmed`. Those three usually cover the most useful operator alerts before you subscribe to every lifecycle event.
-                  </p>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {endpointTrustNotes.map((note) => (
+                    <div key={note.label} className="ui-panel-soft p-4">
+                      <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">{note.label}</div>
+                      <p className="mt-2 text-sm text-gray-400">{note.detail}</p>
+                    </div>
+                  ))}
                 </div>
                 {success ? <div className="ui-alert-success">{success}</div> : null}
                 {error ? <div className="ui-alert-error">{error}</div> : null}
@@ -338,6 +362,13 @@ export default function WebhookSettingsPage() {
               <div className="text-sm text-gray-400">Loading endpoints...</div>
             ) : (
               <div className="space-y-4">
+                <div className="ui-panel-soft p-4">
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Delivery health</div>
+                  <div className="mt-2 text-sm font-semibold text-white">{deliveryHealthSummary}</div>
+                  <p className="mt-2 text-xs text-gray-400">
+                    Select an endpoint to inspect its recent behavior. The goal is not just “webhook exists,” but “the receiver is actually handling PactAgent events reliably.”
+                  </p>
+                </div>
                 <div className="space-y-2">
                   {endpoints.length ? endpoints.map((endpoint) => (
                     <button key={endpoint.id} type="button" onClick={() => void handleSelectEndpoint(endpoint.id)} className={`w-full rounded-xl border px-4 py-3 text-left transition-colors ${selectedEndpointId === endpoint.id ? 'border-agent-accent bg-agent-bg/80' : 'border-agent-border bg-agent-bg/45 hover:bg-agent-bg/65'}`}>
@@ -371,7 +402,15 @@ export default function WebhookSettingsPage() {
                           <div className="mt-1 text-xs text-gray-500">{EVENT_LABELS[delivery.eventType]?.description || delivery.eventType}</div>
                           <div className="mt-1 text-xs text-gray-500">{new Date(delivery.createdAt).toLocaleString()}</div>
                         </div>
-                        <div className="text-xs uppercase tracking-wide text-gray-400">{delivery.status}</div>
+                        <div className={`text-xs uppercase tracking-wide ${
+                          delivery.status === 'FAILED'
+                            ? 'text-rose-300'
+                            : delivery.status === 'PENDING'
+                              ? 'text-amber-300'
+                              : 'text-emerald-300'
+                        }`}>
+                          {delivery.status}
+                        </div>
                       </div>
                       {delivery.lastError ? <div className="mt-2 text-xs text-red-300">{delivery.lastError}</div> : null}
                     </div>

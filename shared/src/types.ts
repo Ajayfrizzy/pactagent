@@ -6,6 +6,8 @@ import {
   ReleaseMode,
   ReviewerMode,
   PayoutNetwork,
+  PricingMode,
+  ReserveHealthStatus,
   SettlementDirection,
   SettlementRecordStatus,
   SettlementStatus,
@@ -20,6 +22,10 @@ export interface Milestone {
   title: string;
   description: string;
   amount: string;
+  targetUsd?: number | null;
+  releaseQuoteUsdPerCkb?: number | null;
+  releasedCkbAmount?: string | null;
+  releasedUsdValue?: number | null;
   sortOrder: number;
   status: MilestoneStatus;
   escrowFundingTxHash: string | null;
@@ -54,6 +60,11 @@ export interface Agreement {
   escrowLockArgs: string | null;
   agreementDigest: string | null;
   milestoneDigest: string | null;
+  pricingMode: PricingMode;
+  reserveCkbLocked: string;
+  reserveCkbRemaining: string;
+  reserveFundingQuoteUsdPerCkb: number | null;
+  reserveHealthStatus: ReserveHealthStatus;
   settlementStatus: SettlementStatus;
   fundingConfirmedAt: string | null;
   lastSettlementError: string | null;

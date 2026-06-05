@@ -88,6 +88,29 @@ export default function ProfileSettingsPage() {
   const avatarPreviewUrl = form.avatarUrl.trim();
   const parsedSkills = form.skills.split(',').map((item) => item.trim()).filter(Boolean);
   const parsedLinks = parseLinksInput(form.links);
+  const trustSignals = [
+    {
+      label: 'Public recognition',
+      value: normalizedHandle ? 'Ready' : 'Needs a handle',
+      detail: normalizedHandle
+        ? 'People can share and recognize this identity easily.'
+        : 'A memorable handle is the fastest trust signal for counterparties.',
+    },
+    {
+      label: 'Proof of context',
+      value: form.bio.trim() ? 'Bio added' : 'Bio missing',
+      detail: form.bio.trim()
+        ? 'The profile explains what kind of agreements you usually run.'
+        : 'A short bio helps others understand your operating style before they accept an invite.',
+    },
+    {
+      label: 'External references',
+      value: parsedLinks.length ? `${parsedLinks.length} linked` : 'No links yet',
+      detail: parsedLinks.length
+        ? 'People can verify your work through the links you provided.'
+        : 'Portfolio, GitHub, or forum links make this identity feel more credible.',
+    },
+  ];
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -161,9 +184,26 @@ export default function ProfileSettingsPage() {
               Connect and sign in to manage your profile.
             </div>
           ) : (
-            <form onSubmit={handleSubmit} className="space-y-5">
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div className="grid gap-3 md:grid-cols-3">
+                {trustSignals.map((signal) => (
+                  <div key={signal.label} className="ui-panel-soft p-4">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">{signal.label}</div>
+                    <div className="mt-2 text-sm font-semibold text-white">{signal.value}</div>
+                    <p className="mt-2 text-xs text-gray-400">{signal.detail}</p>
+                  </div>
+                ))}
+              </div>
+
               <div className="grid gap-5 md:grid-cols-[1.1fr_0.9fr]">
                 <div className="space-y-5">
+                  <div className="ui-panel-soft p-4">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Why this matters</div>
+                    <p className="mt-2 text-sm text-gray-300">
+                      Your profile is the trust layer behind invites, imported grant collaboration, and public discovery. The goal is to help the other person feel confident that this wallet belongs to a real operator with a recognizable track record.
+                    </p>
+                  </div>
+
                   <div className="grid gap-5 md:grid-cols-2">
                     <label className="block">
                       <span className="ui-label">Handle</span>
@@ -282,6 +322,15 @@ export default function ProfileSettingsPage() {
                           <span className="text-sm text-gray-500">No public links added yet.</span>
                         )}
                       </div>
+                    </div>
+
+                    <div className="mt-5 rounded-xl border border-agent-border bg-agent-card/70 p-4 text-sm text-gray-300">
+                      <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Counterparty impression</div>
+                      <p className="mt-2 text-sm text-gray-400">
+                        {normalizedHandle && form.bio.trim() && (parsedLinks.length || avatarPreviewUrl)
+                          ? 'This profile already gives a counterparty enough context to feel oriented before they accept an invite.'
+                          : 'Add a stronger bio, a recognizable image, or a few external links to make the profile feel more trustworthy at first glance.'}
+                      </p>
                     </div>
                   </div>
                 </label>

@@ -14,14 +14,16 @@ export function NavbarMenu({ children }: { children?: ReactNode }) {
 
   return (
     <>
-      <div className="hidden items-center gap-4 md:flex">
-        {children}
-        <LinkButton href="/settings/profile" label="Profile" />
-        <LinkButton href="/settings/webhooks" label="Webhooks" />
-        <WalletConnect />
+      <div className="hidden items-center gap-3 lg:flex">
+        <div className="flex items-center gap-1.5 rounded-full border border-agent-border bg-agent-bg/55 p-1">
+          {children}
+          <LinkButton href="/settings/profile" label="Profile" />
+          <LinkButton href="/settings/webhooks" label="Webhooks" />
+        </div>
+        <WalletConnect compact />
       </div>
 
-      <div className="relative md:hidden">
+      <div className="relative lg:hidden">
         <button
           type="button"
           aria-label={open ? 'Close navigation menu' : 'Open navigation menu'}
@@ -44,13 +46,11 @@ export function NavbarMenu({ children }: { children?: ReactNode }) {
           <>
             <div className="fixed inset-0 z-40 bg-slate-950/45 backdrop-blur-[2px]" onClick={() => setOpen(false)} aria-hidden="true" />
             <div className="ui-mobile-panel absolute right-0 top-full z-50 mt-3 w-[min(18rem,calc(100vw-2rem))]">
-              {children ? (
-                <div className="mb-4 flex flex-col items-stretch gap-2 border-b border-white/10 pb-4 text-sm">
-                  {children}
-                  <LinkButton href="/settings/profile" label="Profile" />
-                  <LinkButton href="/settings/webhooks" label="Webhooks" />
-                </div>
-              ) : null}
+              <div className="mb-4 flex flex-col items-stretch gap-2 border-b border-white/10 pb-4 text-sm">
+                {children}
+                <LinkButton href="/settings/profile" label="Profile" />
+                <LinkButton href="/settings/webhooks" label="Webhooks" />
+              </div>
               <div className="flex flex-col items-stretch gap-3">
                 <WalletConnect />
               </div>

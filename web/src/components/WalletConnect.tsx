@@ -27,7 +27,7 @@ type CccConnectorElement = HTMLElement & {
   requestUpdate?: () => void;
 };
 
-export function WalletConnect() {
+export function WalletConnect({ compact = false }: { compact?: boolean }) {
   const { open, disconnect, wallet, signerInfo } = ccc.useCcc();
   const signer = ccc.useSigner();
   const {
@@ -360,6 +360,45 @@ export function WalletConnect() {
       : 'Connect a compatible wallet, then approve the sign-in request.';
 
   if (displayAddress) {
+    if (compact) {
+      return (
+        <div className="flex items-center gap-2">
+          <div className={`flex items-center gap-2 rounded-full border px-3 py-1.5 ${
+            hasAuthenticatedSession
+              ? 'border-agent-border bg-agent-card/80'
+              : authStatus === 'error'
+                ? 'border-red-400/40 bg-red-950/10'
+                : 'border-amber-400/30 bg-amber-950/10'
+          }`}>
+            <span className={`h-2 w-2 rounded-full ${statusDotClass}`} />
+            <span className="text-xs font-medium text-white">
+              {displayAddress.slice(0, 6)}...{displayAddress.slice(-4)}
+            </span>
+            <span className="hidden text-[11px] text-gray-400 lg:inline">
+              {connectionLabel}
+            </span>
+          </div>
+          {needsAuthentication ? (
+            <button
+              onClick={handleRetryAuthentication}
+              disabled={working || authStatus === 'authenticating'}
+              className="ui-button-ghost rounded-full px-3 py-1.5 text-xs"
+            >
+              {authStatus === 'authenticating' ? 'Waiting...' : 'Sign In'}
+            </button>
+          ) : (
+            <button
+              onClick={handleDisconnect}
+              disabled={working}
+              className="ui-button-plain text-xs"
+            >
+              Disconnect
+            </button>
+          )}
+        </div>
+      );
+    }
+
     return (
       <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-3">
         <div className={`flex min-w-0 flex-1 items-start gap-3 rounded-xl border px-3 py-2.5 sm:py-2 ${
@@ -421,6 +460,18 @@ export function WalletConnect() {
           </button>
         </div>
       </div>
+    );
+  }
+
+  if (compact) {
+    return (
+      <button
+        onClick={handleConnect}
+        disabled={working || authStatus === 'authenticating'}
+        className="ui-button-primary-sm rounded-full px-4"
+      >
+        {working || authStatus === 'authenticating' ? 'Connecting...' : 'Connect Wallet'}
+      </button>
     );
   }
 

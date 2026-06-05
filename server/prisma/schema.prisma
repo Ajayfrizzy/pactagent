@@ -40,6 +40,11 @@ model Agreement {
   escrowLockArgs        String?
   agreementDigest       String?
   milestoneDigest       String?
+  pricingMode           String    @default("FIXED_CKB") // FIXED_CKB | USD_EQUIVALENT
+  reserveCkbLocked      String    @default("0")
+  reserveCkbRemaining   String    @default("0")
+  reserveFundingQuoteUsdPerCkb Float?
+  reserveHealthStatus   String    @default("HEALTHY") // HEALTHY | TOP_UP_REQUIRED
   settlementStatus      String    @default("UNFUNDED") // SettlementStatus enum
   fundingConfirmedAt    DateTime?
   lastSettlementError   String?
@@ -61,9 +66,6 @@ model Agreement {
   amendments AgreementAmendment[]
   jobs AgentJob[]
   source AgreementSource?
-  ckboostProfileSnapshot CkboostProfileSnapshot?
-  ckboostEvents CkboostEvent[]
-  ckboostNotificationDeliveries CkboostNotificationDelivery[]
   webhookDeliveries WebhookDelivery[]
   proofChecks ProofCheck[]
   infoRequests InfoRequest[]
@@ -164,73 +166,6 @@ model AgreementSource {
   @@index([createdByAddress, createdAt])
 }
 
-model CkboostProfileSnapshot {
-  id                      String   @id @default(uuid())
-  agreementId             String   @unique
-  ckboostProfileId        String?
-  contributorExternalId   String?
-  walletAddress           String?
-  handle                  String?
-  displayName             String?
-  profileUrl              String?
-  campaignParticipationCount Int   @default(0)
-  approvedSubmissionCount Int      @default(0)
-  rejectedSubmissionCount Int      @default(0)
-  approvalRate            Float    @default(0)
-  leaderboardRank         Int?
-  totalPoints             Int      @default(0)
-  totalTipsReceived       String?
-  campaignHistoryJson     String?
-  statsJson               String?
-  lastSyncedAt            DateTime?
-  createdAt               DateTime @default(now())
-  updatedAt               DateTime @updatedAt
-
-  agreement Agreement @relation(fields: [agreementId], references: [id])
-
-  @@index([ckboostProfileId, lastSyncedAt])
-  @@index([walletAddress, lastSyncedAt])
-}
-
-model CkboostEvent {
-  id               String   @id @default(uuid())
-  agreementId      String?
-  externalEventId  String?
-  eventType        String
-  payloadJson      String?
-  sourceExternalId String?
-  contributorExternalId String?
-  occurredAt       DateTime
-  createdAt        DateTime @default(now())
-
-  agreement Agreement? @relation(fields: [agreementId], references: [id])
-
-  @@index([agreementId, occurredAt])
-  @@index([sourceExternalId, occurredAt])
-  @@index([contributorExternalId, occurredAt])
-  @@index([eventType, occurredAt])
-}
-
-model CkboostNotificationDelivery {
-  id           String    @id @default(uuid())
-  agreementId   String
-  eventType     String
-  payloadJson   String
-  status        String    @default("PENDING") // PENDING | DELIVERED | FAILED | RETRY
-  statusCode    Int?
-  attempts      Int       @default(0)
-  lastError     String?
-  nextRetryAt   DateTime?
-  deliveredAt   DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-
-  agreement Agreement @relation(fields: [agreementId], references: [id])
-
-  @@index([agreementId, createdAt])
-  @@index([status, nextRetryAt, createdAt])
-}
-
 model WebhookEndpoint {
   id             String   @id @default(uuid())
   ownerAddress   String
@@ -278,6 +213,10 @@ model Milestone {
   title       String
   description String
   amount      String
+  targetUsd   Float?
+  releaseQuoteUsdPerCkb Float?
+  releasedCkbAmount String?
+  releasedUsdValue Float?
   sortOrder   Int
   status      String   @default("PENDING")
   escrowFundingTxHash String?

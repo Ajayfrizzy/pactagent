@@ -8,6 +8,7 @@
     "worker": "tsx src/worker/index.ts",
     "seed": "tsx src/seed.ts",
     "test": "node --import tsx --test src/**/*.test.ts",
+    "mock:price": "node scripts/mock-price.js",
     "db:push": "npx prisma db push",
     "db:generate": "npx prisma generate",
     "db:studio": "npx prisma studio",

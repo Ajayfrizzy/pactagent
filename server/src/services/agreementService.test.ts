@@ -5,6 +5,7 @@ import {
   buildRefundConsensusState,
   buildSplitConsensusState,
   matchOnchainFundingOutputsToMilestones,
+  isSponsorControlledImportedAgreement,
 } from './agreementService';
 
 const clientAddress = 'ckt1-client';
@@ -172,4 +173,11 @@ test('getImportedCommencementDetails returns null for regular imported milestone
   });
 
   assert.equal(result, null);
+});
+
+test('isSponsorControlledImportedAgreement only matches DAO and BOUNTY imports', () => {
+  assert.equal(isSponsorControlledImportedAgreement({ source: { sourceType: 'DAO' } }), true);
+  assert.equal(isSponsorControlledImportedAgreement({ source: { sourceType: 'BOUNTY' } }), true);
+  assert.equal(isSponsorControlledImportedAgreement({ source: { sourceType: 'CKBOOST' } }), false);
+  assert.equal(isSponsorControlledImportedAgreement({ source: null }), false);
 });

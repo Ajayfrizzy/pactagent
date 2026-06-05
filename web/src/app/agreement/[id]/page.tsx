@@ -469,10 +469,10 @@ function getProofCheckResultFromAuditEntry(entry: any): ProofCheckResult | null 
     status: parsed.status === 'READY_FOR_HUMAN_REVIEW' ? 'READY_FOR_HUMAN_REVIEW' : 'NEEDS_MORE_INFO',
     lifecycleStatus:
       parsed.lifecycleStatus === 'CHECKING'
-      || parsed.lifecycleStatus === 'ISSUES_FOUND'
-      || parsed.lifecycleStatus === 'READY_FOR_HUMAN_REVIEW'
-      || parsed.lifecycleStatus === 'NEEDS_MORE_INFO'
-      || parsed.lifecycleStatus === 'UNREVIEWED'
+        || parsed.lifecycleStatus === 'ISSUES_FOUND'
+        || parsed.lifecycleStatus === 'READY_FOR_HUMAN_REVIEW'
+        || parsed.lifecycleStatus === 'NEEDS_MORE_INFO'
+        || parsed.lifecycleStatus === 'UNREVIEWED'
         ? parsed.lifecycleStatus
         : (parsed.status === 'READY_FOR_HUMAN_REVIEW' ? 'READY_FOR_HUMAN_REVIEW' : 'ISSUES_FOUND'),
     summary: typeof parsed.summary === 'string' ? parsed.summary : '',
@@ -481,15 +481,15 @@ function getProofCheckResultFromAuditEntry(entry: any): ProofCheckResult | null 
     warnings: Array.isArray(parsed.warnings) ? parsed.warnings.filter((item): item is string => typeof item === 'string') : [],
     checklist: Array.isArray(parsed.checklist)
       ? parsed.checklist.filter((item): item is ProofCheckChecklistItem =>
-          Boolean(
-            item
-            && typeof item === 'object'
-            && typeof item.key === 'string'
-            && typeof item.label === 'string'
-            && typeof item.status === 'string'
-            && typeof item.detail === 'string'
-          )
+        Boolean(
+          item
+          && typeof item === 'object'
+          && typeof item.key === 'string'
+          && typeof item.label === 'string'
+          && typeof item.status === 'string'
+          && typeof item.detail === 'string'
         )
+      )
       : [],
   };
 }
@@ -594,8 +594,8 @@ function ProofCheckPanel({
       : lifecycleStatus === 'NEEDS_MORE_INFO'
         ? 'Needs more info'
         : result
-        ? 'Issues found'
-        : 'Check report';
+          ? 'Issues found'
+          : 'Check report';
   const subtitle = checking
     ? 'PactAgent is comparing the submitted proof against the milestone scope and basic evidence signals.'
     : result?.status === 'READY_FOR_HUMAN_REVIEW'
@@ -603,8 +603,8 @@ function ProofCheckPanel({
       : lifecycleStatus === 'NEEDS_MORE_INFO'
         ? result?.summary || 'A reviewer has requested more information before payout can be approved.'
         : result
-        ? 'Needs more info before review is likely to be efficient.'
-        : 'Run a pre-review completeness pass before the human decision step.';
+          ? 'Needs more info before review is likely to be efficient.'
+          : 'Run a pre-review completeness pass before the human decision step.';
 
   return (
     <div className="rounded-xl border border-agent-border bg-agent-bg/60 p-4">
@@ -614,13 +614,12 @@ function ProofCheckPanel({
             <span className="text-sm font-semibold text-white">{title}</span>
             {result && !checking ? (
               <span
-                className={`rounded-full px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${
-                  result.status === 'READY_FOR_HUMAN_REVIEW'
-                    ? 'bg-emerald-950/40 text-emerald-300'
-                    : lifecycleStatus === 'NEEDS_MORE_INFO'
-                      ? 'bg-orange-950/40 text-orange-300'
-                      : 'bg-amber-950/40 text-amber-300'
-                }`}
+                className={`rounded-full px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${result.status === 'READY_FOR_HUMAN_REVIEW'
+                  ? 'bg-emerald-950/40 text-emerald-300'
+                  : lifecycleStatus === 'NEEDS_MORE_INFO'
+                    ? 'bg-orange-950/40 text-orange-300'
+                    : 'bg-amber-950/40 text-amber-300'
+                  }`}
               >
                 {result.status === 'READY_FOR_HUMAN_REVIEW'
                   ? 'Ready'
@@ -943,6 +942,12 @@ export default function AgreementDetailPage() {
   const [proofCheckLoadingMilestoneId, setProofCheckLoadingMilestoneId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [publicConfig, setPublicConfig] = useState<any>(null);
+  const [liveCkbQuote, setLiveCkbQuote] = useState<null | {
+    priceUsd: number;
+    inversePriceCkbPerUsd: number;
+    lastUpdatedAt: string | null;
+    fetchedAt: string;
+  }>(null);
   const [fundingStatus, setFundingStatus] = useState<string | null>(null);
   const [proofSummary, setProofSummary] = useState('');
   const [proofContent, setProofContent] = useState('');
@@ -999,6 +1004,8 @@ export default function AgreementDetailPage() {
   const [amendmentResponseNote, setAmendmentResponseNote] = useState('');
   const [inviteFeedback, setInviteFeedback] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [topUpTxHash, setTopUpTxHash] = useState('');
+  const [topUpAmountCkb, setTopUpAmountCkb] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -1033,6 +1040,50 @@ export default function AgreementDetailPage() {
       cancelled = true;
     };
   }, [authToken, hasHydrated]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadQuote() {
+      if (!agreement?.source || agreement?.pricingMode !== 'USD_EQUIVALENT' || !authToken) {
+        if (!cancelled) {
+          setLiveCkbQuote(null);
+        }
+        return;
+      }
+
+      if (['PAID', 'REFUNDED', 'EXPIRED', 'CANCELLED'].includes(agreement.status)) {
+        if (!cancelled) {
+          setLiveCkbQuote(null);
+        }
+        return;
+      }
+
+      try {
+        const quote = await api.fetchCkbPriceQuote({ fresh: true });
+        if (!cancelled) {
+          setLiveCkbQuote(quote);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.error('Failed to load live CKB quote for imported grant:', err);
+          setLiveCkbQuote(null);
+        }
+      }
+    }
+
+    void loadQuote();
+
+    // Refresh live quote every 60 seconds for funded agreements
+    const intervalId = (agreement?.source && agreement?.pricingMode === 'USD_EQUIVALENT' && !['PAID', 'REFUNDED', 'EXPIRED', 'CANCELLED'].includes(agreement?.status || ''))
+      ? setInterval(() => { void loadQuote(); }, 60_000)
+      : null;
+
+    return () => {
+      cancelled = true;
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [agreement?.id, agreement?.pricingMode, agreement?.source, agreement?.status, authToken]);
 
   useEffect(() => {
     const flash = window.sessionStorage.getItem('pactagent-ui-flash');
@@ -1227,15 +1278,15 @@ export default function AgreementDetailPage() {
         async: true,
       });
       if (result?.queued) {
-        await refreshAgreement().catch(() => {});
-        await refreshAuditLogs().catch(() => {});
+        await refreshAgreement().catch(() => { });
+        await refreshAuditLogs().catch(() => { });
         return null;
       }
       setProofChecksByMilestone((prev) => ({
         ...prev,
         [milestoneId]: result,
       }));
-      await refreshAuditLogs().catch(() => {});
+      await refreshAuditLogs().catch(() => { });
       return result;
     } catch (err) {
       if (!options?.silent) {
@@ -1290,7 +1341,7 @@ export default function AgreementDetailPage() {
       setFollowUpDraftText('');
       setFollowUpDraft(null);
       applyAgreementPayload(response);
-      await refreshAuditLogs().catch(() => {});
+      await refreshAuditLogs().catch(() => { });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send info request');
     } finally {
@@ -1315,7 +1366,7 @@ export default function AgreementDetailPage() {
       });
       setInfoResponseContent('');
       applyAgreementPayload(response);
-      await refreshAuditLogs().catch(() => {});
+      await refreshAuditLogs().catch(() => { });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send info response');
     } finally {
@@ -1337,8 +1388,8 @@ export default function AgreementDetailPage() {
         manualSummary: sourceSummaryOverride.trim() || undefined,
       });
       applyAgreementPayload(response);
-      await refreshAgreement().catch(() => {});
-      await refreshAuditLogs().catch(() => {});
+      await refreshAgreement().catch(() => { });
+      await refreshAuditLogs().catch(() => { });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to sync source thread');
     } finally {
@@ -1360,8 +1411,8 @@ export default function AgreementDetailPage() {
         content: sourceDraftUpdate.trim(),
       });
       applyAgreementPayload(response);
-      await refreshAgreement().catch(() => {});
-      await refreshAuditLogs().catch(() => {});
+      await refreshAgreement().catch(() => { });
+      await refreshAuditLogs().catch(() => { });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to draft source update');
     } finally {
@@ -1382,8 +1433,8 @@ export default function AgreementDetailPage() {
         action: 'REVIEW',
       });
       applyAgreementPayload(response);
-      await refreshAgreement().catch(() => {});
-      await refreshAuditLogs().catch(() => {});
+      await refreshAgreement().catch(() => { });
+      await refreshAuditLogs().catch(() => { });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to mark source update as reviewed');
     } finally {
@@ -1411,8 +1462,8 @@ export default function AgreementDetailPage() {
         reviewerApproved: true,
       });
       applyAgreementPayload(response);
-      await refreshAgreement().catch(() => {});
-      await refreshAuditLogs().catch(() => {});
+      await refreshAgreement().catch(() => { });
+      await refreshAuditLogs().catch(() => { });
       setSourceReviewerApproved(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to publish source update');
@@ -1584,11 +1635,11 @@ export default function AgreementDetailPage() {
       let txHash: string;
       let milestoneOutputs:
         | Array<{
-            milestoneId: string;
-            outputIndex: number;
-            escrowCellData: string;
-            refundTimeoutBlock: string;
-          }>
+          milestoneId: string;
+          outputIndex: number;
+          escrowCellData: string;
+          refundTimeoutBlock: string;
+        }>
         | undefined;
       let commencementOutputIndex: number | undefined;
 
@@ -1606,20 +1657,26 @@ export default function AgreementDetailPage() {
           signer,
           fromAddress: walletAddress,
           toAddress: fundingAddress,
-          amount: agreement.amount,
+          amount: isUsdEquivalentGrant && agreement.status === 'DRAFT' ? currentDraftReserveShannons : agreement.amount,
           onProgress: (step) => setFundingStatus(step),
         });
       }
 
       setFundingStatus('Confirming with server...');
       await withTimeout(
-        api.fundAgreement(id, String(txHash), milestoneOutputs, commencementOutputIndex),
+        api.fundAgreement(
+          id,
+          String(txHash),
+          isUsdEquivalentGrant && agreement.status === 'DRAFT' ? currentDraftReserveShannons : undefined,
+          milestoneOutputs,
+          commencementOutputIndex,
+        ),
         30_000,
         'Timed out confirming the funding with the server. The transaction may have been sent — please refresh the page.',
       );
 
       setFundingStatus(null);
-      await refreshAgreement().catch(() => {});
+      await refreshAgreement().catch(() => { });
     } catch (err) {
       console.error('[Fund] Error:', err);
       setError(err instanceof Error ? err.message : 'Funding failed — please try again.');
@@ -1639,6 +1696,31 @@ export default function AgreementDetailPage() {
       await open();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to reconnect wallet. Try refreshing the page.');
+    }
+  }
+
+  async function handleTopUpReserve() {
+    if (!topUpTxHash.trim() || !topUpAmountCkb.trim()) {
+      setError('Enter the reserve top-up transaction hash and the exact CKB amount sent.');
+      return;
+    }
+
+    setActionLoading('top-up-reserve');
+    setError(null);
+
+    try {
+      const updated = await api.topUpImportedGrantReserve(
+        id,
+        topUpTxHash.trim(),
+        ckbToShannons(topUpAmountCkb.trim()).toString(),
+      );
+      setAgreement(updated);
+      setTopUpTxHash('');
+      setTopUpAmountCkb('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to confirm reserve top-up');
+    } finally {
+      setActionLoading(null);
     }
   }
 
@@ -1842,15 +1924,15 @@ export default function AgreementDetailPage() {
           reviewerAddress: walletAddress,
           confirmation: action === 'APPROVE'
             ? {
-                confirmed: true,
-                summary: reviewerDecisionNote.trim(),
-                aiSuggestionAcknowledged: acknowledgeAiSuggestion,
-                proofCheckAcknowledged: acknowledgeProofCheck,
-              }
+              confirmed: true,
+              summary: reviewerDecisionNote.trim(),
+              aiSuggestionAcknowledged: acknowledgeAiSuggestion,
+              proofCheckAcknowledged: acknowledgeProofCheck,
+            }
             : undefined,
         });
         applyAgreementPayload(response);
-        await refreshAuditLogs().catch(() => {});
+        await refreshAuditLogs().catch(() => { });
         return;
       }
       await refreshAgreement();
@@ -2228,14 +2310,14 @@ export default function AgreementDetailPage() {
     null;
   const currentProofCheck = currentMilestone
     ? (() => {
-        const latestCheck = proofChecksByMilestone[currentMilestone.id] || null;
-        const latestProofId = currentMilestone.proofs?.[0]?.id;
-        if (!latestCheck || !latestProofId || latestCheck.proofId !== latestProofId) {
-          return null;
-        }
+      const latestCheck = proofChecksByMilestone[currentMilestone.id] || null;
+      const latestProofId = currentMilestone.proofs?.[0]?.id;
+      if (!latestCheck || !latestProofId || latestCheck.proofId !== latestProofId) {
+        return null;
+      }
 
-        return latestCheck;
-      })()
+      return latestCheck;
+    })()
     : null;
   const currentProofCheckLoading = currentMilestone ? proofCheckLoadingMilestoneId === currentMilestone.id : false;
   const currentMilestoneInfoRequests = currentMilestone
@@ -2250,11 +2332,11 @@ export default function AgreementDetailPage() {
     agreement.disputes?.find((item: any) => !item.resolvedAt) || null;
   const displayedRecommendation = currentOpenDispute?.aiRecommendation
     ? {
-        recommendation: currentOpenDispute.aiRecommendation,
-        confidence: currentOpenDispute.aiConfidence,
-        summary: currentOpenDispute.aiSummary,
-        rationale: currentOpenDispute.aiRationale,
-      }
+      recommendation: currentOpenDispute.aiRecommendation,
+      confidence: currentOpenDispute.aiConfidence,
+      summary: currentOpenDispute.aiSummary,
+      rationale: currentOpenDispute.aiRationale,
+    }
     : null;
   const canClientReview =
     isClient &&
@@ -2284,6 +2366,7 @@ export default function AgreementDetailPage() {
   const payoutPending = agreement.settlementStatus === 'PAYOUT_PENDING';
   const splitPending = agreement.settlementStatus === 'SPLIT_PENDING';
   const refundPending = agreement.settlementStatus === 'REFUND_PENDING';
+  const reserveTopUpLoading = actionLoading === 'top-up-reserve';
   const hasRecordedFundingAttempt = Boolean(agreement.ckbTxHashFund);
   const fundingNeedsReconnect = agreement.status === 'DRAFT' && isClient && !signer;
   const fundingUnsupportedSigner =
@@ -2316,8 +2399,8 @@ export default function AgreementDetailPage() {
   const hasApprovedMutualRefund = Boolean(
     walletAddress
     && refundConsensus
-      && ((walletAddress === agreement.clientAddress && refundConsensus.clientApprovedAt)
-        || (walletAddress === agreement.workerAddress && refundConsensus.workerApprovedAt))
+    && ((walletAddress === agreement.clientAddress && refundConsensus.clientApprovedAt)
+      || (walletAddress === agreement.workerAddress && refundConsensus.workerApprovedAt))
   );
   const canProposeMutualRefund =
     Boolean(currentOpenDispute)
@@ -2489,61 +2572,61 @@ export default function AgreementDetailPage() {
   }));
   const actionPanel = agreement.status === 'DRAFT'
     ? {
-        title: isClient ? 'Draft agreement is waiting on you' : 'Draft agreement is waiting on the client',
-        body: isClient
-          ? 'Check the draft terms, invite the worker if needed, and fund the agreement once everything is ready.'
-          : 'The client still needs to finalize and fund this draft before work can begin.',
-      }
+      title: isClient ? 'Draft agreement is waiting on you' : 'Draft agreement is waiting on the client',
+      body: isClient
+        ? 'Check the draft terms, invite the worker if needed, and fund the agreement once everything is ready.'
+        : 'The client still needs to finalize and fund this draft before work can begin.',
+    }
     : agreement.status === 'FUNDED' && isWorker && currentMilestone?.status === 'ACTIVE'
       ? {
-          title: 'Current milestone is ready for delivery',
-          body: `Submit proof for ${currentMilestone.title} when the work is ready for review.`,
-        }
+        title: 'Current milestone is ready for delivery',
+        body: `Submit proof for ${currentMilestone.title} when the work is ready for review.`,
+      }
       : canClientReview && currentMilestone
         ? {
-            title: 'Review decision needed now',
-            body: isImportedGrant
-              ? `The worker has delivered ${currentMilestone.title}. Review the proof, ask for more information if needed, and approve the milestone when you are satisfied.`
-              : `The worker has delivered ${currentMilestone.title}. Approve the payout, reject it, or open a dispute based on the submitted proof.`,
-          }
+          title: 'Review decision needed now',
+          body: isImportedGrant
+            ? `The worker has delivered ${currentMilestone.title}. Review the proof, ask for more information if needed, and approve the milestone when you are satisfied.`
+            : `The worker has delivered ${currentMilestone.title}. Approve the payout, reject it, or open a dispute based on the submitted proof.`,
+        }
         : agreement.status === 'DISPUTED' && currentMilestone
           ? {
-              title: 'Dispute workspace is active',
-              body: `Use the shared dispute thread for ${currentMilestone.title} to exchange evidence and choose a resolution path.`,
-            }
+            title: 'Dispute workspace is active',
+            body: `Use the shared dispute thread for ${currentMilestone.title} to exchange evidence and choose a resolution path.`,
+          }
           : {
-              title: 'Agreement is progressing',
-              body: nextActionSummary,
-            };
+            title: 'Agreement is progressing',
+            body: nextActionSummary,
+          };
   const isGrantMode = Boolean(agreement.source);
   const viewerRole = isClient
     ? {
-        label: 'Client Operator',
-        summary: isGrantMode
-          ? 'You define the funding plan, review deliverables, and release each approved milestone.'
-          : 'You fund the agreement, review each delivery, and decide when payouts or disputes should move forward.',
-      }
+      label: 'Client Operator',
+      summary: isGrantMode
+        ? 'You define the funding plan, review deliverables, and release each approved milestone.'
+        : 'You fund the agreement, review each delivery, and decide when payouts or disputes should move forward.',
+    }
     : isWorker
       ? {
-          label: isGrantMode ? 'Builder / Grantee' : 'Worker / Contributor',
-          summary: isGrantMode
-            ? 'You deliver each checkpoint, submit proof, and wait for manual reviewer approval before each payout.'
-            : 'You deliver work milestone by milestone, submit proof, and react to client review or dispute requests.',
-        }
+        label: isGrantMode ? 'Builder / Grantee' : 'Worker / Contributor',
+        summary: isGrantMode
+          ? 'You deliver each checkpoint, submit proof, and wait for manual reviewer approval before each payout.'
+          : 'You deliver work milestone by milestone, submit proof, and react to client review or dispute requests.',
+      }
       : isAdmin
         ? {
-            label: 'Admin Observer',
-            summary: 'You can inspect lifecycle state, logs, and settlement context, but normal participant actions still belong to the client and worker.',
-          }
+          label: 'Admin Observer',
+          summary: 'You can inspect lifecycle state, logs, and settlement context, but normal participant actions still belong to the client and worker.',
+        }
         : walletAddress
           ? {
-              label: 'Connected Observer',
-              summary: 'You are connected, but this wallet is not one of the primary participants on this agreement.',
-            }
+            label: 'Connected Observer',
+            summary: 'You are connected, but this wallet is not one of the primary participants on this agreement.',
+          }
           : {
-              label: 'Visitor',
-              summary: 'Connect the participant wallet to unlock funding, proof, review, and dispute controls.',
-            };
+            label: 'Visitor',
+            summary: 'Connect the participant wallet to unlock funding, proof, review, and dispute controls.',
+          };
   const roleActionLabel = isClient
     ? 'Client action lane'
     : isWorker
@@ -2554,6 +2637,171 @@ export default function AgreementDetailPage() {
   const grantModeSummary = isGrantMode
     ? `Imported from ${agreement.source.sourceType === 'DAO' ? 'a DAO workflow' : 'a bounty source'} so the external context, treasury sponsor, and governance notes stay attached to every milestone.`
     : 'Created directly inside PactAgent as a standard milestone agreement between client and worker.';
+  const isUsdEquivalentGrant = isGrantMode && agreement.pricingMode === 'USD_EQUIVALENT';
+  const reserveRemainingCkb = agreement.reserveCkbRemaining ? shannonsToCKB(agreement.reserveCkbRemaining) : null;
+  const reserveLockedCkb = agreement.reserveCkbLocked ? shannonsToCKB(agreement.reserveCkbLocked) : null;
+  const liveDraftReserveCkb = (() => {
+    if (!isUsdEquivalentGrant || agreement.status !== 'DRAFT' || !liveCkbQuote) {
+      return null;
+    }
+
+    const totalTargetUsd = milestones.reduce((sum: number, milestone: any) => sum + (Number(milestone.targetUsd) || 0), 0);
+    if (!totalTargetUsd || !Number.isFinite(totalTargetUsd)) {
+      return null;
+    }
+
+    const reserveEstimate = (totalTargetUsd / liveCkbQuote.priceUsd) * 1.2;
+    return reserveEstimate;
+  })();
+  const currentDraftReserveLabel = liveDraftReserveCkb != null
+    ? `${liveDraftReserveCkb.toLocaleString('en-US', { maximumFractionDigits: 2 })} CKB`
+    : shannonsToCKB(agreement.amount);
+  const currentDraftReserveShannons = liveDraftReserveCkb != null
+    ? ckbToShannons(String(liveDraftReserveCkb)).toString()
+    : agreement.amount;
+  const currentMilestoneTargetUsd = currentMilestone?.targetUsd ? `$${currentMilestone.targetUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}` : null;
+  const currentMilestoneReleasedUsd = currentMilestone?.releasedUsdValue ? `$${currentMilestone.releasedUsdValue.toLocaleString('en-US', { maximumFractionDigits: 2 })}` : null;
+  const reserveQuoteLabel = agreement.reserveFundingQuoteUsdPerCkb
+    ? `$${agreement.reserveFundingQuoteUsdPerCkb.toFixed(6)} / CKB`
+    : 'Not recorded';
+  const currentLiveQuoteLabel = liveCkbQuote
+    ? `$${liveCkbQuote.priceUsd.toFixed(6)} / CKB`
+    : reserveQuoteLabel;
+  const liveReserveUsdValue = (() => {
+    if (!isUsdEquivalentGrant || agreement.status === 'DRAFT' || !liveCkbQuote || !agreement.reserveCkbRemaining) return null;
+    const remainingShannons = BigInt(agreement.reserveCkbRemaining);
+    const remainingCkb = Number(remainingShannons) / 1e8;
+    return remainingCkb * liveCkbQuote.priceUsd;
+  })();
+  const liveTotalUsdValue = (() => {
+    if (!isUsdEquivalentGrant || agreement.status === 'DRAFT' || !liveCkbQuote) return null;
+    const totalShannons = BigInt(agreement.amount);
+    const totalCkb = Number(totalShannons) / 1e8;
+    return totalCkb * liveCkbQuote.priceUsd;
+  })();
+  const priceMovementPct = (() => {
+    if (!isUsdEquivalentGrant || agreement.status === 'DRAFT' || !liveCkbQuote || !agreement.reserveFundingQuoteUsdPerCkb) return null;
+    return ((liveCkbQuote.priceUsd - agreement.reserveFundingQuoteUsdPerCkb) / agreement.reserveFundingQuoteUsdPerCkb) * 100;
+  })();
+  const priceMovementLabel = (() => {
+    if (priceMovementPct == null) return null;
+    const sign = priceMovementPct >= 0 ? '+' : '';
+    return `${sign}${priceMovementPct.toFixed(2)}%`;
+  })();
+  const importedSourceMetadata = safeParseJson<Record<string, any>>(agreement.source?.externalMetadataJson) || null;
+  const latestSourceSyncActivity = buildLatestSourceSyncActivity(auditLogs);
+  const lifecycleOverview = isGrantMode
+    ? 'Import source context, fund the full grant once, then move milestone-by-milestone through reviewer approval and payout.'
+    : 'Draft the agreement, fund it once, deliver milestone proof, review the work, and settle each approved checkpoint cleanly.';
+  const nextActionOwner = (() => {
+    if (agreement.status === 'DRAFT') {
+      return {
+        label: isClient ? 'You (client operator)' : 'Client operator',
+        detail: 'Finalize the draft, invite the worker if needed, and fund the agreement to activate the first milestone.',
+      };
+    }
+
+    if (agreement.status === 'FUNDED' && currentMilestone?.status === 'ACTIVE') {
+      return {
+        label: isWorker ? 'You (worker / builder)' : 'Worker / builder',
+        detail: 'The current milestone is active and waiting for proof delivery.',
+      };
+    }
+
+    if (
+      ['PROOF_SUBMITTED', 'UNDER_REVIEW'].includes(agreement.status)
+      || ['PROOF_SUBMITTED', 'UNDER_REVIEW'].includes(currentMilestone?.status || '')
+    ) {
+      return {
+        label: isClient ? 'You (review owner)' : 'Client reviewer',
+        detail: 'A human review decision is now the gating step before payout or dispute.',
+      };
+    }
+
+    if (agreement.status === 'DISPUTED') {
+      return {
+        label: isClient || isWorker ? 'Both participants' : 'Client and worker',
+        detail: 'Use the dispute workspace to exchange evidence, answer questions, and agree on the resolution path.',
+      };
+    }
+
+    if (['PAYOUT_PENDING', 'REFUND_PENDING', 'SPLIT_PENDING'].includes(agreement.settlementStatus || '')) {
+      return {
+        label: 'Settlement layer',
+        detail: 'PactAgent is trying to complete the settlement. Participants mainly need to monitor and reconcile if anything stalls.',
+      };
+    }
+
+    if (['PAID', 'REFUNDED', 'EXPIRED', 'CANCELLED'].includes(agreement.status)) {
+      return {
+        label: 'No active owner',
+        detail: 'This agreement is effectively closed unless someone needs to inspect the history or settlement trail.',
+      };
+    }
+
+    return {
+      label: 'Participant handoff',
+      detail: nextActionSummary,
+    };
+  })();
+  const riskFlags = [
+    isUsdEquivalentGrant && agreement.reserveHealthStatus === 'TOP_UP_REQUIRED'
+      ? {
+        label: 'Reserve top-up required',
+        detail: 'The remaining CKB reserve is no longer enough to satisfy the next USD-equivalent milestone payout.',
+        tone: 'border-rose-700/40 bg-rose-950/20 text-rose-100',
+      }
+      : null,
+    agreement.status === 'DISPUTED'
+      ? {
+        label: 'Dispute is open',
+        detail: 'The current milestone is blocked until the participants resolve the dispute workspace.',
+        tone: 'border-rose-700/40 bg-rose-950/20 text-rose-100',
+      }
+      : null,
+    agreement.settlementStatus === 'FAILED'
+      ? {
+        label: 'Settlement needs attention',
+        detail: agreement.lastSettlementError || 'The latest funding or payout attempt failed and may need a retry or reconciliation.',
+        tone: 'border-rose-700/40 bg-rose-950/20 text-rose-100',
+      }
+      : null,
+    currentOpenInfoRequests.length > 0
+      ? {
+        label: 'More information requested',
+        detail: `${currentOpenInfoRequests.length} open info request${currentOpenInfoRequests.length === 1 ? '' : 's'} still need a response before review feels complete.`,
+        tone: 'border-amber-700/40 bg-amber-950/20 text-amber-100',
+      }
+      : null,
+    fundingNeedsReconnect
+      ? {
+        label: 'Funding wallet disconnected',
+        detail: 'The client is signed in but needs to reconnect the funding wallet before this draft can move forward.',
+        tone: 'border-yellow-700/40 bg-yellow-950/20 text-yellow-100',
+      }
+      : null,
+    fundingUnsupportedSigner
+      ? {
+        label: 'Funding wallet unsupported',
+        detail: 'The connected wallet can sign in, but it cannot fund this agreement.',
+        tone: 'border-yellow-700/40 bg-yellow-950/20 text-yellow-100',
+      }
+      : null,
+    describeMissingSourceFields(importedSourceMetadata?.missingFields)
+      ? {
+        label: 'Imported source is incomplete',
+        detail: describeMissingSourceFields(importedSourceMetadata?.missingFields) || 'The source thread is missing fields PactAgent expected to find.',
+        tone: 'border-fuchsia-700/40 bg-fuchsia-950/20 text-fuchsia-100',
+      }
+      : null,
+  ].filter(Boolean) as Array<{ label: string; detail: string; tone: string }>;
+  const currentStateLabel = agreement.workflowStage
+    ? getStatusMeta(agreement.workflowStage).label
+    : agreementStatusMeta.label;
+  const currentStateDetail = agreementStatusMeta.hint || settlementStatusMeta.hint || lifecycleOverview;
+  const progressSummary = milestones.length
+    ? `${paidMilestones}/${milestones.length} milestone${milestones.length === 1 ? '' : 's'} paid`
+    : 'No milestones configured yet.';
   const displayedAgreementComments = [
     ...(agreement.comments || []),
     ...pendingAgreementComments,
@@ -2561,93 +2809,86 @@ export default function AgreementDetailPage() {
     (left: any, right: any) =>
       new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime()
   );
-  const ckboostCampaignHistory = safeParseJson<string[]>(agreement.ckboostProfileSnapshot?.campaignHistoryJson) || [];
-  const ckboostStats = safeParseJson<Record<string, unknown>>(agreement.ckboostProfileSnapshot?.statsJson) || null;
-  const importedSourceMetadata = safeParseJson<Record<string, any>>(agreement.source?.externalMetadataJson) || null;
-  const latestSourceSyncActivity = buildLatestSourceSyncActivity(auditLogs);
   const lifecycleSteps: Array<{
     key: string;
     label: string;
     detail: string;
     state: LifecycleStepState;
   }> = [
-    {
-      key: 'create',
-      label: 'Create',
-      detail: isGrantMode ? 'Grant terms imported and normalized' : 'Agreement draft captured',
-      state: 'complete' as LifecycleStepState,
-    },
-    {
-      key: 'fund',
-      label: 'Fund',
-      detail: isGrantMode ? 'Lock treasury budget once' : 'Lock the full agreement value',
-      state:
-        agreement.status === 'DRAFT'
-          ? 'current'
-          : 'complete',
-    },
-    {
-      key: 'deliver',
-      label: 'Deliver',
-      detail: currentMilestone ? currentMilestone.title : 'Wait for the first milestone',
-      state:
-        agreement.status === 'DRAFT'
-          ? 'upcoming'
-          : ['FUNDED', 'PROOF_SUBMITTED', 'UNDER_REVIEW', 'DISPUTED', 'PAID', 'REFUNDED', 'EXPIRED'].includes(agreement.status)
-            ? currentMilestone?.status === 'ACTIVE'
-              ? 'current'
-              : ['PROOF_SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'PAID', 'DISPUTED', 'REFUNDED', 'EXPIRED'].includes(currentMilestone?.status || '')
-                ? 'complete'
-                : 'upcoming'
-            : 'upcoming',
-    },
-    {
-      key: 'review',
-      label: agreement.reviewerMode === 'MANUAL' ? 'Manual Review' : 'Review',
-      detail: agreement.reviewerMode === 'MANUAL' ? 'Human reviewer must approve each release' : 'Review decides payout path',
-      state:
-        agreement.status === 'DISPUTED'
-          ? 'blocked'
-          : ['PROOF_SUBMITTED', 'UNDER_REVIEW'].includes(agreement.status) || ['PROOF_SUBMITTED', 'UNDER_REVIEW'].includes(currentMilestone?.status || '')
+      {
+        key: 'create',
+        label: 'Create',
+        detail: isGrantMode ? 'Grant terms imported and normalized' : 'Agreement draft captured',
+        state: 'complete' as LifecycleStepState,
+      },
+      {
+        key: 'fund',
+        label: 'Fund',
+        detail: isGrantMode ? 'Lock treasury budget once' : 'Lock the full agreement value',
+        state:
+          agreement.status === 'DRAFT'
             ? 'current'
-            : ['APPROVED', 'PAID', 'REFUNDED'].includes(currentMilestone?.status || '') || ['PAID', 'REFUNDED'].includes(agreement.status)
-              ? 'complete'
-              : agreement.status === 'DRAFT' || agreement.status === 'FUNDED'
-                ? 'upcoming'
-                : 'upcoming',
-    },
-    {
-      key: 'settle',
-      label: 'Settle',
-      detail: agreement.payoutNetwork === 'FIBER' ? 'Route the payout over Fiber when approved' : 'Confirm on-chain payout or refund',
-      state:
-        agreement.status === 'DISPUTED'
-          ? 'blocked'
-          : ['PAYOUT_PENDING', 'REFUND_PENDING', 'SPLIT_PENDING', 'FAILED'].includes(agreement.settlementStatus || '')
-            ? 'current'
-            : ['PAID', 'REFUNDED'].includes(agreement.status)
-              ? 'complete'
-              : currentMilestone?.status === 'APPROVED'
+            : 'complete',
+      },
+      {
+        key: 'deliver',
+        label: 'Deliver',
+        detail: currentMilestone ? currentMilestone.title : 'Wait for the first milestone',
+        state:
+          agreement.status === 'DRAFT'
+            ? 'upcoming'
+            : ['FUNDED', 'PROOF_SUBMITTED', 'UNDER_REVIEW', 'DISPUTED', 'PAID', 'REFUNDED', 'EXPIRED'].includes(agreement.status)
+              ? currentMilestone?.status === 'ACTIVE'
                 ? 'current'
+                : ['PROOF_SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'PAID', 'DISPUTED', 'REFUNDED', 'EXPIRED'].includes(currentMilestone?.status || '')
+                  ? 'complete'
+                  : 'upcoming'
+              : 'upcoming',
+      },
+      {
+        key: 'review',
+        label: agreement.reviewerMode === 'MANUAL' ? 'Manual Review' : 'Review',
+        detail: agreement.reviewerMode === 'MANUAL' ? 'Human reviewer must approve each release' : 'Review decides payout path',
+        state:
+          agreement.status === 'DISPUTED'
+            ? 'blocked'
+            : ['PROOF_SUBMITTED', 'UNDER_REVIEW'].includes(agreement.status) || ['PROOF_SUBMITTED', 'UNDER_REVIEW'].includes(currentMilestone?.status || '')
+              ? 'current'
+              : ['APPROVED', 'PAID', 'REFUNDED'].includes(currentMilestone?.status || '') || ['PAID', 'REFUNDED'].includes(agreement.status)
+                ? 'complete'
                 : agreement.status === 'DRAFT' || agreement.status === 'FUNDED'
                   ? 'upcoming'
                   : 'upcoming',
-    },
-    {
-      key: 'complete',
-      label: isGrantMode ? 'Close Grant' : 'Complete',
-      detail: isGrantMode ? 'Every checkpoint approved and recorded' : 'Agreement settled and closed',
-      state:
-        ['PAID', 'REFUNDED', 'EXPIRED', 'CANCELLED'].includes(agreement.status)
-          ? 'complete'
-          : agreement.status === 'DISPUTED'
+      },
+      {
+        key: 'settle',
+        label: 'Settle',
+        detail: agreement.payoutNetwork === 'FIBER' ? 'Route the payout over Fiber when approved' : 'Confirm on-chain payout or refund',
+        state:
+          agreement.status === 'DISPUTED'
             ? 'blocked'
-            : 'upcoming',
-    },
-  ];
-  const lifecycleOverview = isGrantMode
-    ? 'Import source context, fund the full grant once, then move milestone-by-milestone through reviewer approval and payout.'
-    : 'Draft the agreement, fund it once, deliver milestone proof, review the work, and settle each approved checkpoint cleanly.';
+            : ['PAYOUT_PENDING', 'REFUND_PENDING', 'SPLIT_PENDING', 'FAILED'].includes(agreement.settlementStatus || '')
+              ? 'current'
+              : ['PAID', 'REFUNDED'].includes(agreement.status)
+                ? 'complete'
+                : currentMilestone?.status === 'APPROVED'
+                  ? 'current'
+                  : agreement.status === 'DRAFT' || agreement.status === 'FUNDED'
+                    ? 'upcoming'
+                    : 'upcoming',
+      },
+      {
+        key: 'complete',
+        label: isGrantMode ? 'Close Grant' : 'Complete',
+        detail: isGrantMode ? 'Every checkpoint approved and recorded' : 'Agreement settled and closed',
+        state:
+          ['PAID', 'REFUNDED', 'EXPIRED', 'CANCELLED'].includes(agreement.status)
+            ? 'complete'
+            : agreement.status === 'DISPUTED'
+              ? 'blocked'
+              : 'upcoming',
+      },
+    ];
   const operationalTimeline = (() => {
     const items: Array<{
       id: string;
@@ -2748,56 +2989,78 @@ export default function AgreementDetailPage() {
 
   return (
     <div className="min-h-screen">
-      <nav className="sticky top-0 z-50 border-b border-agent-border bg-agent-card/50 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+      <nav className="app-nav">
+        <div className="app-nav-inner">
           <div className="flex min-w-0 items-center gap-3">
             <BrandLogo />
             <span className="text-gray-600">/</span>
             <span className="truncate text-sm text-gray-400">{agreement.title}</span>
           </div>
           <NavbarMenu>
-            <Link href="/dashboard" className="text-sm text-gray-400 transition-colors hover:text-white">
-              Dashboard
-            </Link>
-            {isAdmin ? (
-              <Link href="/admin" className="text-sm text-agent-accent transition-colors hover:text-blue-300">
-                Admin
-              </Link>
-            ) : null}
+            <Link href="/dashboard" className="app-nav-link">Dashboard</Link>
+            <Link href="/agreement/import-bounty" className="app-nav-link">Imports</Link>
+            {isAdmin ? <Link href="/admin" className="app-nav-link-accent">Admin</Link> : null}
           </NavbarMenu>
         </div>
       </nav>
 
       <div className="max-w-7xl mx-auto px-4 py-8 sm:px-6">
-        <Link
-          href="/dashboard"
-          className="mb-5 inline-flex items-center gap-2 text-sm text-gray-300 transition-colors hover:text-white"
-        >
+        <Link href="/dashboard" className="page-back-link mb-5">
           <ArrowLeftIcon className="h-4 w-4" />
           Back to Dashboard
         </Link>
         {successMessage ? (
-          <div className="mb-5 rounded-2xl border border-emerald-800 bg-emerald-900/20 p-4 text-sm text-emerald-200 shadow-[0_18px_40px_rgba(16,185,129,0.08)]">
+          <div className="ui-alert-success mb-5 shadow-[0_18px_40px_rgba(16,185,129,0.08)]">
             {successMessage}
           </div>
         ) : null}
+        <div className={`mb-5 rounded-2xl border px-4 py-4 ${
+          riskFlags.length
+            ? riskFlags[0].tone
+            : 'border-emerald-700/30 bg-emerald-950/15 text-emerald-100'
+        }`}>
+          <div className="text-[11px] uppercase tracking-[0.16em]">
+            {riskFlags.length ? 'Critical Strip' : 'Clear State'}
+          </div>
+          <div className="mt-2 text-sm font-medium text-white">
+            {riskFlags.length ? riskFlags[0].label : 'No immediate blockers are flagged on this agreement.'}
+          </div>
+          <p className="mt-1 text-sm opacity-90">
+            {riskFlags.length ? riskFlags[0].detail : nextActionOwner.detail}
+          </p>
+        </div>
+        <div className="mb-5 flex flex-wrap gap-2">
+          {[
+            ['#overview', 'Overview'],
+            ['#milestones', 'Milestones'],
+            ['#review', 'Proof & Review'],
+            ['#funding', 'Funding & Settlement'],
+            ['#timeline', 'Timeline'],
+          ].map(([href, label]) => (
+            <a
+              key={href}
+              href={href}
+              className="rounded-full border border-agent-border bg-agent-bg/55 px-3 py-2 text-xs font-medium uppercase tracking-[0.16em] text-gray-300 transition-colors hover:border-agent-accent/40 hover:text-white"
+            >
+              {label}
+            </a>
+          ))}
+        </div>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-6">
-            <div className="overflow-hidden rounded-3xl border border-agent-border bg-agent-card shadow-[0_24px_60px_rgba(15,23,42,0.28)]">
-              <div className={`border-b border-agent-border p-6 sm:p-7 ${
-                isGrantMode
-                  ? 'bg-[radial-gradient(circle_at_top_left,rgba(168,85,247,0.18),transparent_42%),radial-gradient(circle_at_top_right,rgba(56,189,248,0.16),transparent_36%)]'
-                  : 'bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.18),transparent_40%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.16),transparent_34%)]'
-              }`}>
+            <div id="overview" className="overflow-hidden rounded-3xl border border-agent-border bg-agent-card shadow-[0_24px_60px_rgba(15,23,42,0.28)]">
+              <div className={`border-b border-agent-border p-6 sm:p-7 ${isGrantMode
+                ? 'bg-[radial-gradient(circle_at_top_left,rgba(168,85,247,0.18),transparent_42%),radial-gradient(circle_at_top_right,rgba(56,189,248,0.16),transparent_36%)]'
+                : 'bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.18),transparent_40%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.16),transparent_34%)]'
+                }`}>
                 <div className="flex flex-col gap-5">
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                     <div className="max-w-3xl">
                       <div className="mb-3 flex flex-wrap items-center gap-2">
-                        <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] uppercase tracking-[0.18em] ${
-                          isGrantMode
-                            ? 'border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-200'
-                            : 'border-sky-500/30 bg-sky-500/10 text-sky-200'
-                        }`}>
+                        <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] uppercase tracking-[0.18em] ${isGrantMode
+                          ? 'border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-200'
+                          : 'border-sky-500/30 bg-sky-500/10 text-sky-200'
+                          }`}>
                           <SparklesIcon className="h-3.5 w-3.5" />
                           {isGrantMode ? `${agreement.source.sourceType} Grant Mode` : 'Direct Agreement Mode'}
                         </span>
@@ -2817,44 +3080,78 @@ export default function AgreementDetailPage() {
                     </div>
                   </div>
 
-                  <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-                    <div className="rounded-2xl border border-agent-border bg-agent-bg/60 p-4">
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-agent-accent">Lifecycle Path</div>
-                      <h2 className="mt-2 text-lg font-semibold text-white">How this agreement moves from creation to final settlement</h2>
-                      <p className="mt-1 text-sm text-gray-400">{lifecycleOverview}</p>
+                  <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+                    <div className="rounded-3xl border border-agent-border bg-agent-bg/60 p-5">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-agent-accent">Current State</div>
+                      <h2 className="mt-2 text-xl font-semibold text-white">{currentStateLabel}</h2>
+                      <p className="mt-2 text-sm text-gray-400">{currentStateDetail}</p>
+
+                      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-2xl border border-agent-border bg-agent-card/60 p-4">
+                          <div className="text-[11px] uppercase tracking-[0.16em] text-gray-500">Next action</div>
+                          <div className="mt-2 text-sm font-medium text-white">{nextActionSummary}</div>
+                        </div>
+                        <div className="rounded-2xl border border-agent-border bg-agent-card/60 p-4">
+                          <div className="text-[11px] uppercase tracking-[0.16em] text-gray-500">Action owner</div>
+                          <div className="mt-2 text-sm font-medium text-white">{nextActionOwner.label}</div>
+                          <p className="mt-2 text-xs text-gray-500">{nextActionOwner.detail}</p>
+                        </div>
+                        <div className="rounded-2xl border border-agent-border bg-agent-card/60 p-4">
+                          <div className="text-[11px] uppercase tracking-[0.16em] text-gray-500">Current milestone</div>
+                          <div className="mt-2 text-sm font-medium text-white">{currentMilestoneSummary}</div>
+                          <p className="mt-2 text-xs text-gray-500">
+                            {currentMilestone ? 'This checkpoint sets the current delivery and review context.' : 'The first checkpoint becomes active after funding.'}
+                          </p>
+                          {isUsdEquivalentGrant && currentMilestoneTargetUsd ? (
+                            <p className="mt-2 text-xs text-emerald-200">Canonical target: {currentMilestoneTargetUsd}</p>
+                          ) : null}
+                        </div>
+                        <div className="rounded-2xl border border-agent-border bg-agent-card/60 p-4">
+                          <div className="text-[11px] uppercase tracking-[0.16em] text-gray-500">Progress</div>
+                          <div className="mt-2 text-sm font-medium text-white">{progressSummary}</div>
+                          <p className="mt-2 text-xs text-gray-500">Agreement mode: {isGrantMode ? 'Imported grant / bounty' : 'Direct bilateral agreement'}.</p>
+                        </div>
+                      </div>
                     </div>
-                    <div className="rounded-2xl border border-agent-border bg-agent-bg/60 p-4">
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-agent-accent">Your Role</div>
-                      <h2 className="mt-2 text-lg font-semibold text-white">{viewerRole.label}</h2>
-                      <p className="mt-1 text-sm text-gray-400">{viewerRole.summary}</p>
-                      <div className="mt-3 text-xs uppercase tracking-[0.16em] text-gray-500">{roleActionLabel}</div>
+
+                    <div className="rounded-3xl border border-agent-border bg-agent-bg/60 p-5">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-agent-accent">Role + Context</div>
+                      <h2 className="mt-2 text-xl font-semibold text-white">{viewerRole.label}</h2>
+                      <p className="mt-2 text-sm text-gray-400">{viewerRole.summary}</p>
+                      <div className="mt-4 rounded-2xl border border-agent-border bg-agent-card/60 p-4">
+                        <div className="text-[11px] uppercase tracking-[0.16em] text-gray-500">{roleActionLabel}</div>
+                        <p className="mt-2 text-sm text-gray-300">{grantModeSummary}</p>
+                      </div>
+                      <div className="mt-4 rounded-2xl border border-agent-border bg-agent-card/60 p-4">
+                        <div className="text-[11px] uppercase tracking-[0.16em] text-gray-500">Lifecycle path</div>
+                        <p className="mt-2 text-sm text-gray-300">{lifecycleOverview}</p>
+                      </div>
+                      {isUsdEquivalentGrant ? (
+                        <div className="mt-4 rounded-2xl border border-agent-border bg-agent-card/60 p-4">
+                          <div className="text-[11px] uppercase tracking-[0.16em] text-gray-500">Reserve model</div>
+                          <p className="mt-2 text-sm text-gray-300">
+                            This imported grant is tracked as a USD-equivalent obligation and settled in CKB from a treasury reserve. Payout amounts are determined at release time using a fresh quote.
+                          </p>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
 
-                  <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-4">
-                    <div className="rounded-2xl border border-agent-border bg-agent-bg/65 p-4">
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-agent-accent">What Needs Attention</div>
-                      <h3 className="mt-2 text-base font-semibold text-white">{actionPanel.title}</h3>
-                      <p className="mt-1 text-sm text-gray-400">{actionPanel.body}</p>
+                  {riskFlags.length > 1 ? (
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      {riskFlags.slice(1).map((flag) => (
+                        <div key={flag.label} className={`rounded-2xl border p-4 ${flag.tone}`}>
+                          <div className="text-[11px] uppercase tracking-[0.16em]">Risk flag</div>
+                          <h3 className="mt-2 text-sm font-semibold text-white">{flag.label}</h3>
+                          <p className="mt-2 text-sm opacity-90">{flag.detail}</p>
+                        </div>
+                      ))}
                     </div>
-                    <div className="rounded-2xl border border-agent-border bg-agent-bg/65 p-4">
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-agent-accent">Current Milestone</div>
-                      <div className="mt-2 text-sm text-white">{currentMilestoneSummary}</div>
-                      <p className="mt-2 text-xs text-gray-500">
-                        {currentMilestone ? 'This checkpoint sets the current delivery and review context.' : 'The first checkpoint becomes active after funding.'}
-                      </p>
+                  ) : (
+                    <div className="rounded-2xl border border-emerald-700/30 bg-emerald-950/15 p-4 text-sm text-emerald-100">
+                      No immediate workflow risks are flagged right now. The agreement is progressing without a visible blocker at the top level.
                     </div>
-                    <div className="rounded-2xl border border-agent-border bg-agent-bg/65 p-4">
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-agent-accent">Agreement Mode</div>
-                      <div className="mt-2 text-sm font-medium text-white">{isGrantMode ? 'Imported ecosystem grant / bounty' : 'Direct bilateral agreement'}</div>
-                      <p className="mt-2 text-xs text-gray-500">{grantModeSummary}</p>
-                    </div>
-                    <div className="rounded-2xl border border-agent-border bg-agent-bg/65 p-4">
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-agent-accent">Next System Signal</div>
-                      <div className="mt-2 text-sm font-medium text-white">{agreement.workflowStage ? getStatusMeta(agreement.workflowStage).label : agreementStatusMeta.label}</div>
-                      <p className="mt-2 text-xs text-gray-500">{nextActionSummary}</p>
-                    </div>
-                  </div>
+                  )}
 
                   <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
                     {lifecycleSteps.map((step, index) => {
@@ -2880,7 +3177,16 @@ export default function AgreementDetailPage() {
                 <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
                   <div>
                     <span className="mb-1 block text-[10px] uppercase text-gray-500">Total Value</span>
-                    <span className="text-sm font-mono text-white">{shannonsToCKB(agreement.amount)} CKB</span>
+                    <span className="text-sm font-mono text-white">
+                      {isUsdEquivalentGrant && agreement.status === 'DRAFT'
+                        ? currentDraftReserveLabel
+                        : shannonsToCKB(agreement.amount)} CKB
+                    </span>
+                    {liveTotalUsdValue != null ? (
+                      <span className="mt-0.5 block text-[10px] text-emerald-300">
+                        ≈ ${liveTotalUsdValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD at live price
+                      </span>
+                    ) : null}
                   </div>
                   <div>
                     <span className="mb-1 block text-[10px] uppercase text-gray-500">Deadline</span>
@@ -2898,20 +3204,59 @@ export default function AgreementDetailPage() {
                   </div>
                 </div>
 
-                {(agreement.workflowStage || agreement.nextParticipantAction) && (
-                  <div className="mt-4 rounded-lg border border-agent-border bg-agent-bg/60 px-4 py-3">
-                    <div className="flex flex-wrap items-center gap-3">
-                      {agreement.workflowStage ? <StatusBadge status={agreement.workflowStage} /> : null}
-                      {agreement.nextParticipantAction ? (
-                        <span className="text-sm text-gray-300">{agreement.nextParticipantAction}</span>
+                {isUsdEquivalentGrant ? (
+                  <div className="mt-4 grid gap-4 border-t border-agent-border pt-4 md:grid-cols-3">
+                    <div>
+                      <span className="mb-1 block text-[10px] uppercase text-gray-500">
+                        {agreement.status === 'DRAFT' ? 'Current recommendation' : 'Reserve Locked'}
+                      </span>
+                      <span className="text-sm font-mono text-white">
+                        {agreement.status === 'DRAFT'
+                          ? `${currentDraftReserveLabel} CKB`
+                          : `${reserveLockedCkb || '0'} CKB`}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="mb-1 block text-[10px] uppercase text-gray-500">
+                        {agreement.status === 'DRAFT' ? 'Stored draft reserve' : 'Reserve Remaining'}
+                      </span>
+                      <span className="text-sm font-mono text-white">
+                        {agreement.status === 'DRAFT'
+                          ? `${shannonsToCKB(agreement.amount)} CKB`
+                          : `${reserveRemainingCkb || '0'} CKB`}
+                      </span>
+                      {liveReserveUsdValue != null ? (
+                        <span className="mt-0.5 block text-[10px] text-emerald-300">
+                          ≈ ${liveReserveUsdValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD remaining
+                        </span>
+                      ) : null}
+                    </div>
+                    <div>
+                      <span className="mb-1 block text-[10px] uppercase text-gray-500">
+                        {agreement.status === 'DRAFT' ? 'Live quote' : 'Funding Quote'}
+                      </span>
+                      <span className="text-sm text-white">
+                        {agreement.status === 'DRAFT' ? currentLiveQuoteLabel : reserveQuoteLabel}
+                      </span>
+                      {agreement.status !== 'DRAFT' && liveCkbQuote ? (
+                        <>
+                          <span className="mt-0.5 block text-[10px] text-cyan-300">
+                            Live: ${liveCkbQuote.priceUsd.toFixed(6)} / CKB
+                          </span>
+                          {priceMovementLabel != null ? (
+                            <span className={`mt-0.5 block text-[10px] font-medium ${(priceMovementPct || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                              }`}>
+                              {priceMovementLabel} since funding
+                            </span>
+                          ) : null}
+                        </>
                       ) : null}
                     </div>
                   </div>
-                )}
+                ) : null}
 
-                <div className={`mt-4 grid gap-4 border-t border-agent-border pt-4 ${
-                  agreement.payoutNetwork === 'FIBER' && agreement.workerFiberPubkey ? 'grid-cols-1 md:grid-cols-4' : 'grid-cols-3'
-                }`}>
+                <div className={`mt-4 grid gap-4 border-t border-agent-border pt-4 ${agreement.payoutNetwork === 'FIBER' && agreement.workerFiberPubkey ? 'grid-cols-1 md:grid-cols-4' : 'grid-cols-3'
+                  }`}>
                   <div>
                     <span className="mb-1 block text-[10px] uppercase text-gray-500">Client</span>
                     <span className="text-xs font-mono text-gray-300">{agreement.clientAddress.slice(0, 20)}...</span>
@@ -3002,7 +3347,7 @@ export default function AgreementDetailPage() {
               </div>
             </div>
 
-            <div className="bg-agent-card border border-agent-border rounded-xl p-6">
+            <div id="milestones" className="bg-agent-card border border-agent-border rounded-xl p-6">
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h2 className="text-white font-semibold">Milestone Journey</h2>
@@ -3026,25 +3371,22 @@ export default function AgreementDetailPage() {
                   return (
                     <div
                       key={milestone.id}
-                      className={`rounded-xl border p-4 ${
-                        isCurrent ? 'border-agent-accent bg-blue-950/20 shadow-[0_0_0_1px_rgba(59,130,246,0.18)]' : 'border-agent-border bg-agent-bg/60'
-                      }`}
+                      className={`rounded-xl border p-4 ${isCurrent ? 'border-agent-accent bg-blue-950/20 shadow-[0_0_0_1px_rgba(59,130,246,0.18)]' : 'border-agent-border bg-agent-bg/60'
+                        }`}
                     >
                       <div className="flex gap-4">
                         <div className="flex w-9 shrink-0 flex-col items-center">
-                          <div className={`flex h-9 w-9 items-center justify-center rounded-full border text-xs font-semibold ${
-                            isCurrent
-                              ? 'border-agent-accent bg-agent-accent/15 text-agent-accent'
-                              : isCompleted
-                                ? 'border-emerald-500/40 bg-emerald-950/30 text-emerald-300'
-                                : 'border-agent-border bg-agent-card/80 text-gray-300'
-                          }`}>
+                          <div className={`flex h-9 w-9 items-center justify-center rounded-full border text-xs font-semibold ${isCurrent
+                            ? 'border-agent-accent bg-agent-accent/15 text-agent-accent'
+                            : isCompleted
+                              ? 'border-emerald-500/40 bg-emerald-950/30 text-emerald-300'
+                              : 'border-agent-border bg-agent-card/80 text-gray-300'
+                            }`}>
                             {milestone.sortOrder}
                           </div>
                           {milestoneProgressIndex < milestones.length - 1 ? (
-                            <div className={`mt-2 h-full min-h-10 w-px ${
-                              isCompleted ? 'bg-emerald-500/40' : 'bg-agent-border'
-                            }`} />
+                            <div className={`mt-2 h-full min-h-10 w-px ${isCompleted ? 'bg-emerald-500/40' : 'bg-agent-border'
+                              }`} />
                           ) : null}
                         </div>
                         <div className="min-w-0 flex-1">
@@ -3077,6 +3419,21 @@ export default function AgreementDetailPage() {
                             <span>Disputes: {milestone.disputes?.length || 0}</span>
                             <span>Settlements: {milestone.settlements?.length || 0}</span>
                           </div>
+
+                          {isUsdEquivalentGrant && milestone.targetUsd ? (
+                            <div className="mb-3 rounded-lg border border-agent-border bg-agent-card/60 px-3 py-2 text-xs text-gray-300">
+                              <div>Canonical USD target: ${milestone.targetUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}</div>
+                              {milestone.releasedCkbAmount ? (
+                                <div className="mt-1 text-gray-400">
+                                  Released: {shannonsToCKB(milestone.releasedCkbAmount)} CKB
+                                  {milestone.releasedUsdValue ? ` · satisfied ${milestone.releasedUsdValue.toLocaleString('en-US', { maximumFractionDigits: 2 })} USD-equivalent` : ''}
+                                  {milestone.releaseQuoteUsdPerCkb ? ` · quote $${milestone.releaseQuoteUsdPerCkb.toFixed(6)}/CKB` : ''}
+                                </div>
+                              ) : (
+                                <div className="mt-1 text-gray-400">CKB payout amount is determined at release time using a fresh quote.</div>
+                              )}
+                            </div>
+                          ) : null}
 
                           {milestoneInfoRequests.length ? (
                             <div className="mb-3 rounded-lg border border-agent-border bg-agent-card/60 px-3 py-2 text-xs text-gray-300">
@@ -3120,77 +3477,80 @@ export default function AgreementDetailPage() {
               </div>
             </div>
 
-            <CollapsibleSection
+            <div id="timeline">
+              <CollapsibleSection
               title="Unified Lifecycle Timeline"
               description="Funding attempts, audit actions, participant messages, amendments, and dispute activity are merged here so the agreement reads like one continuous operating record."
               countLabel={`${operationalTimeline.length} items`}
               storageKey={`agreement:${id}:section:timeline`}
             >
-            <div className="overflow-hidden rounded-2xl border border-agent-border bg-agent-card shadow-[0_18px_50px_rgba(15,23,42,0.18)]">
-              <div className="border-b border-agent-border bg-gradient-to-r from-agent-bg/95 via-agent-card to-agent-bg/90 p-6">
-                <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
-                  <div className="max-w-2xl">
-                    <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Operational History</div>
-                    <h2 className="mt-2 text-xl font-semibold text-white">Unified lifecycle timeline</h2>
-                    <p className="mt-1 text-sm text-gray-400">
-                      Funding attempts, audit actions, participant messages, amendments, and dispute activity are merged here so the agreement reads like one continuous operating record.
-                    </p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3 text-xs text-gray-400 sm:grid-cols-4 xl:min-w-[520px]">
-                    <div className="rounded-2xl border border-agent-border bg-agent-bg/60 px-4 py-4 sm:px-5">
-                      <div className="text-[10px] uppercase tracking-[0.16em] text-gray-500">Timeline items</div>
-                      <div className="mt-3 text-2xl font-semibold leading-none text-white">{operationalTimeline.length}</div>
+              <div className="overflow-hidden rounded-2xl border border-agent-border bg-agent-card shadow-[0_18px_50px_rgba(15,23,42,0.18)]">
+                <div className="border-b border-agent-border bg-gradient-to-r from-agent-bg/95 via-agent-card to-agent-bg/90 p-6">
+                  <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+                    <div className="max-w-2xl">
+                      <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Operational History</div>
+                      <h2 className="mt-2 text-xl font-semibold text-white">Unified lifecycle timeline</h2>
+                      <p className="mt-1 text-sm text-gray-400">
+                        Funding attempts, audit actions, participant messages, amendments, and dispute activity are merged here so the agreement reads like one continuous operating record.
+                      </p>
                     </div>
-                    <div className="rounded-2xl border border-agent-border bg-agent-bg/60 px-4 py-4 sm:px-5">
-                      <div className="text-[10px] uppercase tracking-[0.16em] text-gray-500">Settlements</div>
-                      <div className="mt-3 text-2xl font-semibold leading-none text-white">{settlementHistory.length}</div>
-                    </div>
-                    <div className="rounded-2xl border border-agent-border bg-agent-bg/60 px-4 py-4 sm:px-5">
-                      <div className="text-[10px] uppercase tracking-[0.16em] text-gray-500">Messages</div>
-                      <div className="mt-3 text-2xl font-semibold leading-none text-white">{agreement.comments?.length || 0}</div>
-                    </div>
-                    <div className="rounded-2xl border border-agent-border bg-agent-bg/60 px-4 py-4 sm:px-5">
-                      <div className="text-[10px] uppercase tracking-[0.16em] text-gray-500">Amendments</div>
-                      <div className="mt-3 text-2xl font-semibold leading-none text-white">{agreement.amendments?.length || 0}</div>
+                    <div className="grid grid-cols-2 gap-3 text-xs text-gray-400 sm:grid-cols-4 xl:min-w-[520px]">
+                      <div className="rounded-2xl border border-agent-border bg-agent-bg/60 px-4 py-4 sm:px-5">
+                        <div className="text-[10px] uppercase tracking-[0.16em] text-gray-500">Timeline items</div>
+                        <div className="mt-3 text-2xl font-semibold leading-none text-white">{operationalTimeline.length}</div>
+                      </div>
+                      <div className="rounded-2xl border border-agent-border bg-agent-bg/60 px-4 py-4 sm:px-5">
+                        <div className="text-[10px] uppercase tracking-[0.16em] text-gray-500">Settlements</div>
+                        <div className="mt-3 text-2xl font-semibold leading-none text-white">{settlementHistory.length}</div>
+                      </div>
+                      <div className="rounded-2xl border border-agent-border bg-agent-bg/60 px-4 py-4 sm:px-5">
+                        <div className="text-[10px] uppercase tracking-[0.16em] text-gray-500">Messages</div>
+                        <div className="mt-3 text-2xl font-semibold leading-none text-white">{agreement.comments?.length || 0}</div>
+                      </div>
+                      <div className="rounded-2xl border border-agent-border bg-agent-bg/60 px-4 py-4 sm:px-5">
+                        <div className="text-[10px] uppercase tracking-[0.16em] text-gray-500">Amendments</div>
+                        <div className="mt-3 text-2xl font-semibold leading-none text-white">{agreement.amendments?.length || 0}</div>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="p-6">
-                {operationalTimeline.length ? (
-                  <div className="space-y-4">
-                    {operationalTimeline.map((item, index) => (
-                      <div key={item.id} className="flex gap-4">
-                        <div className="flex w-9 shrink-0 flex-col items-center">
-                          <div className={`h-3 w-3 rounded-full ${getLifecycleStepStyles(index === 0 ? 'current' : 'complete').dot}`} />
-                          {index < operationalTimeline.length - 1 ? (
-                            <div className="mt-2 h-full min-h-10 w-px bg-agent-border" />
-                          ) : null}
-                        </div>
-                        <div className={`min-w-0 flex-1 rounded-2xl border p-4 ${item.tone}`}>
-                          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                            <div className="min-w-0">
-                              <div className="text-[11px] uppercase tracking-[0.16em] opacity-80">{item.kind}</div>
-                              <h3 className="mt-1 text-sm font-semibold text-white">{item.title}</h3>
-                            </div>
-                            <div className="text-xs opacity-80">{new Date(item.timestamp).toLocaleString()}</div>
+                <div className="p-6">
+                  {operationalTimeline.length ? (
+                    <div className="space-y-4">
+                      {operationalTimeline.map((item, index) => (
+                        <div key={item.id} className="flex gap-4">
+                          <div className="flex w-9 shrink-0 flex-col items-center">
+                            <div className={`h-3 w-3 rounded-full ${getLifecycleStepStyles(index === 0 ? 'current' : 'complete').dot}`} />
+                            {index < operationalTimeline.length - 1 ? (
+                              <div className="mt-2 h-full min-h-10 w-px bg-agent-border" />
+                            ) : null}
                           </div>
-                          <p className="mt-2 whitespace-pre-wrap text-sm text-gray-200/90">{item.detail}</p>
+                          <div className={`min-w-0 flex-1 rounded-2xl border p-4 ${item.tone}`}>
+                            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="min-w-0">
+                                <div className="text-[11px] uppercase tracking-[0.16em] opacity-80">{item.kind}</div>
+                                <h3 className="mt-1 text-sm font-semibold text-white">{item.title}</h3>
+                              </div>
+                              <div className="text-xs opacity-80">{new Date(item.timestamp).toLocaleString()}</div>
+                            </div>
+                            <p className="mt-2 whitespace-pre-wrap text-sm text-gray-200/90">{item.detail}</p>
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-agent-border bg-agent-bg/60 p-4 text-sm text-gray-400">
-                    No unified history yet. As this agreement is funded, reviewed, commented on, amended, or disputed, the most important operational events will appear here in timestamp order.
-                  </div>
-                )}
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-agent-border bg-agent-bg/60 p-4 text-sm text-gray-400">
+                      No unified history yet. As this agreement is funded, reviewed, commented on, amended, or disputed, the most important operational events will appear here in timestamp order.
+                    </div>
+                  )}
+                </div>
               </div>
+              </CollapsibleSection>
             </div>
-            </CollapsibleSection>
 
-            <CollapsibleSection
+            <div id="funding">
+              <CollapsibleSection
               title="Settlement History"
               description="On-chain funding, payout, and refund attempts are tracked separately from workflow."
               countLabel={`${settlementHistory.length} records`}
@@ -3230,128 +3590,8 @@ export default function AgreementDetailPage() {
                   No settlement records yet. Funding, payout, refund, and split attempts will appear here as the agreement moves forward.
                 </div>
               )}
-            </CollapsibleSection>
-
-            {agreement.ckboostProfileSnapshot ? (
-              <CollapsibleSection
-                title="CKBoost Contributor Snapshot"
-                description="Imported contributor reputation and campaign history captured at handoff."
-                storageKey={`agreement:${id}:section:ckboost`}
-              >
-              <div className="overflow-hidden rounded-2xl border border-agent-border bg-agent-card shadow-[0_18px_50px_rgba(15,23,42,0.18)]">
-                <div className="border-b border-agent-border bg-gradient-to-r from-agent-bg/95 via-agent-card to-agent-bg/90 p-6">
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.16em] text-orange-300">CKBoost Contributor Snapshot</div>
-                      <h2 className="mt-2 text-xl font-semibold text-white">
-                        {agreement.ckboostProfileSnapshot.displayName || agreement.ckboostProfileSnapshot.handle || 'Imported contributor'}
-                      </h2>
-                      <p className="mt-1 text-sm text-gray-400">
-                        This reputation snapshot was captured when the CKBoost campaign was handed off into PactAgent so reviewers can keep campaign context attached to milestone decisions.
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {agreement.ckboostProfileSnapshot.leaderboardRank ? (
-                        <StatusBadge status="READY_FOR_REVIEW" />
-                      ) : null}
-                      <StatusBadge status="CONFIRMED" />
-                    </div>
-                  </div>
-                </div>
-                <div className="p-6">
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                    <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4">
-                      <div className="text-xs uppercase tracking-wide text-gray-500">Approval Rate</div>
-                      <div className="mt-2 text-2xl font-semibold text-white">
-                        {Math.round((agreement.ckboostProfileSnapshot.approvalRate || 0) * 100)}%
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4">
-                      <div className="text-xs uppercase tracking-wide text-gray-500">Campaigns</div>
-                      <div className="mt-2 text-2xl font-semibold text-white">
-                        {agreement.ckboostProfileSnapshot.campaignParticipationCount || 0}
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4">
-                      <div className="text-xs uppercase tracking-wide text-gray-500">Leaderboard Rank</div>
-                      <div className="mt-2 text-2xl font-semibold text-white">
-                        {agreement.ckboostProfileSnapshot.leaderboardRank || '—'}
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4">
-                      <div className="text-xs uppercase tracking-wide text-gray-500">Total Points</div>
-                      <div className="mt-2 text-2xl font-semibold text-white">
-                        {agreement.ckboostProfileSnapshot.totalPoints || 0}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 grid gap-3 md:grid-cols-2">
-                    <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4">
-                      <div className="text-xs uppercase tracking-wide text-gray-500">Linked Profile</div>
-                      <div className="mt-2 text-sm text-white">
-                        {agreement.ckboostProfileSnapshot.handle || agreement.ckboostProfileSnapshot.displayName || 'Not provided'}
-                      </div>
-                      {agreement.ckboostProfileSnapshot.profileUrl ? (
-                        <a
-                          href={agreement.ckboostProfileSnapshot.profileUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="mt-2 block break-all text-sm text-agent-accent hover:text-blue-300"
-                        >
-                          {agreement.ckboostProfileSnapshot.profileUrl}
-                        </a>
-                      ) : null}
-                    </div>
-                    <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4">
-                      <div className="text-xs uppercase tracking-wide text-gray-500">Submission History</div>
-                      <div className="mt-2 text-sm text-gray-300">
-                        Approved {agreement.ckboostProfileSnapshot.approvedSubmissionCount || 0}
-                        {' · '}
-                        Rejected {agreement.ckboostProfileSnapshot.rejectedSubmissionCount || 0}
-                      </div>
-                      <div className="mt-2 text-xs text-gray-500">
-                        Last synced {agreement.ckboostProfileSnapshot.lastSyncedAt ? new Date(agreement.ckboostProfileSnapshot.lastSyncedAt).toLocaleString() : 'Unknown'}
-                      </div>
-                    </div>
-                    {ckboostCampaignHistory.length ? (
-                      <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4 md:col-span-2">
-                        <div className="text-xs uppercase tracking-wide text-gray-500">Campaign History</div>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {ckboostCampaignHistory.map((item, index) => (
-                            <span key={`${item}-${index}`} className="rounded-full border border-agent-border px-3 py-1 text-xs text-gray-300">
-                              {item}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-                    {(agreement.ckboostEvents || []).length ? (
-                      <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4 md:col-span-2">
-                        <div className="text-xs uppercase tracking-wide text-gray-500">Recent CKBoost Sync Events</div>
-                        <div className="mt-3 space-y-2">
-                          {(agreement.ckboostEvents || []).slice(0, 4).map((event: any) => (
-                            <div key={event.id} className="rounded-lg border border-agent-border bg-agent-card/60 px-3 py-2 text-sm text-gray-300">
-                              <div className="font-medium text-white">{event.eventType.replace(/_/g, ' ')}</div>
-                              <div className="mt-1 text-xs text-gray-500">{new Date(event.occurredAt).toLocaleString()}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-                    {ckboostStats ? (
-                      <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4 md:col-span-2">
-                        <div className="text-xs uppercase tracking-wide text-gray-500">Imported Snapshot Metadata</div>
-                        <pre className="mt-3 overflow-x-auto rounded-lg bg-slate-950/40 p-3 text-[11px] text-gray-400">
-                          {JSON.stringify(ckboostStats, null, 2)}
-                        </pre>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
               </CollapsibleSection>
-            ) : null}
+            </div>
 
             {agreement.source ? (
               <div className="bg-agent-card border border-agent-border rounded-xl p-6">
@@ -3361,252 +3601,252 @@ export default function AgreementDetailPage() {
                     External DAO or bounty attribution and sync controls attached to this agreement.
                   </p>
                 </div>
-              <div className="overflow-hidden rounded-2xl border border-agent-border bg-agent-card shadow-[0_18px_50px_rgba(15,23,42,0.18)]">
-                <div className="border-b border-agent-border bg-gradient-to-r from-agent-bg/95 via-agent-card to-agent-bg/90 p-6">
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Imported Source</div>
-                      <h2 className="mt-2 text-xl font-semibold text-white">{agreement.source.bountyTitle || agreement.source.sourceLabel}</h2>
-                      <p className="mt-1 text-sm text-gray-400">
-                        This agreement originated from external DAO or bounty metadata and keeps that attribution attached to every milestone and webhook event.
-                      </p>
+                <div className="overflow-hidden rounded-2xl border border-agent-border bg-agent-card shadow-[0_18px_50px_rgba(15,23,42,0.18)]">
+                  <div className="border-b border-agent-border bg-gradient-to-r from-agent-bg/95 via-agent-card to-agent-bg/90 p-6">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Imported Source</div>
+                        <h2 className="mt-2 text-xl font-semibold text-white">{agreement.source.bountyTitle || agreement.source.sourceLabel}</h2>
+                        <p className="mt-1 text-sm text-gray-400">
+                          This agreement originated from external DAO or bounty metadata and keeps that attribution attached to every milestone and webhook event.
+                        </p>
+                      </div>
+                      <StatusBadge status={agreement.source.sourceType} />
                     </div>
-                    <StatusBadge status={agreement.source.sourceType} />
                   </div>
-                </div>
-                <div className="p-6">
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4">
-                      <div className="text-xs uppercase tracking-wide text-gray-500">Source Label</div>
-                      <div className="mt-2 text-sm text-white">{agreement.source.sourceLabel}</div>
-                    </div>
-                    <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4">
-                      <div className="text-xs uppercase tracking-wide text-gray-500">Sponsor / DAO</div>
-                      <div className="mt-2 text-sm text-white">{agreement.source.sponsorName || 'Not provided'}</div>
-                    </div>
-                    {agreement.source.sourceReferenceId ? (
+                  <div className="p-6">
+                    <div className="grid gap-3 md:grid-cols-2">
                       <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4">
-                        <div className="text-xs uppercase tracking-wide text-gray-500">Reference ID</div>
-                        <div className="mt-2 text-sm text-white">{agreement.source.sourceReferenceId}</div>
+                        <div className="text-xs uppercase tracking-wide text-gray-500">Source Label</div>
+                        <div className="mt-2 text-sm text-white">{agreement.source.sourceLabel}</div>
                       </div>
-                    ) : null}
-                    <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4 md:col-span-2">
-                      <div className="text-xs uppercase tracking-wide text-gray-500">External URL</div>
-                      <a href={agreement.source.externalUrl} target="_blank" rel="noreferrer" className="mt-2 block break-all text-sm text-agent-accent hover:text-blue-300">
-                        {agreement.source.externalUrl}
-                      </a>
-                    </div>
-                    {agreement.source.forumThreadUrl ? (
+                      <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4">
+                        <div className="text-xs uppercase tracking-wide text-gray-500">Sponsor / DAO</div>
+                        <div className="mt-2 text-sm text-white">{agreement.source.sponsorName || 'Not provided'}</div>
+                      </div>
+                      {agreement.source.sourceReferenceId ? (
+                        <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4">
+                          <div className="text-xs uppercase tracking-wide text-gray-500">Reference ID</div>
+                          <div className="mt-2 text-sm text-white">{agreement.source.sourceReferenceId}</div>
+                        </div>
+                      ) : null}
                       <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4 md:col-span-2">
-                        <div className="text-xs uppercase tracking-wide text-gray-500">Forum / Governance Thread</div>
-                        <a href={agreement.source.forumThreadUrl} target="_blank" rel="noreferrer" className="mt-2 block break-all text-sm text-agent-accent hover:text-blue-300">
-                          {agreement.source.forumThreadUrl}
+                        <div className="text-xs uppercase tracking-wide text-gray-500">External URL</div>
+                        <a href={agreement.source.externalUrl} target="_blank" rel="noreferrer" className="mt-2 block break-all text-sm text-agent-accent hover:text-blue-300">
+                          {agreement.source.externalUrl}
                         </a>
                       </div>
-                    ) : null}
-                    <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4">
-                      <div className="text-xs uppercase tracking-wide text-gray-500">Source Sync Status</div>
-                      <div className="mt-2 flex items-center gap-2">
-                        <StatusBadge status={agreement.source.syncStatus || 'READY_TO_SYNC'} />
-                      </div>
-                      <div className="mt-2 text-xs text-gray-400">
-                        {agreement.source.lastSyncedAt
-                          ? `Last synced ${new Date(agreement.source.lastSyncedAt).toLocaleString()}`
-                          : 'No source sync has been run yet.'}
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4">
-                      <div className="text-xs uppercase tracking-wide text-gray-500">Publish Controls State</div>
-                      <div className="mt-2 text-sm text-white">
-                        {agreement.source.lastPublishedAt
-                          ? `Published ${new Date(agreement.source.lastPublishedAt).toLocaleString()}`
-                          : agreement.source.reviewedAt
-                            ? `Reviewed ${new Date(agreement.source.reviewedAt).toLocaleString()}`
-                            : agreement.source.draftUpdate
-                              ? 'Draft update prepared'
-                              : 'No drafted or published source update yet'}
-                      </div>
-                      {agreement.source.lastPublishedUrl ? (
-                        <a
-                          href={agreement.source.lastPublishedUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="mt-2 block break-all text-xs text-agent-accent hover:text-blue-300"
-                        >
-                          {agreement.source.lastPublishedUrl}
-                        </a>
-                      ) : null}
-                      {agreement.source.reviewedByAddress ? (
-                        <div className="mt-2 text-xs text-gray-400 break-all">
-                          Reviewed by {agreement.source.reviewedByAddress}
+                      {agreement.source.forumThreadUrl ? (
+                        <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4 md:col-span-2">
+                          <div className="text-xs uppercase tracking-wide text-gray-500">Forum / Governance Thread</div>
+                          <a href={agreement.source.forumThreadUrl} target="_blank" rel="noreferrer" className="mt-2 block break-all text-sm text-agent-accent hover:text-blue-300">
+                            {agreement.source.forumThreadUrl}
+                          </a>
                         </div>
                       ) : null}
-                      {agreement.source.lastPublishError ? (
-                        <div className="mt-2 text-xs text-rose-300">
-                          Last publish error: {agreement.source.lastPublishError}
-                        </div>
-                      ) : null}
-                    </div>
-                    {agreement.source.latestSummary ? (
-                      <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4 md:col-span-2">
-                        <div className="text-xs uppercase tracking-wide text-gray-500">Latest Synced Activity</div>
-                        <div className="mt-2 whitespace-pre-wrap text-sm text-gray-300">{agreement.source.latestSummary}</div>
-                      </div>
-                    ) : null}
-                    {importedSourceMetadata?.parser === 'NERVOS_GRANT_THREAD_V1' ? (
-                      <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4 md:col-span-2">
-                        <div className="text-xs uppercase tracking-wide text-gray-500">Imported Grant Snapshot</div>
-                        <div className="mt-4 grid gap-3 md:grid-cols-2">
-                          <div className="rounded-lg border border-agent-border bg-slate-950/20 p-4">
-                            <div className="text-xs uppercase tracking-wide text-gray-500">Requested Source Budget</div>
-                            <div className="mt-2 text-sm text-white">{importedSourceMetadata.grantAmountRequested || 'Not found in source thread'}</div>
-                          </div>
-                          <div className="rounded-lg border border-agent-border bg-slate-950/20 p-4">
-                            <div className="text-xs uppercase tracking-wide text-gray-500">ETA From Source</div>
-                            <div className="mt-2 text-sm text-white">{importedSourceMetadata.etaToCompletion || 'Not found in source thread'}</div>
-                          </div>
-                          <div className="rounded-lg border border-agent-border bg-slate-950/20 p-4">
-                            <div className="text-xs uppercase tracking-wide text-gray-500">Commencement Payment</div>
-                            <div className="mt-2 text-sm text-white">
-                              {[
-                                importedSourceMetadata.upfrontPayment?.label,
-                                importedSourceMetadata.upfrontPayment?.amountUsd,
-                                importedSourceMetadata.upfrontPayment?.percentage,
-                              ].filter(Boolean).join(' · ') || 'No separate commencement payment parsed'}
-                            </div>
-                          </div>
-                          <div className="rounded-lg border border-agent-border bg-slate-950/20 p-4">
-                            <div className="text-xs uppercase tracking-wide text-gray-500">Funding Address In Source</div>
-                            <div className="mt-2 break-all text-sm text-white">{importedSourceMetadata.fundingAddress || 'Not provided in source thread'}</div>
-                          </div>
-                        </div>
-                        {describeMissingSourceFields(importedSourceMetadata.missingFields) ? (
-                          <div className="mt-4 rounded-lg border border-amber-700/40 bg-amber-950/20 p-4 text-sm text-amber-100">
-                            {describeMissingSourceFields(importedSourceMetadata.missingFields)}
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : null}
-                    {latestSourceSyncActivity ? (
-                      <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4 md:col-span-2">
-                        <div className="text-xs uppercase tracking-wide text-gray-500">Most Recent Source Action</div>
-                        <div className="mt-2 text-sm text-white">
-                          {latestSourceSyncActivity.action.replace(/_/g, ' ')}
+                      <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4">
+                        <div className="text-xs uppercase tracking-wide text-gray-500">Source Sync Status</div>
+                        <div className="mt-2 flex items-center gap-2">
+                          <StatusBadge status={agreement.source.syncStatus || 'READY_TO_SYNC'} />
                         </div>
                         <div className="mt-2 text-xs text-gray-400">
-                          {new Date(latestSourceSyncActivity.createdAt).toLocaleString()}
-                          {latestSourceSyncActivity.actorAddress ? ` · ${getParticipantLabel(latestSourceSyncActivity.actorAddress, agreement)}` : ''}
+                          {agreement.source.lastSyncedAt
+                            ? `Last synced ${new Date(agreement.source.lastSyncedAt).toLocaleString()}`
+                            : 'No source sync has been run yet.'}
                         </div>
-                        {latestSourceSyncActivity.preview ? (
-                          <div className="mt-3 whitespace-pre-wrap text-sm text-gray-300">
-                            {latestSourceSyncActivity.preview}
+                      </div>
+                      <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4">
+                        <div className="text-xs uppercase tracking-wide text-gray-500">Publish Controls State</div>
+                        <div className="mt-2 text-sm text-white">
+                          {agreement.source.lastPublishedAt
+                            ? `Published ${new Date(agreement.source.lastPublishedAt).toLocaleString()}`
+                            : agreement.source.reviewedAt
+                              ? `Reviewed ${new Date(agreement.source.reviewedAt).toLocaleString()}`
+                              : agreement.source.draftUpdate
+                                ? 'Draft update prepared'
+                                : 'No drafted or published source update yet'}
+                        </div>
+                        {agreement.source.lastPublishedUrl ? (
+                          <a
+                            href={agreement.source.lastPublishedUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-2 block break-all text-xs text-agent-accent hover:text-blue-300"
+                          >
+                            {agreement.source.lastPublishedUrl}
+                          </a>
+                        ) : null}
+                        {agreement.source.reviewedByAddress ? (
+                          <div className="mt-2 text-xs text-gray-400 break-all">
+                            Reviewed by {agreement.source.reviewedByAddress}
+                          </div>
+                        ) : null}
+                        {agreement.source.lastPublishError ? (
+                          <div className="mt-2 text-xs text-rose-300">
+                            Last publish error: {agreement.source.lastPublishError}
                           </div>
                         ) : null}
                       </div>
-                    ) : null}
-                    {agreement.source.draftUpdate ? (
-                      <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4 md:col-span-2">
-                        <div className="text-xs uppercase tracking-wide text-gray-500">Draft Update</div>
-                        <div className="mt-2 whitespace-pre-wrap text-sm text-gray-300">{agreement.source.draftUpdate}</div>
-                      </div>
-                    ) : null}
-                    {isAdmin ? (
-                      <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4 md:col-span-2">
-                        <div className="text-xs uppercase tracking-wide text-gray-500">Admin Source Sync Controls</div>
-                        <div className="mt-4 grid gap-4 md:grid-cols-2">
-                          <div>
-                            <label className="text-xs uppercase tracking-wide text-gray-500">Thread URL</label>
-                            <input
-                              value={sourceThreadUrl}
-                              onChange={(e) => setSourceThreadUrl(e.target.value)}
-                              placeholder="https://forum.example.com/t/grant-update-thread"
-                              className="mt-2 w-full rounded-lg border border-agent-border bg-agent-card px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:border-agent-accent focus:outline-none"
-                            />
-                            <textarea
-                              value={sourceSummaryOverride}
-                              onChange={(e) => setSourceSummaryOverride(e.target.value)}
-                              placeholder="Optional manual summary. Leave blank to fetch the thread directly."
-                              className="mt-3 min-h-[96px] w-full rounded-lg border border-agent-border bg-agent-card px-4 py-3 text-sm text-white placeholder-gray-500 focus:border-agent-accent focus:outline-none"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                void handleSyncSource();
-                              }}
-                              disabled={sourceActionLoading === 'sync'}
-                              className="mt-3 rounded-lg border border-agent-accent/40 px-4 py-2 text-sm text-agent-accent hover:bg-agent-accent/10 disabled:opacity-50"
-                            >
-                              {sourceActionLoading === 'sync' ? 'Syncing...' : 'Sync Source Thread'}
-                            </button>
+                      {agreement.source.latestSummary ? (
+                        <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4 md:col-span-2">
+                          <div className="text-xs uppercase tracking-wide text-gray-500">Latest Synced Activity</div>
+                          <div className="mt-2 whitespace-pre-wrap text-sm text-gray-300">{agreement.source.latestSummary}</div>
+                        </div>
+                      ) : null}
+                      {importedSourceMetadata?.parser === 'NERVOS_GRANT_THREAD_V1' ? (
+                        <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4 md:col-span-2">
+                          <div className="text-xs uppercase tracking-wide text-gray-500">Imported Grant Snapshot</div>
+                          <div className="mt-4 grid gap-3 md:grid-cols-2">
+                            <div className="rounded-lg border border-agent-border bg-slate-950/20 p-4">
+                              <div className="text-xs uppercase tracking-wide text-gray-500">Requested Source Budget</div>
+                              <div className="mt-2 text-sm text-white">{importedSourceMetadata.grantAmountRequested || 'Not found in source thread'}</div>
+                            </div>
+                            <div className="rounded-lg border border-agent-border bg-slate-950/20 p-4">
+                              <div className="text-xs uppercase tracking-wide text-gray-500">ETA From Source</div>
+                              <div className="mt-2 text-sm text-white">{importedSourceMetadata.etaToCompletion || 'Not found in source thread'}</div>
+                            </div>
+                            <div className="rounded-lg border border-agent-border bg-slate-950/20 p-4">
+                              <div className="text-xs uppercase tracking-wide text-gray-500">Commencement Payment</div>
+                              <div className="mt-2 text-sm text-white">
+                                {[
+                                  importedSourceMetadata.upfrontPayment?.label,
+                                  importedSourceMetadata.upfrontPayment?.amountUsd,
+                                  importedSourceMetadata.upfrontPayment?.percentage,
+                                ].filter(Boolean).join(' · ') || 'No separate commencement payment parsed'}
+                              </div>
+                            </div>
+                            <div className="rounded-lg border border-agent-border bg-slate-950/20 p-4">
+                              <div className="text-xs uppercase tracking-wide text-gray-500">Funding Address In Source</div>
+                              <div className="mt-2 break-all text-sm text-white">{importedSourceMetadata.fundingAddress || 'Not provided in source thread'}</div>
+                            </div>
                           </div>
-                          <div>
-                            <label className="text-xs uppercase tracking-wide text-gray-500">Draft / Publish Update</label>
-                            <textarea
-                              value={sourceDraftUpdate}
-                              onChange={(e) => setSourceDraftUpdate(e.target.value)}
-                              placeholder="Draft the update that should be published back to the source thread."
-                              className="mt-2 min-h-[164px] w-full rounded-lg border border-agent-border bg-agent-card px-4 py-3 text-sm text-white placeholder-gray-500 focus:border-agent-accent focus:outline-none"
-                            />
-                            <label className="mt-3 flex items-start gap-3 text-sm text-gray-200">
+                          {describeMissingSourceFields(importedSourceMetadata.missingFields) ? (
+                            <div className="mt-4 rounded-lg border border-amber-700/40 bg-amber-950/20 p-4 text-sm text-amber-100">
+                              {describeMissingSourceFields(importedSourceMetadata.missingFields)}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {latestSourceSyncActivity ? (
+                        <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4 md:col-span-2">
+                          <div className="text-xs uppercase tracking-wide text-gray-500">Most Recent Source Action</div>
+                          <div className="mt-2 text-sm text-white">
+                            {latestSourceSyncActivity.action.replace(/_/g, ' ')}
+                          </div>
+                          <div className="mt-2 text-xs text-gray-400">
+                            {new Date(latestSourceSyncActivity.createdAt).toLocaleString()}
+                            {latestSourceSyncActivity.actorAddress ? ` · ${getParticipantLabel(latestSourceSyncActivity.actorAddress, agreement)}` : ''}
+                          </div>
+                          {latestSourceSyncActivity.preview ? (
+                            <div className="mt-3 whitespace-pre-wrap text-sm text-gray-300">
+                              {latestSourceSyncActivity.preview}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {agreement.source.draftUpdate ? (
+                        <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4 md:col-span-2">
+                          <div className="text-xs uppercase tracking-wide text-gray-500">Draft Update</div>
+                          <div className="mt-2 whitespace-pre-wrap text-sm text-gray-300">{agreement.source.draftUpdate}</div>
+                        </div>
+                      ) : null}
+                      {isAdmin ? (
+                        <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4 md:col-span-2">
+                          <div className="text-xs uppercase tracking-wide text-gray-500">Admin Source Sync Controls</div>
+                          <div className="mt-4 grid gap-4 md:grid-cols-2">
+                            <div>
+                              <label className="text-xs uppercase tracking-wide text-gray-500">Thread URL</label>
                               <input
-                                type="checkbox"
-                                className="mt-1"
-                                checked={sourceReviewerApproved}
-                                onChange={(e) => setSourceReviewerApproved(e.target.checked)}
+                                value={sourceThreadUrl}
+                                onChange={(e) => setSourceThreadUrl(e.target.value)}
+                                placeholder="https://forum.example.com/t/grant-update-thread"
+                                className="mt-2 w-full rounded-lg border border-agent-border bg-agent-card px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:border-agent-accent focus:outline-none"
                               />
-                              <span>I explicitly approve this outbound source-thread update before publishing it.</span>
-                            </label>
-                            <div className="mt-3 flex flex-wrap gap-3">
+                              <textarea
+                                value={sourceSummaryOverride}
+                                onChange={(e) => setSourceSummaryOverride(e.target.value)}
+                                placeholder="Optional manual summary. Leave blank to fetch the thread directly."
+                                className="mt-3 min-h-[96px] w-full rounded-lg border border-agent-border bg-agent-card px-4 py-3 text-sm text-white placeholder-gray-500 focus:border-agent-accent focus:outline-none"
+                              />
                               <button
                                 type="button"
                                 onClick={() => {
-                                  void handleDraftSourceUpdate();
+                                  void handleSyncSource();
                                 }}
-                                disabled={sourceActionLoading === 'draft-source' || !sourceDraftUpdate.trim()}
-                                className="rounded-lg border border-agent-border px-4 py-2 text-sm text-white hover:bg-agent-card disabled:opacity-50"
+                                disabled={sourceActionLoading === 'sync'}
+                                className="mt-3 rounded-lg border border-agent-accent/40 px-4 py-2 text-sm text-agent-accent hover:bg-agent-accent/10 disabled:opacity-50"
                               >
-                                {sourceActionLoading === 'draft-source' ? 'Saving Draft...' : 'Draft Update'}
+                                {sourceActionLoading === 'sync' ? 'Syncing...' : 'Sync Source Thread'}
                               </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  void handleReviewSourceUpdate();
-                                }}
-                                disabled={sourceActionLoading === 'review-source'}
-                                className="rounded-lg border border-agent-border px-4 py-2 text-sm text-white hover:bg-agent-card disabled:opacity-50"
-                              >
-                                {sourceActionLoading === 'review-source' ? 'Marking...' : 'Mark as Reviewed'}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  void handlePublishSourceUpdate();
-                                }}
-                                disabled={sourceActionLoading === 'publish-source' || !sourceDraftUpdate.trim() || !sourceReviewerApproved}
-                                className="rounded-lg border border-emerald-500/40 px-4 py-2 text-sm text-emerald-200 hover:bg-emerald-500/10 disabled:opacity-50"
-                              >
-                                {sourceActionLoading === 'publish-source' ? 'Publishing...' : 'Publish Update'}
-                              </button>
+                            </div>
+                            <div>
+                              <label className="text-xs uppercase tracking-wide text-gray-500">Draft / Publish Update</label>
+                              <textarea
+                                value={sourceDraftUpdate}
+                                onChange={(e) => setSourceDraftUpdate(e.target.value)}
+                                placeholder="Draft the update that should be published back to the source thread."
+                                className="mt-2 min-h-[164px] w-full rounded-lg border border-agent-border bg-agent-card px-4 py-3 text-sm text-white placeholder-gray-500 focus:border-agent-accent focus:outline-none"
+                              />
+                              <label className="mt-3 flex items-start gap-3 text-sm text-gray-200">
+                                <input
+                                  type="checkbox"
+                                  className="mt-1"
+                                  checked={sourceReviewerApproved}
+                                  onChange={(e) => setSourceReviewerApproved(e.target.checked)}
+                                />
+                                <span>I explicitly approve this outbound source-thread update before publishing it.</span>
+                              </label>
+                              <div className="mt-3 flex flex-wrap gap-3">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    void handleDraftSourceUpdate();
+                                  }}
+                                  disabled={sourceActionLoading === 'draft-source' || !sourceDraftUpdate.trim()}
+                                  className="rounded-lg border border-agent-border px-4 py-2 text-sm text-white hover:bg-agent-card disabled:opacity-50"
+                                >
+                                  {sourceActionLoading === 'draft-source' ? 'Saving Draft...' : 'Draft Update'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    void handleReviewSourceUpdate();
+                                  }}
+                                  disabled={sourceActionLoading === 'review-source'}
+                                  className="rounded-lg border border-agent-border px-4 py-2 text-sm text-white hover:bg-agent-card disabled:opacity-50"
+                                >
+                                  {sourceActionLoading === 'review-source' ? 'Marking...' : 'Mark as Reviewed'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    void handlePublishSourceUpdate();
+                                  }}
+                                  disabled={sourceActionLoading === 'publish-source' || !sourceDraftUpdate.trim() || !sourceReviewerApproved}
+                                  className="rounded-lg border border-emerald-500/40 px-4 py-2 text-sm text-emerald-200 hover:bg-emerald-500/10 disabled:opacity-50"
+                                >
+                                  {sourceActionLoading === 'publish-source' ? 'Publishing...' : 'Publish Update'}
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    ) : null}
-                    {agreement.source.bountyDescription ? (
-                      <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4 md:col-span-2">
-                        <div className="text-xs uppercase tracking-wide text-gray-500">Imported Scope</div>
-                        <div className="mt-2 whitespace-pre-wrap text-sm text-gray-300">{agreement.source.bountyDescription}</div>
-                      </div>
-                    ) : null}
-                    {agreement.source.governanceNotes ? (
-                      <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4 md:col-span-2">
-                        <div className="text-xs uppercase tracking-wide text-gray-500">Governance Notes</div>
-                        <div className="mt-2 whitespace-pre-wrap text-sm text-gray-300">{agreement.source.governanceNotes}</div>
-                      </div>
-                    ) : null}
+                      ) : null}
+                      {agreement.source.bountyDescription ? (
+                        <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4 md:col-span-2">
+                          <div className="text-xs uppercase tracking-wide text-gray-500">Imported Scope</div>
+                          <div className="mt-2 whitespace-pre-wrap text-sm text-gray-300">{agreement.source.bountyDescription}</div>
+                        </div>
+                      ) : null}
+                      {agreement.source.governanceNotes ? (
+                        <div className="rounded-lg border border-agent-border bg-agent-bg/60 p-4 md:col-span-2">
+                          <div className="text-xs uppercase tracking-wide text-gray-500">Governance Notes</div>
+                          <div className="mt-2 whitespace-pre-wrap text-sm text-gray-300">{agreement.source.governanceNotes}</div>
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
-              </div>
               </div>
             ) : null}
 
@@ -3820,8 +4060,8 @@ export default function AgreementDetailPage() {
                   {splitPending
                     ? 'A split settlement has been sent. The worker payout and client refund are both waiting for on-chain confirmation before the milestone moves forward.'
                     : payoutPending
-                    ? 'A payout transaction has been sent and the worker is waiting for on-chain confirmation before this milestone is marked paid.'
-                    : 'A refund transaction has been sent and the client is waiting for on-chain confirmation before the settlement is final.'}
+                      ? 'A payout transaction has been sent and the worker is waiting for on-chain confirmation before this milestone is marked paid.'
+                      : 'A refund transaction has been sent and the client is waiting for on-chain confirmation before the settlement is final.'}
                 </p>
                 <button
                   onClick={handleReconcile}
@@ -4038,9 +4278,14 @@ export default function AgreementDetailPage() {
                 </h3>
                 <p className="text-sm text-gray-400 mb-4">
                   {isImportedGrant
-                    ? `Lock ${shannonsToCKB(agreement.amount)} CKB once. Any commencement fund releases immediately after funding confirms, and the remaining deliverables stay milestone-based for manual review.`
+                    ? `Lock ${currentDraftReserveLabel} as the initial reserve. Any commencement fund releases immediately after funding confirms, and later milestone payouts are quoted from the remaining reserve at release time.`
                     : `Lock ${shannonsToCKB(agreement.amount)} CKB once, then the agent will release milestone payouts as work is approved.`}
                 </p>
+                {isUsdEquivalentGrant && agreement.status === 'DRAFT' && liveCkbQuote ? (
+                  <div className="mb-4 rounded-lg border border-emerald-800/40 bg-emerald-950/20 px-3 py-2 text-xs text-emerald-100">
+                    Live reserve recommendation refreshed at {new Date(liveCkbQuote.lastUpdatedAt || liveCkbQuote.fetchedAt).toLocaleString()} using 1 CKB = ${liveCkbQuote.priceUsd.toFixed(6)}.
+                  </div>
+                ) : null}
                 <div className="mb-4 rounded-lg border border-agent-border bg-agent-bg/60 px-3 py-2 text-xs text-gray-400">
                   Funds will be sent to the agreement escrow destination:
                   <div className="mt-1 font-mono text-gray-300 break-all">
@@ -4071,6 +4316,35 @@ export default function AgreementDetailPage() {
                     agreements that need funding.
                   </div>
                 )}
+                {isUsdEquivalentGrant && agreement.reserveHealthStatus === 'TOP_UP_REQUIRED' && (
+                  <div className="mb-4 rounded-lg border border-rose-800 bg-rose-950/20 p-4 text-sm text-rose-100">
+                    <div className="font-medium text-white">Reserve top-up required</div>
+                    <p className="mt-2 text-sm text-rose-100/90">
+                      The remaining CKB reserve is not enough to satisfy the next USD-equivalent milestone payout. Send an additional treasury funding transfer to the escrow destination, then confirm it here.
+                    </p>
+                    <div className="mt-4 grid gap-3 md:grid-cols-2">
+                      <input
+                        className="w-full rounded-lg border border-agent-border bg-agent-bg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-agent-accent"
+                        value={topUpTxHash}
+                        onChange={(e) => setTopUpTxHash(e.target.value)}
+                        placeholder="Top-up transaction hash"
+                      />
+                      <input
+                        className="w-full rounded-lg border border-agent-border bg-agent-bg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-agent-accent"
+                        value={topUpAmountCkb}
+                        onChange={(e) => setTopUpAmountCkb(e.target.value)}
+                        placeholder="Top-up amount in CKB"
+                      />
+                    </div>
+                    <button
+                      onClick={handleTopUpReserve}
+                      disabled={reserveTopUpLoading}
+                      className="mt-4 rounded-lg bg-agent-accent px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-600 disabled:opacity-60"
+                    >
+                      {reserveTopUpLoading ? 'Confirming top-up...' : 'Confirm Reserve Top-Up'}
+                    </button>
+                  </div>
+                )}
                 {fundingNeedsReconnect ? (
                   <button
                     onClick={handleReconnectSigner}
@@ -4099,11 +4373,13 @@ export default function AgreementDetailPage() {
                             ? 'Funding Requires CKB Wallet'
                             : 'Lock Funds on CKB'}
                       </>
-                      )}
+                    )}
                   </button>
                 )}
               </div>
             )}
+
+            <div id="review" className="scroll-mt-24" />
 
             {['FUNDED', 'PROOF_SUBMITTED'].includes(agreement.status) && isWorker && currentMilestone && ['ACTIVE', 'PROOF_SUBMITTED'].includes(currentMilestone.status) && (
               <div className="bg-agent-card border border-yellow-800/50 rounded-xl p-6">
@@ -4184,13 +4460,12 @@ export default function AgreementDetailPage() {
                         {submitAreaProofCheck.lifecycleStatus === 'NEEDS_MORE_INFO' ? 'Outstanding checker warnings' : 'Latest checker result'}
                       </span>
                       <span
-                        className={`rounded-full px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${
-                          submitAreaProofCheck.status === 'READY_FOR_HUMAN_REVIEW'
-                            ? 'bg-emerald-950/40 text-emerald-300'
-                            : submitAreaProofCheck.lifecycleStatus === 'NEEDS_MORE_INFO'
-                              ? 'bg-orange-950/40 text-orange-300'
-                              : 'bg-amber-950/40 text-amber-300'
-                        }`}
+                        className={`rounded-full px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${submitAreaProofCheck.status === 'READY_FOR_HUMAN_REVIEW'
+                          ? 'bg-emerald-950/40 text-emerald-300'
+                          : submitAreaProofCheck.lifecycleStatus === 'NEEDS_MORE_INFO'
+                            ? 'bg-orange-950/40 text-orange-300'
+                            : 'bg-amber-950/40 text-amber-300'
+                          }`}
                       >
                         {submitAreaProofCheck.status === 'READY_FOR_HUMAN_REVIEW'
                           ? 'Ready'
@@ -4257,94 +4532,56 @@ export default function AgreementDetailPage() {
             )}
 
             {canClientReview && currentMilestone && (
-                <div className="bg-agent-card border border-emerald-800/50 rounded-xl p-6">
+              <div className="bg-agent-card border border-emerald-800/50 rounded-xl p-6">
                 <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
                   <ScaleIcon className="w-5 h-5 text-emerald-400" />
                   Review Current Milestone
                 </h3>
                 <p className="text-sm text-gray-400 mb-4">
                   {agreement.escrowModel === 'ONCHAIN_LOCK'
-                      ? `Sign the on-chain payout resolution for ${currentMilestone.title}.`
-                      : currentMilestone.status === 'PROOF_SUBMITTED'
-                        ? `The worker has submitted proof for ${currentMilestone.title}. Payout is already available while PactAgent continues the background review.`
-                        : isImportedGrant
+                    ? `Sign the on-chain payout resolution for ${currentMilestone.title}.`
+                    : currentMilestone.status === 'PROOF_SUBMITTED'
+                      ? `The worker has submitted proof for ${currentMilestone.title}. Payout is already available while PactAgent continues the background review.`
+                      : isImportedGrant
                         ? `Review ${currentMilestone.title}, message the worker for missing context when needed, and approve the payout only after manual review is complete.`
                         : `Approve payout for ${currentMilestone.title}, or open a dispute below. Refunds only happen after both client and worker agree inside the dispute thread.`}
                 </p>
-                  <div className="mb-4">
-                    <ProofCheckPanel
-                      result={currentProofCheck}
-                      checking={currentProofCheckLoading}
-                      onCheck={() => {
-                        void handleCheckProof(currentMilestone.id);
-                      }}
-                    />
-                  </div>
-                  {!isImportedGrant ? (
-                    <div className="mb-4 rounded-xl border border-agent-border bg-agent-bg/60 p-4">
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div>
-                          <h4 className="text-sm font-semibold text-white">Request More Info</h4>
-                          <p className="mt-1 text-xs text-gray-400">
-                            Ask only for the missing evidence. Send a structured request here, then continue the conversation in the reviewer thread below.
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            void handleDraftInfoRequest(currentMilestone.id);
-                          }}
-                          disabled={draftInfoRequestLoading}
-                          className="rounded-lg border border-agent-accent/40 px-3 py-2 text-xs font-medium text-agent-accent hover:bg-agent-accent/10 disabled:opacity-60"
-                        >
-                          {draftInfoRequestLoading ? 'Drafting...' : 'Suggest Questions'}
-                        </button>
+                <div className="mb-4">
+                  <ProofCheckPanel
+                    result={currentProofCheck}
+                    checking={currentProofCheckLoading}
+                    onCheck={() => {
+                      void handleCheckProof(currentMilestone.id);
+                    }}
+                  />
+                </div>
+                {!isImportedGrant ? (
+                  <div className="mb-4 rounded-xl border border-agent-border bg-agent-bg/60 p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <h4 className="text-sm font-semibold text-white">Request More Info</h4>
+                        <p className="mt-1 text-xs text-gray-400">
+                          Ask only for the missing evidence. Send a structured request here, then continue the conversation in the reviewer thread below.
+                        </p>
                       </div>
-                      <textarea
-                        className="mt-3 min-h-[110px] w-full rounded-lg border border-agent-border bg-agent-bg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-agent-accent"
-                        placeholder="One follow-up request per line..."
-                        value={followUpDraftText}
-                        onChange={(e) => setFollowUpDraftText(e.target.value)}
-                      />
-                      {currentMilestoneInfoRequests.length ? (
-                        <div className="mt-3 space-y-2">
-                          {currentMilestoneInfoRequests.map((request) => (
-                            <div key={request.requestId} className={`rounded-lg border px-3 py-2 ${getInfoRequestTone(request)}`}>
-                              <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] uppercase tracking-[0.16em]">
-                                <span>{request.requestId}</span>
-                                <span>{request.resolved ? 'Answered' : 'Open'}</span>
-                              </div>
-                              <div className="mt-2 space-y-1">
-                                {request.questions.map((question, index) => (
-                                  <p key={`${request.requestId}-${index}`} className="text-sm">
-                                    {index + 1}. {question}
-                                  </p>
-                                ))}
-                              </div>
-                              {request.responsePreview ? (
-                                <p className="mt-2 text-xs text-gray-300">Latest response: {request.responsePreview}</p>
-                              ) : null}
-                            </div>
-                          ))}
-                        </div>
-                      ) : null}
                       <button
                         type="button"
                         onClick={() => {
-                          void handleSendInfoRequest(currentMilestone.id);
+                          void handleDraftInfoRequest(currentMilestone.id);
                         }}
-                        disabled={sendInfoRequestLoading || !followUpDraftText.trim()}
-                        className="mt-3 rounded-lg border border-agent-border px-4 py-2 text-sm font-medium text-white hover:bg-agent-bg disabled:opacity-50"
+                        disabled={draftInfoRequestLoading}
+                        className="rounded-lg border border-agent-accent/40 px-3 py-2 text-xs font-medium text-agent-accent hover:bg-agent-accent/10 disabled:opacity-60"
                       >
-                        {sendInfoRequestLoading ? 'Sending Request...' : 'Send Structured Request'}
+                        {draftInfoRequestLoading ? 'Drafting...' : 'Suggest Questions'}
                       </button>
                     </div>
-                  ) : currentMilestoneInfoRequests.length ? (
-                    <div className="mb-4 rounded-xl border border-agent-border bg-agent-bg/60 p-4">
-                      <h4 className="text-sm font-semibold text-white">Structured Review Requests</h4>
-                      <p className="mt-1 text-xs text-gray-400">
-                        Formal reviewer requests stay tracked here. Use the reviewer thread below for the actual conversation.
-                      </p>
+                    <textarea
+                      className="mt-3 min-h-[110px] w-full rounded-lg border border-agent-border bg-agent-bg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-agent-accent"
+                      placeholder="One follow-up request per line..."
+                      value={followUpDraftText}
+                      onChange={(e) => setFollowUpDraftText(e.target.value)}
+                    />
+                    {currentMilestoneInfoRequests.length ? (
                       <div className="mt-3 space-y-2">
                         {currentMilestoneInfoRequests.map((request) => (
                           <div key={request.requestId} className={`rounded-lg border px-3 py-2 ${getInfoRequestTone(request)}`}>
@@ -4365,67 +4602,105 @@ export default function AgreementDetailPage() {
                           </div>
                         ))}
                       </div>
-                    </div>
-                  ) : null}
-                  <ReviewerDecisionDraftPanel
-                    reviewerDecisionNote={reviewerDecisionNote}
-                    setReviewerDecisionNote={setReviewerDecisionNote}
-                    humanApprovalConfirmed={humanApprovalConfirmed}
-                    setHumanApprovalConfirmed={setHumanApprovalConfirmed}
-                    acknowledgeProofCheck={acknowledgeProofCheck}
-                    setAcknowledgeProofCheck={setAcknowledgeProofCheck}
-                    acknowledgeAiSuggestion={acknowledgeAiSuggestion}
-                    setAcknowledgeAiSuggestion={setAcknowledgeAiSuggestion}
-                    displayedRecommendation={displayedRecommendation}
-                    currentOpenInfoRequestsCount={currentOpenInfoRequests.length}
-                    waitingForReview={currentMilestone.status === 'PROOF_SUBMITTED'}
-                  />
-                  <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+                    ) : null}
                     <button
-                      onClick={() => handleReviewAction('APPROVE')}
-                      disabled={
-                        !!actionLoading
-                        || !humanApprovalConfirmed
-                        || !reviewerDecisionNote.trim()
-                        || !acknowledgeProofCheck
-                        || (displayedRecommendation ? !acknowledgeAiSuggestion : false)
-                      }
-                      className="flex min-w-[150px] items-center justify-center gap-1.5 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+                      type="button"
+                      onClick={() => {
+                        void handleSendInfoRequest(currentMilestone.id);
+                      }}
+                      disabled={sendInfoRequestLoading || !followUpDraftText.trim()}
+                      className="mt-3 rounded-lg border border-agent-border px-4 py-2 text-sm font-medium text-white hover:bg-agent-bg disabled:opacity-50"
                     >
-                      {approveLoading ? (
+                      {sendInfoRequestLoading ? 'Sending Request...' : 'Send Structured Request'}
+                    </button>
+                  </div>
+                ) : currentMilestoneInfoRequests.length ? (
+                  <div className="mb-4 rounded-xl border border-agent-border bg-agent-bg/60 p-4">
+                    <h4 className="text-sm font-semibold text-white">Structured Review Requests</h4>
+                    <p className="mt-1 text-xs text-gray-400">
+                      Formal reviewer requests stay tracked here. Use the reviewer thread below for the actual conversation.
+                    </p>
+                    <div className="mt-3 space-y-2">
+                      {currentMilestoneInfoRequests.map((request) => (
+                        <div key={request.requestId} className={`rounded-lg border px-3 py-2 ${getInfoRequestTone(request)}`}>
+                          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] uppercase tracking-[0.16em]">
+                            <span>{request.requestId}</span>
+                            <span>{request.resolved ? 'Answered' : 'Open'}</span>
+                          </div>
+                          <div className="mt-2 space-y-1">
+                            {request.questions.map((question, index) => (
+                              <p key={`${request.requestId}-${index}`} className="text-sm">
+                                {index + 1}. {question}
+                              </p>
+                            ))}
+                          </div>
+                          {request.responsePreview ? (
+                            <p className="mt-2 text-xs text-gray-300">Latest response: {request.responsePreview}</p>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                <ReviewerDecisionDraftPanel
+                  reviewerDecisionNote={reviewerDecisionNote}
+                  setReviewerDecisionNote={setReviewerDecisionNote}
+                  humanApprovalConfirmed={humanApprovalConfirmed}
+                  setHumanApprovalConfirmed={setHumanApprovalConfirmed}
+                  acknowledgeProofCheck={acknowledgeProofCheck}
+                  setAcknowledgeProofCheck={setAcknowledgeProofCheck}
+                  acknowledgeAiSuggestion={acknowledgeAiSuggestion}
+                  setAcknowledgeAiSuggestion={setAcknowledgeAiSuggestion}
+                  displayedRecommendation={displayedRecommendation}
+                  currentOpenInfoRequestsCount={currentOpenInfoRequests.length}
+                  waitingForReview={currentMilestone.status === 'PROOF_SUBMITTED'}
+                />
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+                  <button
+                    onClick={() => handleReviewAction('APPROVE')}
+                    disabled={
+                      !!actionLoading
+                      || !humanApprovalConfirmed
+                      || !reviewerDecisionNote.trim()
+                      || !acknowledgeProofCheck
+                      || (displayedRecommendation ? !acknowledgeAiSuggestion : false)
+                    }
+                    className="flex min-w-[150px] items-center justify-center gap-1.5 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+                  >
+                    {approveLoading ? (
+                      <>
+                        <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                        Approving...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircleIcon className="w-4 h-4" />
+                        {agreement.escrowModel === 'ONCHAIN_LOCK' ? 'Sign Milestone Payout Transaction' : 'Approve Milestone Payout'}
+                      </>
+                    )}
+                  </button>
+                  {canOnchainRefundReview ? (
+                    <button
+                      onClick={() => handleReviewAction('REJECT')}
+                      disabled={!!actionLoading}
+                      className="flex min-w-[170px] items-center justify-center gap-1.5 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                    >
+                      {rejectLoading ? (
                         <>
                           <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                          Approving...
+                          Refunding...
                         </>
                       ) : (
                         <>
-                          <CheckCircleIcon className="w-4 h-4" />
-                          {agreement.escrowModel === 'ONCHAIN_LOCK' ? 'Sign Milestone Payout Transaction' : 'Approve Milestone Payout'}
+                          <XCircleIcon className="w-4 h-4" />
+                          Sign Milestone Refund Transaction
                         </>
                       )}
                     </button>
-                    {canOnchainRefundReview ? (
-                      <button
-                        onClick={() => handleReviewAction('REJECT')}
-                        disabled={!!actionLoading}
-                        className="flex min-w-[170px] items-center justify-center gap-1.5 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
-                      >
-                        {rejectLoading ? (
-                          <>
-                            <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                            Refunding...
-                          </>
-                        ) : (
-                          <>
-                            <XCircleIcon className="w-4 h-4" />
-                            Sign Milestone Refund Transaction
-                          </>
-                        )}
-                      </button>
-                    ) : null}
-                  </div>
+                  ) : null}
                 </div>
-              )}
+              </div>
+            )}
 
             {isImportedGrant && currentMilestone && (isClient || isWorker) ? (
               <div className="bg-agent-card border border-sky-800/40 rounded-xl p-6">
@@ -4558,11 +4833,10 @@ export default function AgreementDetailPage() {
                     ) : null}
                   </div>
                   <span
-                    className={`rounded-full border px-3 py-1 text-[11px] font-medium ${
-                      wsConnected
-                        ? 'border-emerald-800/40 bg-emerald-950/40 text-emerald-300'
-                        : 'border-white/10 bg-slate-900/60 text-gray-300'
-                    }`}
+                    className={`rounded-full border px-3 py-1 text-[11px] font-medium ${wsConnected
+                      ? 'border-emerald-800/40 bg-emerald-950/40 text-emerald-300'
+                      : 'border-white/10 bg-slate-900/60 text-gray-300'
+                      }`}
                   >
                     {wsConnected ? 'Live updates on' : 'Live updates off'}
                   </span>
@@ -4706,19 +4980,17 @@ export default function AgreementDetailPage() {
                         return (
                           <div
                             key={entry.id}
-                            className={`rounded-lg border border-white/5 bg-slate-950/30 px-3 py-3 ${
-                              isPendingReply ? 'opacity-80' : ''
-                            }`}
+                            className={`rounded-lg border border-white/5 bg-slate-950/30 px-3 py-3 ${isPendingReply ? 'opacity-80' : ''
+                              }`}
                           >
                             <div className="mb-2 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wide text-gray-500">
                               <span
-                                className={`rounded-full px-2 py-1 ${
-                                  entryLabel === 'Client'
-                                    ? 'bg-blue-950/40 text-blue-300'
-                                    : entryLabel === 'Worker'
-                                      ? 'bg-amber-950/40 text-amber-300'
-                                      : 'bg-slate-900/60 text-gray-300'
-                                }`}
+                                className={`rounded-full px-2 py-1 ${entryLabel === 'Client'
+                                  ? 'bg-blue-950/40 text-blue-300'
+                                  : entryLabel === 'Worker'
+                                    ? 'bg-amber-950/40 text-amber-300'
+                                    : 'bg-slate-900/60 text-gray-300'
+                                  }`}
                               >
                                 {entryLabel} reply
                               </span>
@@ -4821,15 +5093,14 @@ export default function AgreementDetailPage() {
                           Suggested only
                         </span>
                         <span
-                          className={`px-3 py-1 rounded-full text-xs font-bold ${
-                            displayedRecommendation.recommendation === 'APPROVE_PAYOUT'
-                              ? 'bg-green-900/50 text-green-300'
-                              : displayedRecommendation.recommendation === 'REFUND_CLIENT'
-                                ? 'bg-red-900/50 text-red-300'
-                                : displayedRecommendation.recommendation === 'REQUEST_MORE_EVIDENCE'
-                                  ? 'bg-yellow-900/50 text-yellow-300'
-                                  : 'bg-purple-900/50 text-purple-300'
-                          }`}
+                          className={`px-3 py-1 rounded-full text-xs font-bold ${displayedRecommendation.recommendation === 'APPROVE_PAYOUT'
+                            ? 'bg-green-900/50 text-green-300'
+                            : displayedRecommendation.recommendation === 'REFUND_CLIENT'
+                              ? 'bg-red-900/50 text-red-300'
+                              : displayedRecommendation.recommendation === 'REQUEST_MORE_EVIDENCE'
+                                ? 'bg-yellow-900/50 text-yellow-300'
+                                : 'bg-purple-900/50 text-purple-300'
+                            }`}
                         >
                           {displayedRecommendation.recommendation.replace(/_/g, ' ')}
                         </span>
@@ -4952,11 +5223,58 @@ export default function AgreementDetailPage() {
           </div>
 
           <div className="lg:col-span-1">
-            <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-              Agent Activity
-            </h2>
-            <AgentLogPanel agreementId={id} />
+            <div className="space-y-5 lg:sticky lg:top-24">
+              <div className="ui-panel p-5">
+                <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Case Rail</div>
+                <h2 className="mt-2 text-xl font-semibold text-white">Next move</h2>
+                <p className="mt-2 text-sm text-gray-400">{nextActionSummary}</p>
+
+                <div className="mt-4 space-y-3">
+                  <div className="rounded-2xl border border-agent-border bg-agent-bg/55 p-4">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-gray-500">Action owner</div>
+                    <div className="mt-2 text-sm font-medium text-white">{nextActionOwner.label}</div>
+                    <p className="mt-2 text-xs text-gray-500">{nextActionOwner.detail}</p>
+                  </div>
+                  <div className="rounded-2xl border border-agent-border bg-agent-bg/55 p-4">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-gray-500">Current milestone</div>
+                    <div className="mt-2 text-sm font-medium text-white">{currentMilestoneSummary}</div>
+                    <p className="mt-2 text-xs text-gray-500">{progressSummary}</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-2xl border border-agent-border bg-agent-bg/55 p-4">
+                      <div className="text-[11px] uppercase tracking-[0.16em] text-gray-500">Deadline</div>
+                      <div className="mt-2 text-sm text-white">{new Date(agreement.deadlineAt).toLocaleDateString()}</div>
+                    </div>
+                    <div className="rounded-2xl border border-agent-border bg-agent-bg/55 p-4">
+                      <div className="text-[11px] uppercase tracking-[0.16em] text-gray-500">Value</div>
+                      <div className="mt-2 text-sm font-mono text-white">{shannonsToCKB(agreement.amount)} CKB</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="ui-panel p-5">
+                <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Jump Links</div>
+                <div className="mt-4 flex flex-col gap-2 text-sm">
+                  <a href="#overview" className="app-nav-link">Overview</a>
+                  <a href="#milestones" className="app-nav-link">Milestones</a>
+                  <a href="#review" className="app-nav-link">Proof & Review</a>
+                  <a href="#funding" className="app-nav-link">Funding & Settlement</a>
+                  <a href="#timeline" className="app-nav-link">Timeline</a>
+                </div>
+              </div>
+
+              <div className="ui-panel p-5">
+                <div className="mb-4 flex items-center gap-2 text-white">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-green-400" />
+                  <h2 className="text-lg font-semibold">Agent Activity</h2>
+                </div>
+                <p className="mb-4 text-sm text-gray-400">
+                  Live operational logs for this agreement.
+                </p>
+                <AgentLogPanel agreementId={id} />
+              </div>
+            </div>
           </div>
         </div>
       </div>

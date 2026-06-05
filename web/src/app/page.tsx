@@ -55,6 +55,7 @@ export default function HomePage() {
           <BrandLogo />
           <NavbarMenu>
             {walletAddress ? <Link href="/dashboard" className="app-nav-link">Dashboard</Link> : null}
+            {walletAddress ? <Link href="/agreement/import-bounty" className="app-nav-link">Imports</Link> : null}
             {walletAddress && isAdmin ? <Link href="/admin" className="app-nav-link-accent">Admin</Link> : null}
           </NavbarMenu>
         </div>
@@ -79,6 +80,20 @@ export default function HomePage() {
                 <p className="mt-5 max-w-2xl text-base text-gray-300 sm:text-lg">
                   PactAgent helps clients, workers, and grant operators run milestone-based agreements with wallet-based access, review checkpoints, and live settlement status.
                 </p>
+                <div className="mt-6 grid gap-3 sm:grid-cols-3">
+                  <div className="ui-panel-soft p-4">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">1. See state</div>
+                    <p className="mt-2 text-sm text-gray-300">Every agreement now surfaces current status, action owner, next move, and risk signals right away.</p>
+                  </div>
+                  <div className="ui-panel-soft p-4">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">2. Move work forward</div>
+                    <p className="mt-2 text-sm text-gray-300">Draft, fund, deliver, review, dispute, and settle through one operational flow instead of scattered screens.</p>
+                  </div>
+                  <div className="ui-panel-soft p-4">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">3. Keep trust visible</div>
+                    <p className="mt-2 text-sm text-gray-300">Profiles, webhooks, and imported source context all reinforce who is acting and why the workflow is credible.</p>
+                  </div>
+                </div>
                 <div className="mt-8 flex flex-col gap-3 sm:flex-row">
                   {hasWalletAccess ? (
                     <>
@@ -181,6 +196,36 @@ export default function HomePage() {
             <p className="text-sm text-gray-400">
               Funding, review, disputes, and settlement should read like one continuous workflow, not separate systems.
             </p>
+          </div>
+        </section>
+
+        <section className="mb-16 ui-panel p-6 sm:p-8">
+          <div className="grid gap-5 lg:grid-cols-[1.05fr_0.95fr]">
+            <div>
+              <div className="ui-kicker mb-3">Designed For Operational Clarity</div>
+              <h2 className="text-2xl font-semibold text-white">A structured workspace for milestone agreements, review, and settlement</h2>
+              <p className="mt-3 text-sm text-gray-400">
+                PactAgent gives clients, workers, and grant operators a shared system for defining scope, tracking delivery, reviewing proof, and settling payouts. Each agreement keeps status, accountability, and next steps visible so operational decisions are easier to make and easier to verify.
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="ui-panel-soft p-4">
+                <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Operational visibility</div>
+                <p className="mt-2 text-sm text-gray-300">Agreement state, participant responsibility, and next actions remain visible throughout the lifecycle.</p>
+              </div>
+              <div className="ui-panel-soft p-4">
+                <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Structured execution</div>
+                <p className="mt-2 text-sm text-gray-300">Milestone-based workflows make delivery checkpoints, proof review, and payout decisions easier to manage.</p>
+              </div>
+              <div className="ui-panel-soft p-4">
+                <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Review integrity</div>
+                <p className="mt-2 text-sm text-gray-300">Proof, comments, disputes, and settlement history stay attached to the agreement record for clearer oversight.</p>
+              </div>
+              <div className="ui-panel-soft p-4">
+                <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Trust and integration</div>
+                <p className="mt-2 text-sm text-gray-300">Wallet access, public identity, and webhook integrations support stronger coordination and more reliable downstream operations.</p>
+              </div>
+            </div>
           </div>
         </section>
 

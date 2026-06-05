@@ -14,7 +14,7 @@ export function BrandLogo({
   href = '/',
   className = '',
   compact = false,
-  badgeLabel = 'CKB Testnet',
+  badgeLabel = 'TESTNET',
 }: BrandLogoProps) {
   return (
     <Link href={href} className={`flex min-w-0 items-center gap-3 ${className}`.trim()}>
@@ -27,7 +27,7 @@ export function BrandLogo({
         priority
       />
       {badgeLabel ? (
-        <span className="ui-chip-muted hidden sm:inline-flex">
+        <span className="ui-chip-muted hidden md:inline-flex">
           {badgeLabel}
         </span>
       ) : null}

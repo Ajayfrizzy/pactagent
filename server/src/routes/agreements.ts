@@ -99,6 +99,7 @@ const createAgreementSchema = z.object({
         title: z.string().min(1).max(120),
         description: z.string().min(1).max(1000),
         amount: z.string().min(1),
+        targetUsd: z.number().positive().optional(),
       })
     )
     .min(1),
@@ -124,6 +125,7 @@ const bountyAutofillSchema = z.object({
 
 const fundSchema = z.object({
   txHash: z.string().min(1),
+  amount: z.string().min(1).optional(),
   milestoneOutputs: z.array(
     z.object({
       milestoneId: z.string().min(1),
@@ -133,6 +135,11 @@ const fundSchema = z.object({
     })
   ).optional(),
   commencementOutputIndex: z.number().int().min(0).optional(),
+});
+
+const topUpReserveSchema = z.object({
+  txHash: z.string().min(1),
+  amount: z.string().min(1),
 });
 
 const submitProofSchema = z.object({
@@ -453,6 +460,7 @@ router.post('/import-bounty', actionRateLimit, async (req: Request, res: Respons
       ...data.agreement,
       reviewerMode: 'MANUAL',
       releaseMode: 'PARTIAL',
+      escrowModel: 'TREASURY_BRIDGE',
       sourceMetadata: {
         sourceType: data.sourceType,
         sourceLabel: data.sourceLabel,
@@ -466,6 +474,10 @@ router.post('/import-bounty', actionRateLimit, async (req: Request, res: Respons
         governanceNotes: data.governanceNotes,
         createdByAddress: authAddress,
       },
+      milestones: data.agreement.milestones.map((milestone) => ({
+        ...milestone,
+        targetUsd: milestone.targetUsd,
+      })),
     });
 
     await createAuditLog({
@@ -701,11 +713,11 @@ router.post('/:id/fund', actionRateLimit, async (req: Request, res: Response) =>
       return res.status(403).json({ success: false, error: 'Only the client can fund this agreement' });
     }
 
-    const { txHash, milestoneOutputs, commencementOutputIndex } = fundSchema.parse(req.body);
+    const { txHash, amount, milestoneOutputs, commencementOutputIndex } = fundSchema.parse(req.body);
     const agreement = result.agreement.id && (await agreementService.getAgreementById(req.params.id));
     const updated = agreement?.escrowModel === 'ONCHAIN_LOCK'
       ? await agreementService.registerOnchainFundingIntent(req.params.id, txHash, milestoneOutputs || [], commencementOutputIndex)
-      : await agreementService.fundAgreement(req.params.id, txHash);
+      : await agreementService.fundAgreement(req.params.id, txHash, amount);
     await createAuditLog({
       agreementId: req.params.id,
       actorAddress: authAddress,
@@ -715,6 +727,37 @@ router.post('/:id/fund', actionRateLimit, async (req: Request, res: Response) =>
       metadata: { txHash },
     });
     await queueAgreementJob(req.params.id, 'funding submitted', 'VERIFY_FUNDING');
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Validation error';
+    res.status(400).json({ success: false, error: msg });
+  }
+});
+
+router.post('/:id/reserve/top-up', actionRateLimit, async (req: Request, res: Response) => {
+  try {
+    const result = await getAgreementParticipantRecord(req);
+    if ('error' in result) {
+      return res.status(result.error === 'Agreement not found' ? 404 : 403).json({ success: false, error: result.error });
+    }
+
+    const authAddress = getAuthAddress(req);
+    if (result.agreement.clientAddress !== authAddress) {
+      return res.status(403).json({ success: false, error: 'Only the client can top up this imported grant reserve' });
+    }
+
+    const { txHash, amount } = topUpReserveSchema.parse(req.body);
+    const updated = await agreementService.topUpImportedGrantReserve(req.params.id, txHash, amount);
+
+    await createAuditLog({
+      agreementId: req.params.id,
+      actorAddress: authAddress,
+      action: 'AGREEMENT_RESERVE_TOP_UP',
+      resourceType: 'SETTLEMENT',
+      resourceId: req.params.id,
+      metadata: { txHash, amount },
+    });
+
     res.json({ success: true, data: updated });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Validation error';

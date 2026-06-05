@@ -603,21 +603,19 @@ export default function ImportBountyPage() {
           reviewerMode: 'MANUAL',
           releaseMode: 'PARTIAL',
           payoutNetwork: form.payoutNetwork,
-          escrowModel:
-            publicConfig?.onchainEscrowReady && form.payoutNetwork === 'CKB'
-              ? 'ONCHAIN_LOCK'
-              : 'TREASURY_BRIDGE',
+          escrowModel: 'TREASURY_BRIDGE',
           milestones: milestones.map((milestone) => ({
             title: milestone.title,
             description: milestone.description,
             amount: ckbToShannons(milestone.amountCkb).toString(),
+            targetUsd: milestone.sourceBudgetUsd ?? undefined,
           })),
         },
       });
 
       window.sessionStorage.setItem(
         'pactagent-ui-flash',
-        `Imported grant agreement created successfully. Lock the total ${totalGrantCkb || 0} CKB once funding is ready. The commencement fund releases immediately after funding confirms, and the remaining deliverables stay milestone-based for manual review.`,
+        `Imported grant agreement created successfully. Fund the recommended reserve of ${formatLargeCkbAmount(recommendedReserveCkb)} CKB when ready. PactAgent will settle milestone targets in CKB using fresh quotes at payout time and request a top-up only if the reserve becomes insufficient.`,
       );
       router.push(`/agreement/${agreement.id}`);
     } catch (err) {
@@ -677,6 +675,7 @@ export default function ImportBountyPage() {
   const commencementAmountShannons = grantAutofillMetadata?.upfrontPayment?.amountShannons || null;
   const commencementAmountCkb = commencementAmountShannons ? Number(shannonsToCKB(commencementAmountShannons)) : 0;
   const totalGrantCkb = milestones.reduce((sum, milestone) => sum + (Number(milestone.amountCkb) || 0), 0) + commencementAmountCkb;
+  const recommendedReserveCkb = totalGrantCkb * 1.2;
   const commencementAmountError =
     commencementAmountShannons && Number.isFinite(commencementAmountCkb)
       ? null
@@ -713,7 +712,7 @@ export default function ImportBountyPage() {
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
           <BrandLogo />
           <NavbarMenu>
-            <Link href="/dashboard" className="text-sm text-gray-400 transition-colors hover:text-white">
+            <Link href="/dashboard" className="app-nav-link pl-5">
               Dashboard
             </Link>
           </NavbarMenu>
@@ -1099,23 +1098,23 @@ export default function ImportBountyPage() {
                 </div>
               </div>
 
-                    <div className="mt-6 grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
-                      <div className="rounded-2xl border border-agent-border bg-agent-card/50 p-5">
-                        <div className="text-xs uppercase tracking-[0.16em] text-gray-500">Milestone Funding Pattern</div>
-                        <p className="mt-3 max-w-xl text-sm leading-7 text-slate-300">
-                          The treasury funds the full amount once. PactAgent then unlocks value milestone-by-milestone as human review clears each deliverable.
-                        </p>
-                      </div>
-                      <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-5">
-                        <div className="text-xs uppercase tracking-[0.16em] text-emerald-200">Total To Lock Upfront</div>
-                        <div className="mt-3 break-words text-[2rem] font-bold leading-tight text-white sm:text-[2.4rem]">
-                          {formatLargeCkbAmount(totalGrantCkb)} CKB
-                        </div>
-                        <p className="mt-2 text-sm leading-7 text-slate-300">
-                          Includes {formatLargeCkbAmount(commencementAmountCkb)} CKB commencement funding for immediate release, plus milestone escrow for manual payouts.
-                        </p>
-                      </div>
-                    </div>
+              <div className="mt-6 grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
+                <div className="rounded-2xl border border-agent-border bg-agent-card/50 p-5">
+                  <div className="text-xs uppercase tracking-[0.16em] text-gray-500">Milestone Funding Pattern</div>
+                  <p className="mt-3 max-w-xl text-sm leading-7 text-slate-300">
+                    The treasury funds a CKB reserve once. PactAgent then converts each approved USD-equivalent milestone target into CKB at payout time using a fresh quote.
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-5">
+                  <div className="text-xs uppercase tracking-[0.16em] text-emerald-200">Recommended Reserve To Lock</div>
+                  <div className="mt-3 break-words text-[2rem] font-bold leading-tight text-white sm:text-[2.4rem]">
+                    {formatLargeCkbAmount(recommendedReserveCkb)} CKB
+                  </div>
+                  <p className="mt-2 text-sm leading-7 text-slate-300">
+                    Includes the current live estimate of {formatLargeCkbAmount(totalGrantCkb)} CKB plus a 20% volatility buffer so the grant can tolerate moderate price movement before a top-up is needed.
+                  </p>
+                </div>
+              </div>
 
               <div className="mt-6 space-y-5">
                 {milestones.map((milestone, index) => (
@@ -1200,17 +1199,17 @@ export default function ImportBountyPage() {
                             <div>
                               {milestone.sourceBudgetLabel
                                 ? `Source reference: ${milestone.sourceBudgetLabel}.`
-                                : 'Amount released when this milestone is approved.'}
+                                : 'This milestone is tracked against a canonical USD target.'}
                             </div>
                             <div className="mt-1 text-slate-400">
-                              USD is only a planning reference. PactAgent still stores and pays the real amount in CKB.
+                              USD is the obligation reference for imported grants. PactAgent still pays the worker in CKB using the live quote at payout time.
                             </div>
                             {milestone.sourceBudgetUsd && ckbPriceQuote ? (
                               <div className="mt-1 text-emerald-200">
-                                Live estimate: {formatEstimatedCkb(estimateCkbFromUsd(milestone.sourceBudgetUsd))} CKB
+                                Current payout estimate: {formatEstimatedCkb(estimateCkbFromUsd(milestone.sourceBudgetUsd))} CKB
                               </div>
                             ) : milestone.sourceBudgetLabel ? (
-                              <div className="mt-1 text-slate-400">Refresh the live quote to estimate the current CKB amount.</div>
+                              <div className="mt-1 text-slate-400">Refresh the live quote to estimate the current CKB payout for this USD target.</div>
                             ) : null}
                           </div>
                         )}
@@ -1246,7 +1245,7 @@ export default function ImportBountyPage() {
                     {[
                       'Source links and governance notes stay attached to the agreement.',
                       'Review stays intentionally human-controlled for every milestone.',
-                      'The full grant is funded once, but released gradually as work clears review.',
+                      'The grant uses USD-equivalent milestone targets while still settling in CKB.',
                     ].map((point) => (
                       <div key={point} className="flex items-start gap-3 rounded-2xl border border-agent-border/70 bg-agent-bg/50 px-3 py-3">
                         <CheckCircleIcon className="mt-0.5 h-4 w-4 text-emerald-300" />
@@ -1261,9 +1260,9 @@ export default function ImportBountyPage() {
                   <div className="mt-4 space-y-3">
                     {[
                       ['1', 'Import and rewrite the source into explicit milestones.'],
-                      ['2', 'Fund the total grant once the agreement is created.'],
+                      ['2', 'Fund a buffered CKB reserve once the agreement is created.'],
                       ['3', 'Review proof manually before every release.'],
-                      ['4', 'Repeat until the grant closes cleanly.'],
+                      ['4', 'Top up the reserve only if CKB drops enough to make the next payout short.'],
                     ].map(([step, label]) => (
                       <div key={step} className="flex items-start gap-3">
                         <div className="flex h-7 w-7 items-center justify-center rounded-full border border-sky-400/30 bg-sky-500/10 text-xs font-semibold text-sky-100">
@@ -1331,7 +1330,7 @@ export default function ImportBountyPage() {
 
             <div className="flex flex-col gap-3 border-t border-agent-border/70 pt-5 sm:flex-row sm:items-center sm:justify-between">
               <p className="max-w-2xl text-sm leading-6 text-slate-400">
-                This creates a manual PactAgent grant that keeps the source attribution visible while converting the work into milestone-based treasury releases.
+                This creates a manual PactAgent grant that keeps source attribution visible, tracks the real obligation in USD, and settles payouts in CKB through a treasury-backed reserve.
               </p>
               <button type="submit" disabled={saving} className="rounded-xl bg-agent-accent px-6 py-3 text-sm font-medium text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-70">
                 {saving ? 'Importing...' : 'Create Imported Agreement'}

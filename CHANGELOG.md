@@ -33,19 +33,6 @@ The format is based on Keep a Changelog, and this project follows a simple seman
   - imported grant snapshots with requested budget, ETA, funding-address, and commencement-payment context
   - dynamic milestone extraction from source threads instead of fixed milestone assumptions
   - near-real-time agreement refresh after source sync updates
-- Phase 5 CKBoost handoff with:
-  - `Create from CKBoost` dashboard entry and import page
-  - CKBoost import service, route, and webhook-driven agreement ingestion
-  - campaign, quest bundle, approved proof, contributor, and sponsor metadata mapping
-  - sponsor wallet to client mapping while preserving importer-as-creator access
-  - persisted CKBoost external IDs for future sync-back
-  - CKBoost campaign-link auto-fill for campaign metadata and quest-derived milestone drafts
-- Phase 6 CKBoost identity, reputation, and event sync with:
-  - contributor snapshot panels on import and agreement pages
-  - stored CKBoost profile snapshots and event history
-  - scheduled CKBoost profile refresh jobs and webhook receivers
-  - outbound CKBoost lifecycle notifications for proof submitted, milestone approved, and milestone paid
-  - durable CKBoost notification delivery records with retry handling
 - Imported grant pricing support with:
   - live CKB/USD quote endpoint
   - grant-import quote panels for requested budget, commencement payment, and milestone budget references
@@ -72,13 +59,11 @@ The format is based on Keep a Changelog, and this project follows a simple seman
 ### Changed
 
 - Agreement access now also recognizes imported-agreement creators for source-backed grant flows, so sponsor-mapped imports remain accessible to the importing operator.
-- CKBoost import now supports separating the sponsor/client identity from the importing wallet, while preserving creator attribution on the imported agreement source record.
 - DAO/bounty import now supports a true grant-style flow with multiple milestones and a visible total amount to lock upfront.
 - Imported DAO/bounty agreements now force manual review and partial milestone-based release behavior.
 - DAO/bounty import now supports forum-thread auto-fill so source metadata and milestone drafts can be resolved from a pasted Nervos grant link.
 - DAO/bounty import now preserves separate commencement payments as their own kickoff checkpoint instead of forcing them into Milestone 1.
 - Imported grants can now auto-release a dedicated commencement payment immediately after funding while keeping the remaining milestones under manual review.
-- CKBoost import now supports campaign-link auto-fill instead of relying only on manual campaign entry.
 - Imported grant pricing now auto-fills CKB milestone amounts from source USD budgets and keeps editable USD/CKB conversion helpers in the import flow.
 - Agreement detail and dashboard views now surface source attribution and invite actions where relevant.
 - Wallet authentication and webhook flows are now aligned with stricter production deployment expectations, including authenticated webhook management routes.

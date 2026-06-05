@@ -32,6 +32,7 @@ import {
   serializeProofBundle,
 } from './richPayloadService';
 import { refreshReputationForAgreement } from './reputationService';
+import { convertUsdToCkb, fetchCkbPriceQuote, parseUsdAmount } from './marketPriceService';
 
 const AGREEMENT_VALID_TRANSITIONS: Record<string, string[]> = {
   DRAFT: ['FUNDED', 'EXPIRED', 'CANCELLED'],
@@ -94,7 +95,6 @@ const agreementListInclude = {
     take: 2,
   },
   source: true,
-  ckboostProfileSnapshot: true,
 } as const;
 
 const agreementDetailInclude = {
@@ -126,7 +126,6 @@ const agreementDetailInclude = {
     orderBy: { createdAt: 'desc' },
   },
   source: true,
-  ckboostProfileSnapshot: true,
   proofChecks: {
     orderBy: { createdAt: 'desc' },
     take: 20,
@@ -134,10 +133,6 @@ const agreementDetailInclude = {
   infoRequests: {
     orderBy: { createdAt: 'desc' },
     take: 50,
-  },
-  ckboostEvents: {
-    orderBy: { occurredAt: 'desc' },
-    take: 25,
   },
   jobs: {
     orderBy: { createdAt: 'desc' },
@@ -192,6 +187,8 @@ type ImportedSourceMetadata = {
     amountShannons?: string | null;
   } | null;
 };
+
+const IMPORTED_GRANT_RESERVE_BUFFER_MULTIPLIER = 1.2;
 
 function canTransitionAgreement(from: string, to: string): boolean {
   return AGREEMENT_VALID_TRANSITIONS[from]?.includes(to) ?? false;
@@ -768,6 +765,7 @@ function deriveDisputeWorkspaceState(params: {
 function deriveAgreementWorkflowState(agreement: {
   status: string;
   settlementStatus: string;
+  reserveHealthStatus?: string;
   milestones?: Array<{ status: string }>;
   disputes?: Array<{ resolvedAt?: string | Date | null }>;
 }) {
@@ -791,6 +789,13 @@ function deriveAgreementWorkflowState(agreement: {
     return {
       workflowStage: 'FUNDING_IN_PROGRESS',
       nextParticipantAction: 'Wait for on-chain funding confirmation',
+    };
+  }
+
+  if (agreement.reserveHealthStatus === 'TOP_UP_REQUIRED') {
+    return {
+      workflowStage: 'SETTLEMENT_ATTENTION',
+      nextParticipantAction: 'Top up the imported grant reserve before the next payout can continue',
     };
   }
 
@@ -1011,7 +1016,132 @@ export function isSponsorControlledImportedAgreement(agreement: {
   return agreement.source?.sourceType === 'BOUNTY' || agreement.source?.sourceType === 'DAO';
 }
 
-async function sendApprovedMilestonePayout(params: {
+function isUsdEquivalentImportedGrant(agreement: {
+  pricingMode?: string | null;
+  source?: {
+    sourceType?: string | null;
+  } | null;
+}) {
+  return agreement.pricingMode === 'USD_EQUIVALENT' && isSponsorControlledImportedAgreement(agreement);
+}
+
+function roundCkbAmountInput(value: number) {
+  return value.toFixed(8).replace(/0+$/, '').replace(/\.$/, '') || '0';
+}
+
+function convertUsdToShannonsOrThrow(usdAmount: number, priceUsd: number) {
+  const ckbAmount = convertUsdToCkb(usdAmount, priceUsd);
+  if (!ckbAmount) {
+    throw new Error('Unable to convert the USD-equivalent amount into CKB with the current quote.');
+  }
+
+  return BigInt(Math.ceil(ckbAmount * 10 ** 8));
+}
+
+function getImportedMilestoneTargetUsdFromMetadata(
+  metadata: ImportedSourceMetadata | null,
+  sortOrder: number,
+) {
+  if (!metadata?.milestones?.length) {
+    return null;
+  }
+
+  const matchingMilestone = metadata.milestones.find((milestone) => {
+    if (milestone?.kind === 'COMMENCEMENT') {
+      return false;
+    }
+
+    if (typeof milestone?.index === 'number') {
+      return milestone.index === sortOrder;
+    }
+
+    return false;
+  });
+
+  return parseUsdAmount(matchingMilestone?.budgetAmountUsd || null);
+}
+
+async function getFreshRequiredPayoutFromUsdTarget(targetUsd: number) {
+  const quote = await fetchCkbPriceQuote(true);
+  const amountShannons = convertUsdToShannonsOrThrow(targetUsd, quote.priceUsd);
+  return {
+    quote,
+    amountShannons,
+  };
+}
+
+async function ensureImportedGrantReserveSufficient(
+  agreement: {
+    id: string;
+    reserveCkbRemaining?: string | null;
+  },
+  milestone: {
+    id: string;
+    title: string;
+    targetUsd?: number | null;
+  },
+) {
+  if (!Number.isFinite(milestone.targetUsd ?? NaN) || !milestone.targetUsd || milestone.targetUsd <= 0) {
+    throw new Error('This imported grant milestone is missing its canonical USD target.');
+  }
+
+  const { quote, amountShannons } = await getFreshRequiredPayoutFromUsdTarget(milestone.targetUsd);
+  const reserveRemaining = BigInt(agreement.reserveCkbRemaining || '0');
+
+  if (reserveRemaining < amountShannons) {
+    await prisma.$transaction(async (tx) => {
+      await tx.agreement.update({
+        where: { id: agreement.id },
+        data: {
+          reserveHealthStatus: 'TOP_UP_REQUIRED',
+          lastSettlementError: 'CKB reserve is insufficient to satisfy the next USD-equivalent milestone payout.',
+        },
+      });
+    });
+
+    throw new Error('CKB reserve is insufficient for this milestone. Top up the reserve before payout can continue.');
+  }
+
+  return {
+    quote,
+    amountShannons,
+  };
+}
+
+async function applyImportedGrantReserveDebit(params: {
+  agreementId: string;
+  milestoneId?: string | null;
+  amountShannons: bigint;
+  quoteUsdPerCkb: number;
+  realizedUsdValue: number;
+}) {
+  const agreement = await fetchAgreementOrThrow(params.agreementId);
+  const reserveRemaining = BigInt(agreement.reserveCkbRemaining || '0');
+  const nextReserve = reserveRemaining - params.amountShannons;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.agreement.update({
+      where: { id: params.agreementId },
+      data: {
+        reserveCkbRemaining: nextReserve.toString(),
+        reserveHealthStatus: 'HEALTHY',
+      },
+    });
+
+    if (params.milestoneId) {
+      await tx.milestone.update({
+        where: { id: params.milestoneId },
+        data: {
+          releasedCkbAmount: params.amountShannons.toString(),
+          releaseQuoteUsdPerCkb: params.quoteUsdPerCkb,
+          releasedUsdValue: params.realizedUsdValue,
+        },
+      });
+    }
+  });
+}
+
+export async function sendApprovedMilestonePayout(params: {
   agreementId: string;
   milestoneId: string;
   trigger: 'STANDARD_APPROVAL' | 'COMMENCEMENT_AUTO_RELEASE';
@@ -1059,47 +1189,71 @@ async function sendApprovedMilestonePayout(params: {
       milestoneId: milestone.id,
       milestoneTitle: milestone.title,
       milestoneAmount: milestone.amount,
+      milestoneTargetUsd: milestone.targetUsd ?? null,
       payoutNetwork: agreement.payoutNetwork,
       trigger: params.trigger,
     },
   });
 
+  let payoutAmount = milestone.amount;
+  let payoutQuoteUsdPerCkb: number | null = null;
+  let realizedUsdValue: number | null = null;
+
+  if (isUsdEquivalentImportedGrant(agreement)) {
+    const reserveCheck = await ensureImportedGrantReserveSufficient(agreement, milestone);
+    payoutAmount = reserveCheck.amountShannons.toString();
+    payoutQuoteUsdPerCkb = reserveCheck.quote.priceUsd;
+    realizedUsdValue = milestone.targetUsd ?? null;
+  }
+
   if (agreement.payoutNetwork === 'FIBER' || agreement.releaseMode === 'PARTIAL') {
     const fiberResult = await attemptFiberPayout(
       params.agreementId,
       agreement.workerFiberPubkey || agreement.workerAddress,
-      milestone.amount
+      payoutAmount
     );
 
-    await createLog({
-      agreementId: params.agreementId,
-      level: fiberResult.route === 'FIBER' ? 'SUCCESS' : 'INFO',
+      await createLog({
+        agreementId: params.agreementId,
+        level: fiberResult.route === 'FIBER' ? 'SUCCESS' : 'INFO',
       eventType: 'RELEASE_SENT',
       message:
         fiberResult.route === 'FIBER'
           ? `Milestone payment released via Fiber: ${milestone.title}`
           : `Milestone payment released on CKB fallback: ${milestone.title}`,
-      metadata: {
-        milestoneId: milestone.id,
-        milestoneTitle: milestone.title,
-        trigger: params.trigger,
-        ...fiberResult,
-      },
-    });
-
-    if (fiberResult.route === 'FIBER' && fiberResult.paymentReference) {
-      await recordMilestoneSettlementAttempt({
-        agreementId: params.agreementId,
-        milestoneId: milestone.id,
-        direction: 'PAYOUT',
-        network: 'FIBER',
-        amount: milestone.amount,
-        paymentReference: fiberResult.paymentReference,
-        status: 'CONFIRMED',
-        confirmedAt: new Date(),
+        metadata: {
+          milestoneId: milestone.id,
+          milestoneTitle: milestone.title,
+          releaseQuoteUsdPerCkb: payoutQuoteUsdPerCkb,
+          realizedUsdValue,
+          trigger: params.trigger,
+          ...fiberResult,
+        },
       });
 
-      const updatedAgreement = await completeApprovedMilestone(params.agreementId);
+      if (fiberResult.route === 'FIBER' && fiberResult.paymentReference) {
+        await recordMilestoneSettlementAttempt({
+          agreementId: params.agreementId,
+          milestoneId: milestone.id,
+          direction: 'PAYOUT',
+          network: 'FIBER',
+          amount: payoutAmount,
+          paymentReference: fiberResult.paymentReference,
+          status: 'CONFIRMED',
+          confirmedAt: new Date(),
+        });
+
+        if (isUsdEquivalentImportedGrant(agreement) && payoutQuoteUsdPerCkb && realizedUsdValue != null) {
+          await applyImportedGrantReserveDebit({
+            agreementId: params.agreementId,
+            milestoneId: milestone.id,
+            amountShannons: BigInt(payoutAmount),
+            quoteUsdPerCkb: payoutQuoteUsdPerCkb,
+            realizedUsdValue,
+          });
+        }
+
+        const updatedAgreement = await completeApprovedMilestone(params.agreementId);
       await createLog({
         agreementId: params.agreementId,
         level: 'SUCCESS',
@@ -1119,16 +1273,26 @@ async function sendApprovedMilestonePayout(params: {
 
   const payoutTxHash = await sendTreasuryTransfer(
     agreement.workerAddress,
-    milestone.amount
+    payoutAmount
   );
   await recordMilestoneSettlementAttempt({
     agreementId: params.agreementId,
     milestoneId: milestone.id,
     direction: 'PAYOUT',
     network: 'CKB',
-    amount: milestone.amount,
+    amount: payoutAmount,
     txHash: payoutTxHash,
   });
+
+  if (isUsdEquivalentImportedGrant(agreement) && payoutQuoteUsdPerCkb && realizedUsdValue != null) {
+    await applyImportedGrantReserveDebit({
+      agreementId: params.agreementId,
+      milestoneId: milestone.id,
+      amountShannons: BigInt(payoutAmount),
+      quoteUsdPerCkb: payoutQuoteUsdPerCkb,
+      realizedUsdValue,
+    });
+  }
 
   await createLog({
     agreementId: params.agreementId,
@@ -1141,7 +1305,9 @@ async function sendApprovedMilestonePayout(params: {
     metadata: {
       milestoneId: milestone.id,
       milestoneTitle: milestone.title,
-      amount: milestone.amount,
+      amount: payoutAmount,
+      releaseQuoteUsdPerCkb: payoutQuoteUsdPerCkb,
+      realizedUsdValue,
       route: 'CKB',
       trigger: params.trigger,
     },
@@ -1152,15 +1318,17 @@ async function sendApprovedMilestonePayout(params: {
 
 async function sendImportedCommencementPayout(params: {
   agreementId: string;
-  amount: string;
+  amountUsd: number;
   title?: string | null;
 }) {
   const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(params.agreementId));
+  const { quote, amountShannons } = await getFreshRequiredPayoutFromUsdTarget(params.amountUsd);
+  const payoutAmount = amountShannons.toString();
   const existingSettlement = agreement.settlements.find(
     (settlement: any) =>
       settlement.direction === 'PAYOUT' &&
       settlement.milestoneId == null &&
-      settlement.amount === params.amount &&
+      settlement.amount === payoutAmount &&
       ['PENDING', 'CONFIRMED'].includes(settlement.status),
   );
 
@@ -1178,7 +1346,9 @@ async function sendImportedCommencementPayout(params: {
       ? `Preparing immediate commencement payout: ${params.title}`
       : 'Preparing immediate commencement payout',
     metadata: {
-      amount: params.amount,
+      amount: payoutAmount,
+      amountUsd: params.amountUsd,
+      releaseQuoteUsdPerCkb: quote.priceUsd,
       trigger: 'COMMENCEMENT_AUTO_RELEASE',
       payoutNetwork: agreement.payoutNetwork,
     },
@@ -1188,7 +1358,7 @@ async function sendImportedCommencementPayout(params: {
     const fiberResult = await attemptFiberPayout(
       params.agreementId,
       agreement.workerFiberPubkey || agreement.workerAddress,
-      params.amount,
+      payoutAmount,
     );
 
     await createLog({
@@ -1200,7 +1370,9 @@ async function sendImportedCommencementPayout(params: {
           ? 'Commencement payout released via Fiber'
           : 'Commencement payout released on CKB fallback',
       metadata: {
-        amount: params.amount,
+        amount: payoutAmount,
+        amountUsd: params.amountUsd,
+        releaseQuoteUsdPerCkb: quote.priceUsd,
         trigger: 'COMMENCEMENT_AUTO_RELEASE',
         ...fiberResult,
       },
@@ -1212,24 +1384,38 @@ async function sendImportedCommencementPayout(params: {
         milestoneId: null,
         direction: 'PAYOUT',
         network: 'FIBER',
-        amount: params.amount,
+        amount: payoutAmount,
         paymentReference: fiberResult.paymentReference,
         status: 'CONFIRMED',
         confirmedAt: new Date(),
+      });
+      await applyImportedGrantReserveDebit({
+        agreementId: params.agreementId,
+        milestoneId: null,
+        amountShannons,
+        quoteUsdPerCkb: quote.priceUsd,
+        realizedUsdValue: params.amountUsd,
       });
       return getAgreementById(params.agreementId);
     }
   }
 
-  const payoutTxHash = await sendTreasuryTransfer(agreement.workerAddress, params.amount);
+  const payoutTxHash = await sendTreasuryTransfer(agreement.workerAddress, payoutAmount);
   await createSettlementRecord({
     agreementId: params.agreementId,
     milestoneId: null,
     direction: 'PAYOUT',
     network: 'CKB',
-    amount: params.amount,
+    amount: payoutAmount,
     txHash: payoutTxHash,
     status: 'PENDING',
+  });
+  await applyImportedGrantReserveDebit({
+    agreementId: params.agreementId,
+    milestoneId: null,
+    amountShannons,
+    quoteUsdPerCkb: quote.priceUsd,
+    realizedUsdValue: params.amountUsd,
   });
 
   await setAgreementSettlementState(params.agreementId, {
@@ -1244,7 +1430,9 @@ async function sendImportedCommencementPayout(params: {
     eventType: 'RELEASE_SENT',
     message: 'Commencement payout prepared on CKB',
     metadata: {
-      amount: params.amount,
+      amount: payoutAmount,
+      amountUsd: params.amountUsd,
+      releaseQuoteUsdPerCkb: quote.priceUsd,
       txHash: payoutTxHash,
       trigger: 'COMMENCEMENT_AUTO_RELEASE',
     },
@@ -2036,6 +2224,7 @@ export async function createAgreement(data: {
     title: string;
     description: string;
     amount: string;
+    targetUsd?: number;
   }>;
   sourceMetadata?: {
     sourceType: string;
@@ -2058,6 +2247,7 @@ export async function createAgreement(data: {
   const sourceMetadata = data.sourceMetadata
     ? safeParseSourceMetadata<ImportedSourceMetadata>(data.sourceMetadata.externalMetadataJson)
     : null;
+  const isImportedGrant = Boolean(data.sourceMetadata && ['DAO', 'BOUNTY'].includes(data.sourceMetadata.sourceType));
   const commencementAmount = sourceMetadata?.upfrontPayment?.amountShannons
     ? BigInt(sourceMetadata.upfrontPayment.amountShannons)
     : BigInt(0);
@@ -2065,16 +2255,55 @@ export async function createAgreement(data: {
   const clientAddress = normalizeAddress(data.clientAddress);
   const workerAddress = normalizeAddress(data.workerAddress);
 
-  const totalAmount = data.milestones
-    .reduce((sum, milestone) => sum + BigInt(milestone.amount), commencementAmount)
-    .toString();
+  let reserveFundingQuoteUsdPerCkb: number | null = null;
+  let pricingMode = 'FIXED_CKB';
+  let reserveCkbLocked = '0';
+  let reserveCkbRemaining = '0';
+  let reserveHealthStatus = 'HEALTHY';
+
+  const totalAmount = (() => {
+    if (!isImportedGrant) {
+      return data.milestones
+        .reduce((sum, milestone) => sum + BigInt(milestone.amount), commencementAmount)
+        .toString();
+    }
+
+    pricingMode = 'USD_EQUIVALENT';
+    return 'PENDING_IMPORTED_USD_EQUIVALENT';
+  })();
   const agreementId = uuid();
   const normalizedMilestones = data.milestones.map((milestone, index) => ({
     title: milestone.title,
     description: milestone.description,
     amount: milestone.amount,
+    targetUsd:
+      isImportedGrant
+        ? milestone.targetUsd ?? getImportedMilestoneTargetUsdFromMetadata(sourceMetadata, index + 1)
+        : null,
     sortOrder: index + 1,
   }));
+
+  const computedImportedUsdTotal = (() => {
+    if (!isImportedGrant) {
+      return 0;
+    }
+
+    const canonicalUsdTotal = normalizedMilestones.reduce((sum, milestone) => {
+      const usdTarget = milestone.targetUsd;
+      if (!Number.isFinite(usdTarget ?? NaN) || !usdTarget || usdTarget <= 0) {
+        throw new Error(`Imported milestone ${milestone.sortOrder} is missing its canonical USD target.`);
+      }
+      return sum + usdTarget;
+    }, 0);
+
+    const commencementUsd = parseUsdAmount(sourceMetadata?.upfrontPayment?.amountUsd || null) || 0;
+    const totalUsd = canonicalUsdTotal + commencementUsd;
+    if (!Number.isFinite(totalUsd) || totalUsd <= 0) {
+      throw new Error('Imported grant requires a positive USD-equivalent target before it can be created.');
+    }
+
+    return totalUsd;
+  })();
   const milestoneDigest = buildMilestoneDigest(normalizedMilestones);
   const agreementDigest = buildAgreementDigest({
     title: data.title,
@@ -2090,7 +2319,18 @@ export async function createAgreement(data: {
     payoutNetwork: data.payoutNetwork,
     milestoneDigest,
   });
-  const escrowModel = data.escrowModel || 'TREASURY_BRIDGE';
+  const escrowModel = isImportedGrant ? 'TREASURY_BRIDGE' : (data.escrowModel || 'TREASURY_BRIDGE');
+
+  if (isImportedGrant) {
+    const quote = await fetchCkbPriceQuote(true);
+    reserveFundingQuoteUsdPerCkb = quote.priceUsd;
+    const reserveShannons = convertUsdToShannonsOrThrow(
+      computedImportedUsdTotal * IMPORTED_GRANT_RESERVE_BUFFER_MULTIPLIER,
+      quote.priceUsd,
+    ).toString();
+    reserveCkbLocked = reserveShannons;
+    reserveCkbRemaining = reserveShannons;
+  }
 
   if (escrowModel === 'ONCHAIN_LOCK' && !isOnchainEscrowReady()) {
     throw new Error('On-chain lock escrow is not configured in this environment yet.');
@@ -2133,7 +2373,7 @@ export async function createAgreement(data: {
       workerAddress,
       arbitratorAddress: null,
       workerFiberPubkey: data.workerFiberPubkey || null,
-      amount: totalAmount,
+      amount: isImportedGrant ? reserveCkbLocked : totalAmount,
       deadlineAt: new Date(data.deadlineAt),
       disputeWindowSecs: data.disputeWindowSecs,
       proofType: data.proofType,
@@ -2147,6 +2387,11 @@ export async function createAgreement(data: {
       escrowLockArgs: onchainDescriptor?.lockArgs || null,
       agreementDigest,
       milestoneDigest,
+      pricingMode,
+      reserveCkbLocked,
+      reserveCkbRemaining,
+      reserveFundingQuoteUsdPerCkb,
+      reserveHealthStatus,
       settlementStatus: 'UNFUNDED',
       status: 'DRAFT',
       milestones: {
@@ -2155,6 +2400,7 @@ export async function createAgreement(data: {
           title: milestone.title,
           description: milestone.description,
           amount: milestone.amount,
+          targetUsd: milestone.targetUsd ?? null,
           sortOrder: milestone.sortOrder,
           status: 'PENDING',
         })),
@@ -2201,7 +2447,7 @@ export async function createAgreement(data: {
       amount: agreement.amount,
       workerAddress: agreement.workerAddress,
       workerFiberPubkey: agreement.workerFiberPubkey,
-      milestoneCount: agreement.milestones.length,
+      milestoneCount: normalizedMilestones.length,
       disputeResolution: 'MUTUAL_SETTLEMENT',
       escrowModel: agreement.escrowModel,
       escrowAddress: agreement.escrowAddress,
@@ -2224,7 +2470,7 @@ export async function createAgreement(data: {
   return agreement;
 }
 
-export async function fundAgreement(agreementId: string, txHash: string) {
+export async function fundAgreement(agreementId: string, txHash: string, amountOverride?: string) {
   const agreement = await fetchAgreementOrThrow(agreementId);
 
   if (agreement.status !== 'DRAFT') {
@@ -2240,6 +2486,9 @@ export async function fundAgreement(agreementId: string, txHash: string) {
   }
 
   const escrowAddress = agreement.escrowAddress || await getTreasuryAddress();
+  const fundingAmount = isUsdEquivalentImportedGrant(agreement) && amountOverride
+    ? amountOverride
+    : agreement.amount;
 
   await prisma.$transaction(async (tx) => {
     await tx.agreement.update({
@@ -2247,6 +2496,7 @@ export async function fundAgreement(agreementId: string, txHash: string) {
       data: {
         ckbTxHashFund: txHash,
         escrowAddress,
+        amount: fundingAmount,
         settlementStatus: 'FUNDING_PENDING',
         lastSettlementError: null,
       },
@@ -2258,7 +2508,7 @@ export async function fundAgreement(agreementId: string, txHash: string) {
         agreementId,
         direction: 'FUNDING',
         network: 'CKB',
-        amount: agreement.amount,
+        amount: fundingAmount,
         txHash,
         status: 'PENDING',
       },
@@ -2273,8 +2523,76 @@ export async function fundAgreement(agreementId: string, txHash: string) {
     metadata: {
       txHash,
       escrowAddress,
+      fundingAmount,
       agreementDigest: agreement.agreementDigest,
       milestoneDigest: agreement.milestoneDigest,
+    },
+  });
+
+  return getAgreementById(agreementId);
+}
+
+export async function topUpImportedGrantReserve(agreementId: string, txHash: string, amount: string) {
+  const agreement = await fetchAgreementOrThrow(agreementId);
+
+  if (!isUsdEquivalentImportedGrant(agreement)) {
+    throw new Error('Reserve top-up is available only for USD-equivalent imported grants.');
+  }
+
+  if (agreement.escrowModel !== 'TREASURY_BRIDGE') {
+    throw new Error('Reserve top-up is available only for treasury-backed imported grants.');
+  }
+
+  const escrowAddress = agreement.escrowAddress || await getTreasuryAddress();
+
+  const verification = await verifyFundingTransaction({
+    txHash,
+    toAddress: escrowAddress,
+    expectedAmount: amount,
+  });
+
+  if (!verification.foundTransaction || verification.status !== 'committed' || !verification.foundMatchingOutput) {
+    throw new Error('Top-up transaction could not be verified on-chain yet.');
+  }
+
+  const nextReserveLocked = (BigInt(agreement.reserveCkbLocked || '0') + BigInt(amount)).toString();
+  const nextReserveRemaining = (BigInt(agreement.reserveCkbRemaining || '0') + BigInt(amount)).toString();
+
+  await prisma.$transaction(async (tx) => {
+    await tx.agreement.update({
+      where: { id: agreementId },
+      data: {
+        reserveCkbLocked: nextReserveLocked,
+        reserveCkbRemaining: nextReserveRemaining,
+        reserveHealthStatus: 'HEALTHY',
+        lastSettlementError: null,
+      },
+    });
+
+    await tx.milestoneSettlement.create({
+      data: {
+        id: uuid(),
+        agreementId,
+        direction: 'FUNDING',
+        network: 'CKB',
+        amount,
+        txHash,
+        status: 'CONFIRMED',
+        confirmedAt: new Date(),
+      },
+    });
+  });
+
+  await createLog({
+    agreementId,
+    level: 'SUCCESS',
+    eventType: 'FUNDING_CONFIRMED',
+    message: 'Imported grant reserve top-up confirmed on-chain',
+    metadata: {
+      txHash,
+      amount,
+      reserveCkbLocked: nextReserveLocked,
+      reserveCkbRemaining: nextReserveRemaining,
     },
   });
 
@@ -2395,6 +2713,7 @@ export async function confirmFundingIfReady(agreementId: string) {
   const commencementAmount = importedCommencement?.amountShannons
     ? BigInt(importedCommencement.amountShannons)
     : BigInt(0);
+  const commencementUsdAmount = parseUsdAmount(importedCommencement?.amountUsd || null) || 0;
   const commencementVerification =
     agreement.escrowModel === 'ONCHAIN_LOCK' && commencementAmount > BigInt(0)
       ? await inspectTransactionOutputsToAddress({
@@ -2472,6 +2791,15 @@ export async function confirmFundingIfReady(agreementId: string) {
       );
     }
 
+    await prisma.agreement.update({
+      where: { id: agreementId },
+      data: {
+        reserveCkbLocked: isUsdEquivalentImportedGrant(agreement) ? agreement.amount : agreement.reserveCkbLocked,
+        reserveCkbRemaining: isUsdEquivalentImportedGrant(agreement) ? agreement.amount : agreement.reserveCkbRemaining,
+        reserveHealthStatus: isUsdEquivalentImportedGrant(agreement) ? 'HEALTHY' : agreement.reserveHealthStatus,
+      },
+    });
+
     await setAgreementSettlementState(agreementId, {
       settlementStatus: 'FUNDED',
       fundingConfirmedAt: confirmedAt,
@@ -2505,7 +2833,7 @@ export async function confirmFundingIfReady(agreementId: string) {
           settlement.status === 'CONFIRMED',
       );
 
-      if (!existingCommencementPayout) {
+      if (!existingCommencementPayout && !isUsdEquivalentImportedGrant(agreement)) {
         await createSettlementRecord({
           agreementId,
           milestoneId: null,
@@ -2533,10 +2861,16 @@ export async function confirmFundingIfReady(agreementId: string) {
       }
     }
 
-    if (agreement.escrowModel !== 'ONCHAIN_LOCK' && commencementAmount > BigInt(0)) {
+    if (agreement.escrowModel !== 'ONCHAIN_LOCK' && commencementUsdAmount > 0 && isUsdEquivalentImportedGrant(agreement)) {
       await sendImportedCommencementPayout({
         agreementId,
-        amount: commencementAmount.toString(),
+        amountUsd: commencementUsdAmount,
+        title: importedCommencement?.title || null,
+      });
+    } else if (agreement.escrowModel !== 'ONCHAIN_LOCK' && commencementUsdAmount > 0 && !isUsdEquivalentImportedGrant(agreement)) {
+      await sendImportedCommencementPayout({
+        agreementId,
+        amountUsd: commencementUsdAmount,
         title: importedCommencement?.title || null,
       });
     }
@@ -3625,10 +3959,52 @@ export async function completeApprovedMilestone(
     });
   } else {
     await transitionStatus(agreementId, 'PAID');
-    await setAgreementSettlementState(agreementId, {
-      settlementStatus: options?.finalSettlementStatus || 'PAYOUT_CONFIRMED',
-      lastSettlementError: null,
-    });
+    const reserveRemaining = BigInt(agreement.reserveCkbRemaining || '0');
+    const existingReserveRefund = agreement.settlements.find((settlement: any) =>
+      settlement.direction === 'REFUND'
+      && settlement.milestoneId == null
+      && ['PENDING', 'CONFIRMED'].includes(settlement.status)
+    );
+
+    if (isUsdEquivalentImportedGrant(agreement) && reserveRemaining > BigInt(0) && !existingReserveRefund) {
+      const refundTxHash = await sendTreasuryTransfer(agreement.clientAddress, reserveRemaining.toString());
+      await createSettlementRecord({
+        agreementId,
+        milestoneId: null,
+        direction: 'REFUND',
+        network: 'CKB',
+        amount: reserveRemaining.toString(),
+        txHash: refundTxHash,
+        status: 'PENDING',
+      });
+      await prisma.agreement.update({
+        where: { id: agreementId },
+        data: {
+          reserveCkbRemaining: '0',
+        },
+      });
+      await setAgreementSettlementState(agreementId, {
+        settlementStatus: 'REFUND_PENDING',
+        ckbTxHashRelease: refundTxHash,
+        lastSettlementError: null,
+      });
+      await createLog({
+        agreementId,
+        level: 'INFO',
+        eventType: 'RELEASE_SENT',
+        message: 'Returning leftover imported grant reserve to the client',
+        metadata: {
+          amount: reserveRemaining.toString(),
+          txHash: refundTxHash,
+          trigger: 'IMPORTED_GRANT_RESERVE_CLOSEOUT',
+        },
+      });
+    } else {
+      await setAgreementSettlementState(agreementId, {
+        settlementStatus: options?.finalSettlementStatus || 'PAYOUT_CONFIRMED',
+        lastSettlementError: null,
+      });
+    }
   }
 
   return getAgreementById(agreementId);

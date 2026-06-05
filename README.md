@@ -45,7 +45,7 @@ PactAgent allows two participants to coordinate work and payment through a miles
 
 PactAgent also supports imported grant and bounty workflows:
 
-1. An operator can paste a Nervos forum grant thread or a CKBoost campaign link into the dedicated import flows.
+1. An operator can paste a Nervos forum grant thread into the dedicated import flow.
 2. PactAgent auto-fills source metadata, governance context, source budget references, and draft milestone structure from the original source.
 3. Imported Nervos grants can preserve separate commencement payments as their own kickoff checkpoint instead of forcing them into Milestone 1.
 4. Imported milestone USD budgets can auto-populate live CKB estimates, and operators can refresh all estimates or convert between USD and CKB before finalizing payout amounts.
@@ -53,7 +53,6 @@ PactAgent also supports imported grant and bounty workflows:
 6. The imported work is converted into manually reviewed milestones with partial release behavior.
 7. Proof is checked for completeness before human review, and missing information can trigger structured follow-up requests.
 8. Source-thread updates can be drafted, reviewed, published, and synced over time.
-9. CKBoost imports can keep contributor reputation, external IDs, event history, and sync-back notifications attached to the agreement.
 
 ## Current Product Scope
 
@@ -79,7 +78,6 @@ What is already implemented:
 - live CKB/USD quote conversion for imported grant budgets with automatic CKB prefill, editable USD/CKB helper inputs, and total-lock previews
 - automatic commencement-payment release after funding for imported grants that include a dedicated kickoff checkpoint
 - source-thread sync, review, publish controls, and Discourse-aware summarization for imported grants
-- CKBoost import, campaign-link auto-fill, contributor snapshots, event history, webhook ingestion, and outbound lifecycle notifications
 - Prisma + PostgreSQL persistence, ready for Supabase
 
 Important architecture note:
@@ -117,20 +115,11 @@ At the same time, the broader agreement coordination layer is still off-chain. A
 3. Use the live CKB quote panel to estimate current CKB equivalents for the imported USD values.
 4. Let imported milestone USD references auto-fill their current CKB equivalents, then use `Refresh All CKB Estimates` or the USD/CKB converter helpers when you want to re-run the latest quote.
 5. Add, remove, or edit milestones freely so the final agreement matches the real delivery plan even when the source thread has more or fewer than four checkpoints.
-6. Fund the total grant once so the agreement has the full payout capacity up front.
-7. If the import includes a separate commencement payment, PactAgent can release that kickoff amount automatically as soon as funding is confirmed.
-8. Run a proof completeness check before approving the remaining milestones through manual review.
+6. Fund a buffered CKB reserve once so the agreement has enough settlement capacity for normal price movement.
+7. If the import includes a separate commencement payment, PactAgent converts that kickoff USD target into CKB at funding confirmation time and releases it automatically.
+8. Run a proof completeness check before approving the remaining milestones through manual review. Each later payout uses a fresh quote and can request a reserve top-up if the remaining CKB is insufficient.
 9. Request more info through structured reviewer questions when needed.
 10. Optionally sync or publish source-thread updates for governance visibility.
-
-### CKBoost Handoff Flow
-
-1. Paste a CKBoost campaign link into the dedicated import flow.
-2. Resolve campaign title, description, rules, timing, and quest-derived milestone drafts from CKBoost campaign data.
-3. Map the sponsor to the agreement client and the contributor to the worker role.
-4. Carry campaign, quest bundle, approved proof, contributor reputation, and external IDs into PactAgent.
-5. Ingest CKBoost webhook events and refresh contributor snapshots over time.
-6. Notify CKBoost when proof is submitted, approved, or paid.
 
 ### Proof Review Flow
 
@@ -164,7 +153,7 @@ The agent currently handles:
 - scheduling info-request follow-up and proof re-check work
 - generating dispute recommendations
 - initiating payout or refund settlement
-- polling imported source threads and scheduling CKBoost sync work
+- polling imported source threads for updates
 - unlocking the next milestone after settlement
 - broadcasting logs and agreement changes in real time
 
@@ -213,19 +202,13 @@ The frontend is built with Next.js and provides three main surfaces:
 - shows live CKB conversion for imported USD budgets with editable USD/CKB helper fields and a single `Refresh All CKB Estimates` action
 - supports dynamic milestone editing and keeps commencement payments visually separate from numbered delivery milestones
 
-### CKBoost Import Page
-
-- accepts CKBoost campaign links for source resolution
-- auto-fills campaign metadata and quest-derived milestone drafts
-- keeps contributor reputation and campaign context attached during handoff
-
 ### Agreement Detail Page
 
 - displays agreement metadata and milestone timeline
 - shows funding, settlement, and Fiber references
 - allows funding, proof submission, proof checking, review actions, info requests, dispute actions, and evidence submission
 - displays submitted proofs and agreement-specific logs
-- surfaces imported source metadata, source sync controls, CKBoost contributor context, and operational history
+- surfaces imported source metadata, source sync controls, and operational history
 
 ## Backend Architecture
 
@@ -379,20 +362,6 @@ Implemented:
 - scheduled background source polling in the worker loop
 - near-real-time agreement refresh broadcasts after source sync updates land
 
-### Phase 5: CKBoost Handoff
-
-Implemented:
-- `Create from CKBoost` entry point
-- CKBoost campaign/contributor import form
-- `POST /api/integrations/ckboost/autofill` for campaign-link auto-fill
-- CKBoost on-chain campaign resolver for title, description, rules, stats, and quest-derived milestone drafts
-- CKBoost import service and route
-- mapping from sponsor to client, contributor to worker, and campaign/quest/proof data into agreement metadata
-- imported contributor reputation and campaign history during creation
-- manual import and webhook-driven ingestion
-- `POST /api/integrations/ckboost/import`
-- persistence of CKBoost external IDs for future sync-back
-
 ### Imported Grant Pricing
 
 Implemented:
@@ -402,17 +371,10 @@ Implemented:
 - milestone-level USD helper inputs with `USD -> CKB` and `CKB -> USD` conversion support
 - a single `Refresh All CKB Estimates` action for reapplying the latest quote across the full grant
 - automatic quote refresh while the imported grant form is open
-- manual override of the final CKB payout amounts before agreement creation
-
-### Phase 6: CKBoost Identity, Reputation, And Event Sync
-
-Implemented:
-- contributor reputation panels on import and agreement pages
-- linked CKBoost profile, approval rate, campaign participation, and leaderboard context
-- periodic sync jobs and webhook receivers for CKBoost events
-- stored external profile snapshots and event history
-- CKBoost notifications for proof submitted, approved, and paid
-- durable retryable outbound CKBoost notification delivery records
+- canonical USD milestone targets stored for imported DAO and bounty grants
+- buffered reserve funding for new imported grants
+- payout-time USD -> CKB conversion for imported milestone releases
+- reserve top-up flow when price movement makes the remaining CKB insufficient
 
 ### Phase 7: Premium Automation Package
 
@@ -579,9 +541,6 @@ Notes:
 - set `FORUM_PUBLISH_ENABLED=true` to let Phase 4 publish approved source-thread updates directly
 - `FORUM_PUBLISH_PROVIDER=DISCOURSE` posts replies to Discourse topic URLs using `FORUM_PUBLISH_API_KEY` and `FORUM_PUBLISH_API_USERNAME`
 - `FORUM_PUBLISH_PROVIDER=WEBHOOK` sends the approved update payload to `FORUM_PUBLISH_WEBHOOK_URL` so you can bridge to other governance/forum systems
-- set `CKBOOST_SYNC_ENABLED=true` to enable outbound CKBoost lifecycle notifications for proof submission, approval, and payout
-- `CKBOOST_WEBHOOK_URL` is the outbound CKBoost endpoint PactAgent should notify for imported CKBoost agreements
-- `CKBOOST_INBOUND_TOKEN` protects the `POST /api/integrations/ckboost/webhook` receiver when CKBoost pushes reputation or campaign events back into PactAgent
 - `COINGECKO_API_BASE_URL`, `COINGECKO_API_KEY`, and `MARKET_PRICE_CACHE_TTL_MS` control the live CKB quote service used during imported grant conversion from USD source budgets into editable CKB estimates
 - AI can run in mock mode without external dependencies
 
@@ -652,7 +611,7 @@ The app will be available at:
 - treasury custody is still a trust assumption in the current architecture
 - proof validation is still operationally focused rather than cryptographic or oracle-backed verification
 - dispute AI is advisory, not a replacement for arbitration
-- imported grant USD-to-CKB conversion uses a live quote for operator guidance, but the final CKB payout values are still chosen manually and are not price-locked automatically
+- existing imported grants created before the new reserve model still behave as fixed-CKB agreements and are not migrated automatically
 - there is no role-separated admin or arbitrator interface yet
 - premium automation packaging and billing controls from Phase 7 are still not implemented
 

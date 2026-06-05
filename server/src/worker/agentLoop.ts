@@ -9,10 +9,10 @@ import {
   recordMilestoneSettlementAttempt,
   refundCurrentMilestone,
   reconcileAgreementSettlement,
+  sendApprovedMilestonePayout,
   transitionMilestoneStatus,
   transitionStatus,
 } from '../services/agreementService';
-import { sendTreasuryTransfer } from '../services/ckbService';
 import {
   evaluateRecommendationReadiness,
   generateRecommendation,
@@ -33,11 +33,6 @@ import {
   startProofReview,
 } from '../services/reportReviewService';
 import { listSourceSyncCandidates, syncAgreementSource } from '../services/sourceSyncService';
-import {
-  deliverCkboostNotificationDelivery,
-  listCkboostSyncCandidates,
-  syncCkboostAgreementProfile,
-} from '../services/ckboostIntegrationService';
 import { deliverWebhookDelivery } from '../services/webhookService';
 
 let cycleInProgress = false;
@@ -66,14 +61,6 @@ function shouldScheduleSourceSync(lastSyncedAt: Date | null | undefined, now: Da
   }
 
   return now.getTime() - lastSyncedAt.getTime() >= 5 * 60 * 1000;
-}
-
-function shouldScheduleCkboostSync(lastSyncedAt: Date | null | undefined, now: Date) {
-  if (!lastSyncedAt) {
-    return true;
-  }
-
-  return now.getTime() - lastSyncedAt.getTime() >= 60 * 60 * 1000;
 }
 
 async function ensureLatestProofCheckComplete(agreementId: string, milestoneId: string, proofId: string) {
@@ -309,22 +296,6 @@ async function scheduleSystemJobs() {
     });
   }
 
-  const ckboostCandidates = await listCkboostSyncCandidates(20);
-  for (const agreement of ckboostCandidates) {
-    if (!shouldScheduleCkboostSync(agreement.ckboostProfileSnapshot?.lastSyncedAt || null, now)) {
-      continue;
-    }
-
-    await enqueueAgreementJob({
-      agreementId: agreement.id,
-      kind: 'SYNC_CKBOOST',
-      payload: {
-        agreementId: agreement.id,
-        ckboostSyncMode: 'PROFILE_REFRESH',
-      },
-      dedupeSuffix: `scheduled:${agreement.ckboostProfileSnapshot?.lastSyncedAt?.toISOString() || 'never'}`,
-    });
-  }
 }
 
 async function processJob(job: {
@@ -374,11 +345,6 @@ async function processJob(job: {
         await deliverWebhookDelivery(payload.deliveryId);
       }
       return;
-    case 'DELIVER_CKBOOST_NOTIFICATION':
-      if (payload.ckboostNotificationId) {
-        await deliverCkboostNotificationDelivery(payload.ckboostNotificationId);
-      }
-      return;
     case 'SYNC_SOURCE_THREAD':
       if (job.agreementId) {
         await syncAgreementSource({
@@ -388,11 +354,6 @@ async function processJob(job: {
           forumThreadUrl: payload.forumThreadUrl,
           manualSummary: payload.manualSummary,
         });
-      }
-      return;
-    case 'SYNC_CKBOOST':
-      if (job.agreementId) {
-        await syncCkboostAgreementProfile(job.agreementId);
       }
       return;
     case 'AGREEMENT_CONTINUE':
@@ -764,95 +725,11 @@ async function processAgreement(agreement: any): Promise<void> {
           payoutNetwork: agreement.payoutNetwork,
         },
       });
-      if (agreement.payoutNetwork === 'FIBER' || agreement.releaseMode === 'PARTIAL') {
-        const fiberResult = await attemptFiberPayout(
-          agreement.id,
-          agreement.workerFiberPubkey || agreement.workerAddress,
-          currentMilestone.amount
-        );
-
-        await createLog({
-          agreementId: agreement.id,
-          level: fiberResult.route === 'FIBER' ? 'SUCCESS' : 'INFO',
-          eventType: 'RELEASE_SENT',
-          message:
-            fiberResult.route === 'FIBER'
-              ? `Milestone payment released via Fiber: ${currentMilestone.title}`
-              : `Milestone payment released on CKB fallback: ${currentMilestone.title}`,
-          metadata: {
-            milestoneId: currentMilestone.id,
-            milestoneTitle: currentMilestone.title,
-            trigger: 'STANDARD_APPROVAL',
-            ...fiberResult,
-          },
-        });
-
-        if (fiberResult.route === 'FIBER' && fiberResult.paymentReference) {
-          await recordMilestoneSettlementAttempt({
-            agreementId: agreement.id,
-            milestoneId: currentMilestone.id,
-            direction: 'PAYOUT',
-            network: 'FIBER',
-            amount: currentMilestone.amount,
-            paymentReference: fiberResult.paymentReference,
-            status: 'CONFIRMED',
-            confirmedAt: new Date(),
-          });
-
-          const updatedAgreement = await completeApprovedMilestone(agreement.id);
-          await createLog({
-            agreementId: agreement.id,
-            level: 'SUCCESS',
-            eventType: 'SETTLEMENT_CONFIRMED',
-            message: `Milestone settled on Fiber: ${currentMilestone.title}`,
-            metadata: {
-              milestoneId: currentMilestone.id,
-              milestoneTitle: currentMilestone.title,
-              finalAgreementStatus: updatedAgreement?.status,
-            },
-          });
-        } else {
-          const payoutTxHash = await sendTreasuryTransfer(
-            agreement.workerAddress,
-            currentMilestone.amount
-          );
-          await recordMilestoneSettlementAttempt({
-            agreementId: agreement.id,
-            milestoneId: currentMilestone.id,
-            direction: 'PAYOUT',
-            network: 'CKB',
-            amount: currentMilestone.amount,
-            txHash: payoutTxHash,
-          });
-        }
-      } else {
-        const payoutTxHash = await sendTreasuryTransfer(
-          agreement.workerAddress,
-          currentMilestone.amount
-        );
-        await recordMilestoneSettlementAttempt({
-          agreementId: agreement.id,
-          milestoneId: currentMilestone.id,
-          direction: 'PAYOUT',
-          network: 'CKB',
-          amount: currentMilestone.amount,
-          txHash: payoutTxHash,
-        });
-
-        await createLog({
-          agreementId: agreement.id,
-          level: 'INFO',
-          eventType: 'RELEASE_SENT',
-          message: `Milestone payment prepared on CKB: ${currentMilestone.title}`,
-          metadata: {
-            milestoneId: currentMilestone.id,
-            milestoneTitle: currentMilestone.title,
-            amount: currentMilestone.amount,
-            route: 'CKB',
-            trigger: 'STANDARD_APPROVAL',
-          },
-        });
-      }
+      await sendApprovedMilestonePayout({
+        agreementId: agreement.id,
+        milestoneId: currentMilestone.id,
+        trigger: 'STANDARD_APPROVAL',
+      });
       break;
     }
 

@@ -68,22 +68,6 @@ export const config = {
   forumPublishApiUsername: process.env.FORUM_PUBLISH_API_USERNAME || '',
   forumPublishWebhookUrl: process.env.FORUM_PUBLISH_WEBHOOK_URL || '',
   forumPublishTimeoutMs: parseNumber(process.env.FORUM_PUBLISH_TIMEOUT_MS, 10_000),
-  ckboostSyncEnabled: process.env.CKBOOST_SYNC_ENABLED === 'true',
-  ckboostWebhookUrl: process.env.CKBOOST_WEBHOOK_URL || '',
-  ckboostWebhookSecret: process.env.CKBOOST_WEBHOOK_SECRET || '',
-  ckboostInboundToken: process.env.CKBOOST_INBOUND_TOKEN || '',
-  ckboostProtocolTypeHash:
-    process.env.CKBOOST_PROTOCOL_TYPE_HASH
-    || '0x53769be2ed1d09a9da7c1d71488347449bb76f1212068f7e366939d0d5fd59fa',
-  ckboostProtocolCellArgs:
-    process.env.CKBOOST_PROTOCOL_CELL_ARGS
-    || '0x73bd77dcbe8bc89dccdfb400d9d032d9561b2eecb322cf948d414951a53ff9c1',
-  ckboostCampaignTypeHash:
-    process.env.CKBOOST_CAMPAIGN_TYPE_HASH
-    || '0x0bf18a83f13ec240d84b322ee8b1827b811137024749c7d5fbf4d6bdeed81778',
-  ckboostCampaignBaseUrl:
-    process.env.CKBOOST_CAMPAIGN_BASE_URL
-    || 'https://ckboost.netlify.app/campaign',
   coinGeckoApiBaseUrl:
     process.env.COINGECKO_API_BASE_URL
     || 'https://api.coingecko.com/api/v3',
