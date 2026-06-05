@@ -2990,17 +2990,19 @@ export default function AgreementDetailPage() {
   return (
     <div className="min-h-screen">
       <nav className="app-nav">
-        <div className="app-nav-inner">
-          <div className="flex min-w-0 items-center gap-3">
+        <div className="mx-auto max-w-7xl px-4 py-3.5 sm:px-6">
+          <div className="flex items-center justify-between gap-4">
             <BrandLogo />
-            <span className="text-gray-600">/</span>
-            <span className="truncate text-sm text-gray-400">{agreement.title}</span>
+            <NavbarMenu>
+              <Link href="/dashboard" className="app-nav-link">Dashboard</Link>
+              <Link href="/agreement/import-bounty" className="app-nav-link">Imports</Link>
+              {isAdmin ? <Link href="/admin" className="app-nav-link-accent">Admin</Link> : null}
+            </NavbarMenu>
           </div>
-          <NavbarMenu>
-            <Link href="/dashboard" className="app-nav-link">Dashboard</Link>
-            <Link href="/agreement/import-bounty" className="app-nav-link">Imports</Link>
-            {isAdmin ? <Link href="/admin" className="app-nav-link-accent">Admin</Link> : null}
-          </NavbarMenu>
+          <div className="mt-3 flex min-w-0 items-center gap-3 border-t border-agent-border/70 pt-3">
+            <span className="ui-chip-muted shrink-0">Agreement</span>
+            <span className="truncate text-sm text-gray-300">{agreement.title}</span>
+          </div>
         </div>
       </nav>
 
