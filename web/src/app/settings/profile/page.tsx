@@ -158,20 +158,20 @@ export default function ProfileSettingsPage() {
           Back to dashboard
         </Link>
 
-        <section className="ui-panel p-6">
-          <div className="mb-6 flex items-start justify-between gap-4">
-            <div>
+        <section className="ui-panel p-5 sm:p-6">
+          <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0 space-y-2">
               <div className="ui-kicker mb-2">
                 <ShieldCheckIcon className="h-4 w-4" />
                 Public Identity
               </div>
-              <h1 className="text-2xl font-bold text-white">Profile Settings</h1>
-              <p className="mt-2 text-sm text-gray-400">
+              <h1 className="text-3xl font-bold leading-tight text-white sm:text-2xl">Profile Settings</h1>
+              <p className="max-w-xl text-sm leading-6 text-gray-400">
                 Set the public face of your Nervos marketplace profile and keep your Fiber details current.
               </p>
             </div>
             {profile?.handle ? (
-              <Link href={`/profiles/${profile.handle}`} className="app-nav-link-accent">
+              <Link href={`/profiles/${profile.handle}`} className="ui-button-ghost ui-mobile-action shrink-0 text-sm">
                 View public profile
               </Link>
             ) : null}
@@ -185,12 +185,12 @@ export default function ProfileSettingsPage() {
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="grid gap-3 md:grid-cols-3">
+              <div className="grid gap-3 sm:grid-cols-3">
                 {trustSignals.map((signal) => (
-                  <div key={signal.label} className="ui-panel-soft p-4">
+                  <div key={signal.label} className="ui-panel-soft p-4 sm:min-h-[9.25rem]">
                     <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">{signal.label}</div>
                     <div className="mt-2 text-sm font-semibold text-white">{signal.value}</div>
-                    <p className="mt-2 text-xs text-gray-400">{signal.detail}</p>
+                    <p className="mt-2 text-xs leading-5 text-gray-400">{signal.detail}</p>
                   </div>
                 ))}
               </div>

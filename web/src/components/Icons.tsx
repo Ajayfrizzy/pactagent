@@ -3,16 +3,22 @@
 import {
   ArrowLeft,
   Bot,
+  Menu,
+  CircleEllipsis,
   CircleCheck,
   CircleDollarSign,
+  CircleUser,
   CircleX,
   ChevronDown,
   ChevronRight,
   ClipboardCheck,
   Clock3,
   FileText,
+  FileInput,
   Flame,
   Eye,
+  Home,
+  LayoutDashboard,
   Link2,
   MessageCircle,
   Paperclip,
@@ -26,6 +32,7 @@ import {
   Trophy,
   Undo2,
   Cpu,
+  Webhook,
   Zap,
 } from 'lucide-react';
 
@@ -41,8 +48,20 @@ export function AgentIcon({ className = 'w-5 h-5' }: IconProps) {
   return <Bot className={className} />;
 }
 
+export function MenuIcon({ className = 'w-5 h-5' }: IconProps) {
+  return <Menu className={className} />;
+}
+
 export function CheckCircleIcon({ className = 'w-5 h-5' }: IconProps) {
   return <CircleCheck className={className} />;
+}
+
+export function CircleEllipsisIcon({ className = 'w-5 h-5' }: IconProps) {
+  return <CircleEllipsis className={className} />;
+}
+
+export function CircleUserIcon({ className = 'w-5 h-5' }: IconProps) {
+  return <CircleUser className={className} />;
 }
 
 export function XCircleIcon({ className = 'w-5 h-5' }: IconProps) {
@@ -59,6 +78,10 @@ export function ExclamationTriangleIcon({ className = 'w-5 h-5' }: IconProps) {
 
 export function DocumentTextIcon({ className = 'w-5 h-5' }: IconProps) {
   return <FileText className={className} />;
+}
+
+export function FileInputIcon({ className = 'w-5 h-5' }: IconProps) {
+  return <FileInput className={className} />;
 }
 
 export function PaperClipIcon({ className = 'w-5 h-5' }: IconProps) {
@@ -83,6 +106,14 @@ export function BoltIcon({ className = 'w-5 h-5' }: IconProps) {
 
 export function LinkIcon({ className = 'w-5 h-5' }: IconProps) {
   return <Link2 className={className} />;
+}
+
+export function HomeIcon({ className = 'w-5 h-5' }: IconProps) {
+  return <Home className={className} />;
+}
+
+export function LayoutDashboardIcon({ className = 'w-5 h-5' }: IconProps) {
+  return <LayoutDashboard className={className} />;
 }
 
 export function ShieldCheckIcon({ className = 'w-5 h-5' }: IconProps) {
@@ -111,6 +142,10 @@ export function EyeIcon({ className = 'w-5 h-5' }: IconProps) {
 
 export function CpuChipIcon({ className = 'w-5 h-5' }: IconProps) {
   return <Cpu className={className} />;
+}
+
+export function WebhookIcon({ className = 'w-5 h-5' }: IconProps) {
+  return <Webhook className={className} />;
 }
 
 export function TrophyIcon({ className = 'w-5 h-5' }: IconProps) {

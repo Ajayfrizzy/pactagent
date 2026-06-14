@@ -1070,10 +1070,80 @@ async function getFreshRequiredPayoutFromUsdTarget(targetUsd: number) {
   };
 }
 
+function getNextUsdEquivalentPayoutMilestone(agreement: {
+  milestones?: Array<{
+    status: string;
+    targetUsd?: number | null;
+    sortOrder?: number | null;
+  }>;
+}) {
+  const payableStatuses = ['APPROVED', 'UNDER_REVIEW', 'PROOF_SUBMITTED', 'ACTIVE', 'PENDING'];
+  return [...(agreement.milestones || [])]
+    .sort((left, right) => (left.sortOrder || 0) - (right.sortOrder || 0))
+    .find((milestone) =>
+      payableStatuses.includes(milestone.status)
+      && Number.isFinite(milestone.targetUsd ?? NaN)
+      && Boolean(milestone.targetUsd)
+      && Number(milestone.targetUsd) > 0
+    ) || null;
+}
+
+async function clearImportedGrantReserveAttentionIfRecovered(agreement: {
+  id: string;
+  pricingMode?: string | null;
+  reserveCkbRemaining?: string | null;
+  reserveHealthStatus?: string | null;
+  lastSettlementError?: string | null;
+  source?: {
+    sourceType?: string | null;
+  } | null;
+  milestones?: Array<{
+    status: string;
+    targetUsd?: number | null;
+    sortOrder?: number | null;
+  }>;
+}) {
+  if (!isUsdEquivalentImportedGrant(agreement) || agreement.reserveHealthStatus !== 'TOP_UP_REQUIRED') {
+    return agreement;
+  }
+
+  const nextMilestone = getNextUsdEquivalentPayoutMilestone(agreement);
+  if (!nextMilestone?.targetUsd) {
+    return agreement;
+  }
+
+  let amountShannons: bigint;
+  try {
+    amountShannons = (await getFreshRequiredPayoutFromUsdTarget(nextMilestone.targetUsd)).amountShannons;
+  } catch {
+    return agreement;
+  }
+
+  const reserveRemaining = BigInt(agreement.reserveCkbRemaining || '0');
+  if (reserveRemaining < amountShannons) {
+    return agreement;
+  }
+
+  const updated = await prisma.agreement.update({
+    where: { id: agreement.id },
+    data: {
+      reserveHealthStatus: 'HEALTHY',
+      lastSettlementError: agreement.lastSettlementError === 'CKB reserve is insufficient to satisfy the next USD-equivalent milestone payout.'
+        ? null
+        : agreement.lastSettlementError,
+    },
+    include: agreementDetailInclude,
+  });
+
+  return ensureAgreementMilestones(updated);
+}
+
 async function ensureImportedGrantReserveSufficient(
   agreement: {
     id: string;
     reserveCkbRemaining?: string | null;
+    reserveHealthStatus?: string | null;
+    lastSettlementError?: string | null;
   },
   milestone: {
     id: string;
@@ -1100,6 +1170,18 @@ async function ensureImportedGrantReserveSufficient(
     });
 
     throw new Error('CKB reserve is insufficient for this milestone. Top up the reserve before payout can continue.');
+  }
+
+  if (agreement.reserveHealthStatus === 'TOP_UP_REQUIRED') {
+    await prisma.agreement.update({
+      where: { id: agreement.id },
+      data: {
+        reserveHealthStatus: 'HEALTHY',
+        lastSettlementError: agreement.lastSettlementError === 'CKB reserve is insufficient to satisfy the next USD-equivalent milestone payout.'
+          ? null
+          : agreement.lastSettlementError,
+      },
+    });
   }
 
   return {
@@ -4045,7 +4127,9 @@ export async function getAgreementById(id: string) {
     return null;
   }
 
-  const hydratedAgreement = await ensureAgreementMilestones(agreement);
+  const hydratedAgreement = await clearImportedGrantReserveAttentionIfRecovered(
+    await ensureAgreementMilestones(agreement),
+  );
   const decoratedAgreement = await decorateAgreementWithRefundConsensus(hydratedAgreement);
   return toJsonSafe(decoratedAgreement);
 }

@@ -401,7 +401,7 @@ export default function AdminPage() {
                       key={agreement.id}
                       type="button"
                       onClick={() => setSelectedAgreementId(agreement.id)}
-                      className={`w-full rounded-xl border p-3 text-left transition-colors ${
+                      className={`w-full rounded-xl border p-3 text-left cursor-pointer transition-colors ${
                         selectedAgreementId === agreement.id
                           ? 'border-agent-accent bg-agent-accent/10'
                           : 'border-agent-border bg-agent-bg/60 hover:border-agent-accent/40'
@@ -448,9 +448,16 @@ export default function AdminPage() {
                             type="button"
                             onClick={() => handleReplayJob(job.id)}
                             disabled={jobLoadingId === job.id}
-                            className="rounded-lg border border-agent-border px-3 py-1.5 text-xs text-white hover:bg-agent-card disabled:opacity-50"
+                            className="inline-flex items-center justify-center gap-2 rounded-lg border border-agent-border px-3 py-1.5 text-xs text-white cursor-pointer hover:bg-agent-card disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            {jobLoadingId === job.id ? 'Replaying...' : 'Replay'}
+                            {jobLoadingId === job.id ? (
+                              <>
+                                <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                                Replaying...
+                              </>
+                            ) : (
+                              'Replay'
+                            )}
                           </button>
                         </div>
                         <div className="grid gap-2 text-xs text-gray-400 md:grid-cols-2">

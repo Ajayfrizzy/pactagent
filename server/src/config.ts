@@ -32,6 +32,7 @@ function parseCsv(value?: string) {
 export const config = {
   port: parseNumber(process.env.PORT, 4000),
   corsOrigins: parseCorsOrigins(process.env.CORS_ORIGIN),
+  allowLocalhostCors: process.env.NODE_ENV !== 'production',
 
   ckbNodeUrl: process.env.CKB_NODE_URL || 'https://testnet.ckb.dev/',
   ckbNetwork: (process.env.CKB_NETWORK || 'testnet') as 'testnet' | 'mainnet',

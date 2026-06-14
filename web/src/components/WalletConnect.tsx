@@ -101,7 +101,23 @@ export function WalletConnect({ compact = false }: { compact?: boolean }) {
       return 'Your wallet connected, but sign-in was not completed. Try again or reconnect.';
     }
 
-    return message || fallback;
+    if (
+      normalized.includes('returned html instead of json')
+      || normalized.includes('failed to fetch')
+      || normalized.includes('load failed')
+      || normalized.includes('networkerror')
+      || normalized.includes('status 404')
+      || normalized.includes('status 500')
+    ) {
+      return 'Wallet sign-in could not reach the PactAgent API. Make sure the backend is running on port 4000, then try again.';
+    }
+
+    const singleLine = message.replace(/\s+/g, ' ').trim();
+    if (singleLine.length > 180) {
+      return `${singleLine.slice(0, 180)}...`;
+    }
+
+    return singleLine || fallback;
   }
 
   async function authenticateSigner(currentSigner: ccc.Signer, options?: { force?: boolean }) {
@@ -434,19 +450,19 @@ export function WalletConnect({ compact = false }: { compact?: boolean }) {
             }`}>
               {connectionLabel}
             </span>
-            <span className={`mt-1 text-[10px] ${
+            <span className={`mt-1 max-w-full break-words text-[10px] ${
               hasAuthenticatedSession ? 'text-gray-500' : authStatus === 'error' ? 'text-red-200' : 'text-gray-400'
             }`}>
               {authHint}
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
           {needsAuthentication ? (
             <button
               onClick={handleRetryAuthentication}
               disabled={working || authStatus === 'authenticating'}
-              className="ui-button-ghost rounded-md px-3 py-1.5 text-xs"
+              className="ui-button-ghost ui-mobile-action rounded-md px-3 py-1.5 text-xs"
             >
               {authStatus === 'authenticating' ? 'Waiting For Approval...' : authError ? 'Try Sign-In Again' : 'Approve Sign-In'}
             </button>
@@ -454,7 +470,7 @@ export function WalletConnect({ compact = false }: { compact?: boolean }) {
           <button
             onClick={handleDisconnect}
             disabled={working}
-            className="ui-button-plain self-start text-xs sm:self-auto"
+            className="ui-button-plain ui-mobile-action py-1 text-xs sm:self-auto"
           >
             Disconnect
           </button>
@@ -480,7 +496,7 @@ export function WalletConnect({ compact = false }: { compact?: boolean }) {
       <button
         onClick={handleConnect}
         disabled={working || authStatus === 'authenticating'}
-        className="ui-button-primary-sm flex w-full sm:w-auto"
+        className="ui-button-primary-sm ui-mobile-action flex"
       >
         {working || authStatus === 'authenticating' ? (
           <>
@@ -499,7 +515,7 @@ export function WalletConnect({ compact = false }: { compact?: boolean }) {
         <span className="ui-chip-muted px-2 py-0.5 normal-case tracking-normal">2. Approve sign-in</span>
         <span className="ui-chip-muted px-2 py-0.5 normal-case tracking-normal">3. Start using PactAgent</span>
       </div>
-      <span className={`text-[11px] ${authError ? 'text-red-300' : 'text-gray-500'}`}>
+      <span className={`max-w-full break-words text-[11px] ${authError ? 'text-red-300' : 'text-gray-500'}`}>
         {authError || 'Connect your wallet, then approve the sign-in request to unlock agreements, invites, webhooks, and profile settings.'}
       </span>
     </div>

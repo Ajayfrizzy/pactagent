@@ -527,7 +527,7 @@ export default function NewAgreementPage() {
                         key={step.key}
                         type="button"
                         onClick={() => setCurrentStep(index)}
-                        className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                        className={`rounded-full px-3 py-1.5 text-xs font-medium cursor-pointer transition-colors ${
                           active
                             ? 'bg-agent-accent text-white'
                             : complete

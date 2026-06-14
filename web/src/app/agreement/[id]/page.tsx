@@ -351,7 +351,7 @@ function ArtifactPreviewList({
               <button
                 type="button"
                 onClick={() => onRemove(artifact.id)}
-                className="text-xs text-red-300 hover:text-red-200"
+                className="cursor-pointer text-xs text-red-300 hover:text-red-200 transition-colors"
               >
                 Remove
               </button>
@@ -646,9 +646,14 @@ function ProofCheckPanel({
             type="button"
             onClick={onCheck}
             disabled={checking}
-            className="inline-flex items-center justify-center rounded-lg border border-agent-accent/40 px-3 py-2 text-xs font-medium text-agent-accent transition-colors hover:bg-agent-accent/10 disabled:opacity-60"
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-agent-accent/40 px-3 py-2 text-xs font-medium text-agent-accent cursor-pointer transition-colors hover:bg-agent-accent/10 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {checking ? 'Checking...' : result ? 'Re-check Report' : 'Check Report'}
+            {checking ? (
+              <>
+                <div className="h-3 w-3 animate-spin rounded-full border-2 border-agent-accent border-t-transparent" />
+                Checking...
+              </>
+            ) : result ? 'Re-check Report' : 'Check Report'}
           </button>
         ) : null}
       </div>
@@ -892,7 +897,7 @@ function CollapsibleSection({
           <button
             type="button"
             onClick={toggle}
-            className="shrink-0 whitespace-nowrap rounded-lg border border-agent-border px-4 py-2 text-sm font-medium tracking-[0.01em] text-gray-200 transition-colors hover:bg-agent-bg"
+            className="shrink-0 whitespace-nowrap rounded-lg border border-agent-border px-4 py-2 text-sm font-medium tracking-[0.01em] text-gray-200 cursor-pointer transition-colors hover:bg-agent-bg"
           >
             {expanded ? 'Show Less' : 'Show More'}
           </button>
@@ -1705,6 +1710,24 @@ export default function AgreementDetailPage() {
       return;
     }
 
+    if (!TX_HASH_PATTERN.test(topUpTxHash.trim())) {
+      setError('Enter a valid 0x transaction hash for the reserve top-up.');
+      return;
+    }
+
+    let topUpAmountShannons: bigint;
+    try {
+      topUpAmountShannons = ckbToShannons(topUpAmountCkb.trim());
+    } catch {
+      setError('Enter a valid reserve top-up amount in CKB.');
+      return;
+    }
+
+    if (topUpAmountShannons <= BigInt(0)) {
+      setError('Reserve top-up amount must be greater than 0 CKB.');
+      return;
+    }
+
     setActionLoading('top-up-reserve');
     setError(null);
 
@@ -1712,11 +1735,13 @@ export default function AgreementDetailPage() {
       const updated = await api.topUpImportedGrantReserve(
         id,
         topUpTxHash.trim(),
-        ckbToShannons(topUpAmountCkb.trim()).toString(),
+        topUpAmountShannons.toString(),
       );
       setAgreement(updated);
       setTopUpTxHash('');
       setTopUpAmountCkb('');
+      setSuccessMessage('Reserve top-up confirmed. PactAgent will retry the approved payout.');
+      await refreshAuditLogs().catch(() => { });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to confirm reserve top-up');
     } finally {
@@ -2595,9 +2620,9 @@ export default function AgreementDetailPage() {
             body: `Use the shared dispute thread for ${currentMilestone.title} to exchange evidence and choose a resolution path.`,
           }
           : {
-            title: 'Agreement is progressing',
-            body: nextActionSummary,
-          };
+          title: 'Agreement is progressing',
+          body: nextActionSummary,
+        };
   const isGrantMode = Boolean(agreement.source);
   const viewerRole = isClient
     ? {
@@ -2640,6 +2665,7 @@ export default function AgreementDetailPage() {
   const isUsdEquivalentGrant = isGrantMode && agreement.pricingMode === 'USD_EQUIVALENT';
   const reserveRemainingCkb = agreement.reserveCkbRemaining ? shannonsToCKB(agreement.reserveCkbRemaining) : null;
   const reserveLockedCkb = agreement.reserveCkbLocked ? shannonsToCKB(agreement.reserveCkbLocked) : null;
+  const reserveTopUpRequired = isUsdEquivalentGrant && agreement.reserveHealthStatus === 'TOP_UP_REQUIRED';
   const liveDraftReserveCkb = (() => {
     if (!isUsdEquivalentGrant || agreement.status !== 'DRAFT' || !liveCkbQuote) {
       return null;
@@ -2688,6 +2714,87 @@ export default function AgreementDetailPage() {
     const sign = priceMovementPct >= 0 ? '+' : '';
     return `${sign}${priceMovementPct.toFixed(2)}%`;
   })();
+  const nextUsdMilestone = isUsdEquivalentGrant
+    ? [...milestones]
+      .sort((left: any, right: any) => (left.sortOrder || 0) - (right.sortOrder || 0))
+      .find((milestone: any) =>
+        ['APPROVED', 'UNDER_REVIEW', 'PROOF_SUBMITTED', 'ACTIVE', 'PENDING'].includes(milestone.status)
+        && Number(milestone.targetUsd) > 0
+      ) || null
+    : null;
+  const nextUsdPayoutEstimate = (() => {
+    if (!nextUsdMilestone?.targetUsd || !liveCkbQuote) {
+      return null;
+    }
+
+    return Number(nextUsdMilestone.targetUsd) / liveCkbQuote.priceUsd;
+  })();
+  const reserveTopUpPanel = reserveTopUpRequired && isClient ? (
+    <div className="rounded-xl border border-rose-800 bg-rose-950/20 p-5 text-sm text-rose-100">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <h3 className="font-semibold text-white">Reserve top-up required</h3>
+          <p className="mt-2 text-sm leading-6 text-rose-100/90">
+            Send additional CKB to the agreement escrow destination, then confirm the transaction here so PactAgent can retry the USD-equivalent payout.
+          </p>
+          <div className="mt-3 rounded-lg border border-rose-800/50 bg-agent-bg/70 px-3 py-2 text-xs text-rose-100/90">
+            Escrow destination:
+            <div className="mt-1 break-all font-mono text-rose-50">
+              {escrowAddress || 'Escrow address not configured'}
+            </div>
+          </div>
+        </div>
+        {nextUsdMilestone ? (
+          <div className="shrink-0 rounded-lg border border-rose-800/50 bg-agent-bg/70 px-3 py-2 text-xs text-rose-100/90 md:min-w-[220px]">
+            <div className="uppercase tracking-[0.14em] text-rose-200/70">Next payout</div>
+            <div className="mt-1 font-mono text-white">
+              ${Number(nextUsdMilestone.targetUsd).toLocaleString('en-US', { maximumFractionDigits: 2 })}
+            </div>
+            {nextUsdPayoutEstimate != null ? (
+              <div className="mt-1 text-rose-100/80">
+                ≈ {nextUsdPayoutEstimate.toLocaleString('en-US', { maximumFractionDigits: 2 })} CKB at live price
+              </div>
+            ) : null}
+            {reserveRemainingCkb ? (
+              <div className="mt-1 text-rose-100/80">
+                Reserve remaining: {reserveRemainingCkb} CKB
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <input
+          className="w-full rounded-lg border border-agent-border bg-agent-bg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:border-agent-accent focus:outline-none"
+          value={topUpTxHash}
+          onChange={(e) => setTopUpTxHash(e.target.value)}
+          placeholder="Top-up transaction hash"
+        />
+        <input
+          className="w-full rounded-lg border border-agent-border bg-agent-bg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:border-agent-accent focus:outline-none"
+          inputMode="decimal"
+          value={topUpAmountCkb}
+          onChange={(e) => setTopUpAmountCkb(e.target.value)}
+          placeholder="Top-up amount in CKB"
+        />
+      </div>
+      <button
+        type="button"
+        onClick={handleTopUpReserve}
+        disabled={reserveTopUpLoading}
+        className="mt-4 inline-flex items-center justify-center gap-2 rounded-lg bg-agent-accent px-4 py-2.5 text-sm font-medium text-white cursor-pointer hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {reserveTopUpLoading ? (
+          <>
+            <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+            Confirming top-up...
+          </>
+        ) : (
+          'Confirm Reserve Top-Up'
+        )}
+      </button>
+    </div>
+  ) : null;
   const importedSourceMetadata = safeParseJson<Record<string, any>>(agreement.source?.externalMetadataJson) || null;
   const latestSourceSyncActivity = buildLatestSourceSyncActivity(auditLogs);
   const lifecycleOverview = isGrantMode
@@ -2745,7 +2852,7 @@ export default function AgreementDetailPage() {
     };
   })();
   const riskFlags = [
-    isUsdEquivalentGrant && agreement.reserveHealthStatus === 'TOP_UP_REQUIRED'
+    reserveTopUpRequired
       ? {
         label: 'Reserve top-up required',
         detail: 'The remaining CKB reserve is no longer enough to satisfy the next USD-equivalent milestone payout.',
@@ -3805,9 +3912,16 @@ export default function AgreementDetailPage() {
                                     void handleDraftSourceUpdate();
                                   }}
                                   disabled={sourceActionLoading === 'draft-source' || !sourceDraftUpdate.trim()}
-                                  className="rounded-lg border border-agent-border px-4 py-2 text-sm text-white hover:bg-agent-card disabled:opacity-50"
+                                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-agent-border px-4 py-2 text-sm text-white cursor-pointer hover:bg-agent-card disabled:cursor-not-allowed disabled:opacity-50"
                                 >
-                                  {sourceActionLoading === 'draft-source' ? 'Saving Draft...' : 'Draft Update'}
+                                  {sourceActionLoading === 'draft-source' ? (
+                                    <>
+                                      <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                                      Saving Draft...
+                                    </>
+                                  ) : (
+                                    'Draft Update'
+                                  )}
                                 </button>
                                 <button
                                   type="button"
@@ -3815,9 +3929,16 @@ export default function AgreementDetailPage() {
                                     void handleReviewSourceUpdate();
                                   }}
                                   disabled={sourceActionLoading === 'review-source'}
-                                  className="rounded-lg border border-agent-border px-4 py-2 text-sm text-white hover:bg-agent-card disabled:opacity-50"
+                                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-agent-border px-4 py-2 text-sm text-white cursor-pointer hover:bg-agent-card disabled:cursor-not-allowed disabled:opacity-50"
                                 >
-                                  {sourceActionLoading === 'review-source' ? 'Marking...' : 'Mark as Reviewed'}
+                                  {sourceActionLoading === 'review-source' ? (
+                                    <>
+                                      <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                                      Marking...
+                                    </>
+                                  ) : (
+                                    'Mark as Reviewed'
+                                  )}
                                 </button>
                                 <button
                                   type="button"
@@ -3825,9 +3946,16 @@ export default function AgreementDetailPage() {
                                     void handlePublishSourceUpdate();
                                   }}
                                   disabled={sourceActionLoading === 'publish-source' || !sourceDraftUpdate.trim() || !sourceReviewerApproved}
-                                  className="rounded-lg border border-emerald-500/40 px-4 py-2 text-sm text-emerald-200 hover:bg-emerald-500/10 disabled:opacity-50"
+                                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-500/40 px-4 py-2 text-sm text-emerald-200 cursor-pointer hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
-                                  {sourceActionLoading === 'publish-source' ? 'Publishing...' : 'Publish Update'}
+                                  {sourceActionLoading === 'publish-source' ? (
+                                    <>
+                                      <div className="h-3 w-3 animate-spin rounded-full border-2 border-emerald-200 border-t-transparent" />
+                                      Publishing...
+                                    </>
+                                  ) : (
+                                    'Publish Update'
+                                  )}
                                 </button>
                               </div>
                             </div>
@@ -4025,16 +4153,30 @@ export default function AgreementDetailPage() {
                               <button
                                 onClick={() => handleRespondToAmendment(amendment.id, true)}
                                 disabled={actionLoading === `amendment-${amendment.id}`}
-                                className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-60"
+                                className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white cursor-pointer hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
                               >
-                                Accept
+                                {actionLoading === `amendment-${amendment.id}` ? (
+                                  <>
+                                    <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                                    Processing...
+                                  </>
+                                ) : (
+                                  'Accept'
+                                )}
                               </button>
                               <button
                                 onClick={() => handleRespondToAmendment(amendment.id, false)}
                                 disabled={actionLoading === `amendment-${amendment.id}`}
-                                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
+                                className="inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white cursor-pointer hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
                               >
-                                Reject
+                                {actionLoading === `amendment-${amendment.id}` ? (
+                                  <>
+                                    <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                                    Processing...
+                                  </>
+                                ) : (
+                                  'Reject'
+                                )}
                               </button>
                             </div>
                           </div>
@@ -4068,9 +4210,16 @@ export default function AgreementDetailPage() {
                 <button
                   onClick={handleReconcile}
                   disabled={reconcileLoading}
-                  className="mt-4 rounded-lg border border-cyan-600/40 px-4 py-2 text-sm font-medium text-cyan-300 transition-colors hover:bg-cyan-900/20 disabled:opacity-60"
+                  className="mt-4 inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-600/40 px-4 py-2 text-sm font-medium text-cyan-300 cursor-pointer transition-colors hover:bg-cyan-900/20 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {reconcileLoading ? 'Rechecking...' : 'Recheck Settlement'}
+                  {reconcileLoading ? (
+                    <>
+                      <div className="h-3 w-3 animate-spin rounded-full border-2 border-cyan-300 border-t-transparent" />
+                      Rechecking...
+                    </>
+                  ) : (
+                    'Recheck Settlement'
+                  )}
                 </button>
               </div>
             )}
@@ -4087,16 +4236,30 @@ export default function AgreementDetailPage() {
                 <button
                   onClick={handleReconcile}
                   disabled={reconcileLoading}
-                  className="mt-4 rounded-lg border border-rose-600/40 px-4 py-2 text-sm font-medium text-rose-300 transition-colors hover:bg-rose-900/20 disabled:opacity-60"
+                  className="mt-4 inline-flex items-center justify-center gap-2 rounded-lg border border-rose-600/40 px-4 py-2 text-sm font-medium text-rose-300 cursor-pointer transition-colors hover:bg-rose-900/20 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {reconcileLoading ? 'Rechecking...' : 'Recheck Settlement'}
+                  {reconcileLoading ? (
+                    <>
+                      <div className="h-3 w-3 animate-spin rounded-full border-2 border-rose-300 border-t-transparent" />
+                      Rechecking...
+                    </>
+                  ) : (
+                    'Recheck Settlement'
+                  )}
                 </button>
                 <button
                   onClick={handleRetrySettlement}
                   disabled={retrySettlementLoading}
-                  className="mt-3 rounded-lg border border-agent-border px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-agent-bg disabled:opacity-60"
+                  className="mt-3 inline-flex items-center justify-center gap-2 rounded-lg border border-agent-border px-4 py-2 text-sm font-medium text-white cursor-pointer transition-colors hover:bg-agent-bg disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {retrySettlementLoading ? 'Retrying...' : 'Retry Settlement'}
+                  {retrySettlementLoading ? (
+                    <>
+                      <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                      Retrying...
+                    </>
+                  ) : (
+                    'Retry Settlement'
+                  )}
                 </button>
               </div>
             )}
@@ -4113,9 +4276,16 @@ export default function AgreementDetailPage() {
                   <button
                     onClick={handleCancelDraft}
                     disabled={actionLoading === 'cancel-draft'}
-                    className="rounded-lg border border-red-700/50 px-4 py-2 text-sm text-red-300 hover:bg-red-950/20 disabled:opacity-60"
+                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-red-700/50 px-4 py-2 text-sm text-red-300 cursor-pointer hover:bg-red-950/20 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {actionLoading === 'cancel-draft' ? 'Cancelling...' : 'Cancel Draft'}
+                    {actionLoading === 'cancel-draft' ? (
+                      <>
+                        <div className="h-3 w-3 animate-spin rounded-full border-2 border-red-300 border-t-transparent" />
+                        Cancelling...
+                      </>
+                    ) : (
+                      'Cancel Draft'
+                    )}
                   </button>
                 </div>
 
@@ -4240,9 +4410,16 @@ export default function AgreementDetailPage() {
                 <button
                   onClick={handleSaveDraft}
                   disabled={actionLoading === 'save-draft'}
-                  className="mt-4 rounded-lg bg-agent-accent px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-600 disabled:opacity-60"
+                  className="mt-4 inline-flex items-center justify-center gap-2 rounded-lg bg-agent-accent cursor-pointer px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {actionLoading === 'save-draft' ? 'Saving Draft...' : 'Save Draft Changes'}
+                  {actionLoading === 'save-draft' ? (
+                    <>
+                      <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                      Saving Draft...
+                    </>
+                  ) : (
+                    'Save Draft Changes'
+                  )}
                 </button>
               </div>
             )}
@@ -4265,12 +4442,21 @@ export default function AgreementDetailPage() {
                 <button
                   onClick={handleCreateInviteFromDraft}
                   disabled={actionLoading === 'draft-invite'}
-                  className="rounded-lg border border-agent-accent/40 bg-agent-accent/10 px-4 py-2 text-sm font-medium text-agent-accent hover:bg-agent-accent/20 disabled:opacity-60"
+                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-agent-accent/40 bg-agent-accent/10 px-4 py-2 text-sm font-medium text-agent-accent cursor-pointer hover:bg-agent-accent/20 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {actionLoading === 'draft-invite' ? 'Creating invite...' : 'Create Worker Invite Link'}
+                  {actionLoading === 'draft-invite' ? (
+                    <>
+                      <div className="h-3 w-3 animate-spin rounded-full border-2 border-agent-accent border-t-transparent" />
+                      Creating invite...
+                    </>
+                  ) : (
+                    'Create Worker Invite Link'
+                  )}
                 </button>
               </div>
             )}
+
+            {reserveTopUpPanel}
 
             {agreement.status === 'DRAFT' && isClient && (
               <div className="bg-agent-card border border-blue-800/50 rounded-xl p-6">
@@ -4318,39 +4504,10 @@ export default function AgreementDetailPage() {
                     agreements that need funding.
                   </div>
                 )}
-                {isUsdEquivalentGrant && agreement.reserveHealthStatus === 'TOP_UP_REQUIRED' && (
-                  <div className="mb-4 rounded-lg border border-rose-800 bg-rose-950/20 p-4 text-sm text-rose-100">
-                    <div className="font-medium text-white">Reserve top-up required</div>
-                    <p className="mt-2 text-sm text-rose-100/90">
-                      The remaining CKB reserve is not enough to satisfy the next USD-equivalent milestone payout. Send an additional treasury funding transfer to the escrow destination, then confirm it here.
-                    </p>
-                    <div className="mt-4 grid gap-3 md:grid-cols-2">
-                      <input
-                        className="w-full rounded-lg border border-agent-border bg-agent-bg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-agent-accent"
-                        value={topUpTxHash}
-                        onChange={(e) => setTopUpTxHash(e.target.value)}
-                        placeholder="Top-up transaction hash"
-                      />
-                      <input
-                        className="w-full rounded-lg border border-agent-border bg-agent-bg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-agent-accent"
-                        value={topUpAmountCkb}
-                        onChange={(e) => setTopUpAmountCkb(e.target.value)}
-                        placeholder="Top-up amount in CKB"
-                      />
-                    </div>
-                    <button
-                      onClick={handleTopUpReserve}
-                      disabled={reserveTopUpLoading}
-                      className="mt-4 rounded-lg bg-agent-accent px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-600 disabled:opacity-60"
-                    >
-                      {reserveTopUpLoading ? 'Confirming top-up...' : 'Confirm Reserve Top-Up'}
-                    </button>
-                  </div>
-                )}
                 {fundingNeedsReconnect ? (
                   <button
                     onClick={handleReconnectSigner}
-                    className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 sm:w-auto"
+                    className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 cursor-pointer px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 sm:w-auto"
                   >
                     <LinkIcon className="w-4 h-4" />
                     Reconnect Wallet
@@ -4572,9 +4729,16 @@ export default function AgreementDetailPage() {
                           void handleDraftInfoRequest(currentMilestone.id);
                         }}
                         disabled={draftInfoRequestLoading}
-                        className="rounded-lg border border-agent-accent/40 px-3 py-2 text-xs font-medium text-agent-accent hover:bg-agent-accent/10 disabled:opacity-60"
+                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-agent-accent/40 px-3 py-2 text-xs font-medium text-agent-accent cursor-pointer hover:bg-agent-accent/10 disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        {draftInfoRequestLoading ? 'Drafting...' : 'Suggest Questions'}
+                        {draftInfoRequestLoading ? (
+                          <>
+                            <div className="h-3 w-3 animate-spin rounded-full border-2 border-agent-accent border-t-transparent" />
+                            Drafting...
+                          </>
+                        ) : (
+                          'Suggest Questions'
+                        )}
                       </button>
                     </div>
                     <textarea
@@ -4775,7 +4939,7 @@ export default function AgreementDetailPage() {
                   <button
                     type="button"
                     onClick={() => appendUrlArtifact(disputeUrlDraft, setDisputeArtifacts, () => setDisputeUrlDraft(''), 'Dispute')}
-                    className="rounded-lg border border-agent-border px-4 py-2 text-sm text-white hover:bg-agent-bg"
+                    className="rounded-lg border border-agent-border px-4 py-2 text-sm text-white cursor-pointer hover:bg-agent-bg"
                   >
                     Add Link
                   </button>
@@ -4885,9 +5049,16 @@ export default function AgreementDetailPage() {
                         <button
                           onClick={handleApproveMutualRefund}
                           disabled={mutualRefundLoading || (!canProposeMutualRefund && !canAcceptMutualRefund)}
-                          className="w-full rounded-lg border border-amber-600/40 px-4 py-2 text-sm font-medium text-amber-200 transition-colors hover:bg-amber-900/30 disabled:opacity-50 sm:w-auto"
+                          className="inline-flex items-center justify-center gap-2 w-full rounded-lg border border-amber-600/40 px-4 py-2 text-sm font-medium text-amber-200 cursor-pointer transition-colors hover:bg-amber-900/30 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                         >
-                          {mutualRefundLoading ? 'Saving...' : mutualRefundActionLabel}
+                          {mutualRefundLoading ? (
+                            <>
+                              <div className="h-3 w-3 animate-spin rounded-full border-2 border-amber-200 border-t-transparent" />
+                              Saving...
+                            </>
+                          ) : (
+                            mutualRefundActionLabel
+                          )}
                         </button>
                       </div>
 
@@ -4921,9 +5092,16 @@ export default function AgreementDetailPage() {
                         <button
                           onClick={handleSplitSettlement}
                           disabled={splitLoading || (!canProposeSplitSettlement && !canAcceptSplitSettlement)}
-                          className="w-full rounded-lg border border-cyan-600/40 px-4 py-2 text-sm font-medium text-cyan-200 transition-colors hover:bg-cyan-900/30 disabled:opacity-50 sm:w-auto"
+                          className="inline-flex items-center justify-center gap-2 w-full rounded-lg border border-cyan-600/40 px-4 py-2 text-sm font-medium text-cyan-200 cursor-pointer transition-colors hover:bg-cyan-900/30 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                         >
-                          {splitLoading ? 'Saving...' : splitSettlementActionLabel}
+                          {splitLoading ? (
+                            <>
+                              <div className="h-3 w-3 animate-spin rounded-full border-2 border-cyan-200 border-t-transparent" />
+                              Saving...
+                            </>
+                          ) : (
+                            splitSettlementActionLabel
+                          )}
                         </button>
                       </div>
 
@@ -5051,7 +5229,7 @@ export default function AgreementDetailPage() {
                         <button
                           type="button"
                           onClick={() => appendUrlArtifact(replyUrlDraft, setReplyArtifacts, () => setReplyUrlDraft(''), 'Reply')}
-                          className="rounded-lg border border-agent-border px-4 py-2 text-sm text-white hover:bg-agent-bg"
+                          className="rounded-lg border border-agent-border px-4 py-2 text-sm text-white cursor-pointer hover:bg-agent-bg"
                         >
                           Add Link
                         </button>
@@ -5074,7 +5252,7 @@ export default function AgreementDetailPage() {
                       <button
                         onClick={handleSubmitDisputeEvidence}
                         disabled={!additionalEvidence.trim() && replyArtifacts.length === 0}
-                        className="w-full rounded-lg border border-purple-600/40 px-4 py-2 text-sm font-medium text-purple-300 transition-colors hover:bg-purple-900/20 disabled:opacity-50 sm:w-auto"
+                        className="inline-flex items-center justify-center gap-2 w-full rounded-lg border border-purple-600/40 px-4 py-2 text-sm font-medium text-purple-300 cursor-pointer transition-colors hover:bg-purple-900/20 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                       >
                         Send Reply
                       </button>

@@ -11,6 +11,28 @@ type ApiEnvelope<T> = {
   error?: string;
 };
 
+function isLikelyHtmlResponse(value: string) {
+  const trimmed = value.trim().toLowerCase();
+  return trimmed.startsWith('<!doctype') || trimmed.startsWith('<html') || trimmed.includes('<body');
+}
+
+function formatApiError(path: string, status: number, rawBody: string) {
+  if (!rawBody) {
+    return `API request to ${path} failed with status ${status}.`;
+  }
+
+  if (isLikelyHtmlResponse(rawBody)) {
+    return `API request to ${path} returned HTML instead of JSON. Make sure the backend server is running and API_PROXY_TARGET points to it.`;
+  }
+
+  const singleLine = rawBody.replace(/\s+/g, ' ').trim();
+  if (singleLine.length > 240) {
+    return `${singleLine.slice(0, 240)}...`;
+  }
+
+  return singleLine;
+}
+
 function getRequestMethod(options?: RequestInit) {
   return (options?.method || 'GET').toUpperCase();
 }
@@ -57,12 +79,12 @@ async function performRequest<T>(path: string, options?: RequestInit): Promise<T
     try {
       data = JSON.parse(rawBody) as ApiEnvelope<T>;
     } catch {
-      throw new Error(rawBody || `API request failed with status ${res.status}`);
+      throw new Error(formatApiError(path, res.status, rawBody));
     }
   }
 
   if (!res.ok || !data?.success) {
-    throw new Error(data?.error || rawBody || 'API request failed');
+    throw new Error(data?.error || formatApiError(path, res.status, rawBody) || 'API request failed');
   }
 
   return data.data as T;

@@ -137,9 +137,11 @@ const fundSchema = z.object({
   commencementOutputIndex: z.number().int().min(0).optional(),
 });
 
+const positiveIntegerString = z.string().regex(/^[1-9]\d*$/, 'Amount must be a positive integer string.');
+
 const topUpReserveSchema = z.object({
   txHash: z.string().min(1),
-  amount: z.string().min(1),
+  amount: positiveIntegerString,
 });
 
 const submitProofSchema = z.object({
@@ -757,6 +759,8 @@ router.post('/:id/reserve/top-up', actionRateLimit, async (req: Request, res: Re
       resourceId: req.params.id,
       metadata: { txHash, amount },
     });
+
+    await queueAgreementJob(req.params.id, 'reserve top-up confirmed');
 
     res.json({ success: true, data: updated });
   } catch (err) {

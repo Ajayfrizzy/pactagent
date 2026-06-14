@@ -26,6 +26,12 @@ body {
   font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif;
 }
 
+@media (max-width: 1023px) {
+  body {
+    padding-bottom: calc(5.75rem + env(safe-area-inset-bottom));
+  }
+}
+
 ::selection {
   background: rgba(59, 130, 246, 0.28);
   color: #f8fafc;
@@ -50,6 +56,39 @@ body {
 
   .app-nav-link-accent {
     @apply inline-flex items-center rounded-full px-4 py-2.5 text-sm text-agent-accent transition-all hover:bg-agent-accent/10 hover:text-cyan-200;
+  }
+
+  .app-bottom-nav {
+    @apply fixed inset-x-0 bottom-0 z-[70] grid grid-cols-5 border-t border-agent-border px-2 pb-2 pt-2;
+    padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+    background:
+      linear-gradient(180deg, rgba(15, 23, 42, 0.94), rgba(8, 12, 19, 0.98)),
+      radial-gradient(circle at top, rgba(56, 189, 248, 0.1), transparent 58%);
+    box-shadow: 0 -18px 48px rgba(0, 0, 0, 0.32);
+  }
+
+  .app-bottom-nav-item {
+    @apply flex h-16 min-w-0 flex-col items-center justify-center gap-1 rounded-xl border border-transparent text-gray-500 transition-colors;
+  }
+
+  .app-bottom-nav-item:hover {
+    @apply text-gray-200;
+  }
+
+  .app-bottom-nav-item[data-active='true'] {
+    @apply border-agent-accent/20 bg-agent-accent/10 text-agent-accent;
+  }
+
+  .app-bottom-nav-icon {
+    @apply flex h-6 w-6 items-center justify-center;
+  }
+
+  .app-bottom-nav-label {
+    @apply max-w-full truncate text-[10px] font-medium leading-none;
+  }
+
+  .app-more-panel-link {
+    @apply flex min-h-14 items-center gap-3 rounded-xl border border-agent-border bg-agent-bg/50 px-4 py-3 text-sm font-medium text-gray-200 transition-colors hover:border-agent-accent/35 hover:bg-agent-accent/10 hover:text-white;
   }
 
   .page-back-link {
@@ -88,31 +127,35 @@ body {
   }
 
   .ui-button-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-agent-accent px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-agent-accent px-5 py-3 text-sm font-medium text-white cursor-pointer transition-colors hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-60;
   }
 
   .ui-button-primary-sm {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-agent-accent px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-agent-accent px-4 py-2.5 text-sm font-medium text-white cursor-pointer transition-colors hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-60;
   }
 
   .ui-button-secondary {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-agent-border bg-agent-bg/40 px-5 py-3 text-sm font-medium text-gray-200 transition-colors hover:border-agent-accent/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-agent-border bg-agent-bg/40 px-5 py-3 text-sm font-medium text-gray-200 cursor-pointer transition-colors hover:border-agent-accent/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-60;
   }
 
   .ui-button-secondary-sm {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-agent-border bg-agent-bg/40 px-4 py-2.5 text-sm font-medium text-gray-200 transition-colors hover:border-agent-accent/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-agent-border bg-agent-bg/40 px-4 py-2.5 text-sm font-medium text-gray-200 cursor-pointer transition-colors hover:border-agent-accent/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-60;
   }
 
   .ui-button-ghost {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-agent-accent/35 bg-agent-accent/10 px-4 py-2.5 text-sm font-medium text-agent-accent transition-colors hover:bg-agent-accent/20 disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-agent-accent/35 bg-agent-accent/10 px-4 py-2.5 text-sm font-medium text-agent-accent cursor-pointer transition-colors hover:bg-agent-accent/20 disabled:cursor-not-allowed disabled:opacity-60;
   }
 
   .ui-button-ghost-danger {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-red-400/30 bg-red-950/10 px-4 py-2.5 text-sm font-medium text-red-200 transition-colors hover:bg-red-950/20 disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-red-400/30 bg-red-950/10 px-4 py-2.5 text-sm font-medium text-red-200 cursor-pointer transition-colors hover:bg-red-950/20 disabled:cursor-not-allowed disabled:opacity-60;
   }
 
   .ui-button-plain {
-    @apply text-sm text-gray-500 transition-colors hover:text-gray-300 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply text-sm text-gray-500 cursor-pointer transition-colors hover:text-gray-300 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .ui-mobile-action {
+    @apply w-full justify-center text-center sm:w-auto;
   }
 
   .ui-input {

@@ -21,11 +21,29 @@ import { runAgentCycle } from './worker/agentLoop';
 
 const app = express();
 
+function isAllowedCorsOrigin(origin: string) {
+  if (config.corsOrigins.includes(origin)) {
+    return true;
+  }
+
+  if (!config.allowLocalhostCors) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(origin);
+    return ['localhost', '127.0.0.1'].includes(parsed.hostname)
+      && ['http:', 'https:'].includes(parsed.protocol);
+  } catch {
+    return false;
+  }
+}
+
 app.use(
   cors({
     origin(origin, callback) {
       // Allow curl, server-to-server calls, and configured browser origins.
-      if (!origin || config.corsOrigins.includes(origin)) {
+      if (!origin || isAllowedCorsOrigin(origin)) {
         callback(null, true);
         return;
       }

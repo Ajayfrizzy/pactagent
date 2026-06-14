@@ -477,12 +477,12 @@ export default function DashboardPage() {
                       : 'Connect your wallet to turn this into your live agreement command center.'}
                   </p>
                 </div>
-                <div className="ml-auto flex flex-wrap justify-end gap-3">
-                  <Link href="/agreement/import-bounty" className="ui-button-secondary-sm">
+                <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end lg:ml-auto">
+                  <Link href="/agreement/import-bounty" className="ui-button-secondary-sm ui-mobile-action">
                     <SparklesIcon className="h-4 w-4" />
                     Import Bounty
                   </Link>
-                  <Link href="/agreement/new" className="ui-button-primary-sm">
+                  <Link href="/agreement/new" className="ui-button-primary-sm ui-mobile-action">
                     <PlusIcon className="h-4 w-4" />
                     New Agreement
                   </Link>
@@ -721,12 +721,12 @@ export default function DashboardPage() {
                       ? 'Try another filter or create a new agreement to add more work into the queue.'
                       : 'Start with a direct milestone agreement, or import DAO / bounty work and let PactAgent organize the full lifecycle from there.'}
                   </p>
-                  <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
-                    <Link href="/agreement/new" className="ui-button-primary-sm px-6">
+                  <div className="flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
+                    <Link href="/agreement/new" className="ui-button-primary-sm ui-mobile-action px-6">
                       <PlusIcon className="h-4 w-4" />
                       Create Agreement
                     </Link>
-                    <Link href="/agreement/import-bounty" className="ui-button-secondary-sm px-6">
+                    <Link href="/agreement/import-bounty" className="ui-button-secondary-sm ui-mobile-action px-6">
                       Import DAO / Bounty
                     </Link>
                   </div>

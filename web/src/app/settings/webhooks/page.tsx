@@ -205,63 +205,65 @@ export default function WebhookSettingsPage() {
         </div>
       </nav>
 
-      <div className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6">
+      <div className="mx-auto max-w-6xl space-y-6 overflow-hidden px-4 py-8 sm:px-6">
         <Link href="/dashboard" className="page-back-link text-gray-400">
           <ArrowLeftIcon className="h-4 w-4" />
           Back to dashboard
         </Link>
 
-        <section className="ui-panel p-6">
-          <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-            <div>
+        <section className="ui-panel overflow-hidden p-5 sm:p-6">
+          <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+            <div className="min-w-0">
               <div className="ui-kicker mb-2">
                 <BoltIcon className="h-4 w-4" />
                 Integrations
               </div>
-              <h1 className="text-2xl font-bold text-white">Webhook Endpoints</h1>
-              <p className="mt-2 max-w-2xl text-sm text-gray-400">
+              <h1 className="break-words text-3xl font-bold leading-tight text-white sm:text-2xl">Webhook Endpoints</h1>
+              <p className="mt-3 max-w-2xl break-words text-sm leading-6 text-gray-400">
                 Webhooks let PactAgent push agreement lifecycle events into your own dashboards, bots, treasury tooling, or grant trackers in real time.
               </p>
-              <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                <div className="rounded-2xl border border-agent-border bg-agent-bg/55 p-4">
+              <div className="mt-4 grid min-w-0 gap-3 md:grid-cols-3">
+                <div className="min-w-0 rounded-2xl border border-agent-border bg-agent-bg/55 p-4">
                   <div className="text-[11px] uppercase tracking-[0.16em] text-gray-500">1. Receive</div>
-                  <p className="mt-2 text-sm text-gray-300">Create a public URL that accepts JSON `POST` requests.</p>
+                  <p className="mt-2 break-words text-sm leading-6 text-gray-300">Create a public URL that accepts JSON POST requests.</p>
                 </div>
-                <div className="rounded-2xl border border-agent-border bg-agent-bg/55 p-4">
+                <div className="min-w-0 rounded-2xl border border-agent-border bg-agent-bg/55 p-4">
                   <div className="text-[11px] uppercase tracking-[0.16em] text-gray-500">2. Subscribe</div>
-                  <p className="mt-2 text-sm text-gray-300">Choose the exact PactAgent events that should trigger deliveries.</p>
+                  <p className="mt-2 break-words text-sm leading-6 text-gray-300">Choose the exact PactAgent events that should trigger deliveries.</p>
                 </div>
-                <div className="rounded-2xl border border-agent-border bg-agent-bg/55 p-4">
+                <div className="min-w-0 rounded-2xl border border-agent-border bg-agent-bg/55 p-4">
                   <div className="text-[11px] uppercase tracking-[0.16em] text-gray-500">3. React</div>
-                  <p className="mt-2 text-sm text-gray-300">Update another app, send a bot alert, or log grant progress automatically.</p>
+                  <p className="mt-2 break-words text-sm leading-6 text-gray-300">Update another app, send a bot alert, or log grant progress automatically.</p>
                 </div>
               </div>
             </div>
-            <div className="ui-panel-soft p-5">
+            <div className="ui-panel-soft min-w-0 overflow-hidden p-4 sm:p-5">
               <div className="text-sm font-semibold text-white">What kind of link works?</div>
               <ul className="mt-3 space-y-2 text-sm text-gray-400">
-                <li>`https://yourapp.com/api/pactagent/webhook`</li>
-                <li>`https://webhook.site/your-test-id`</li>
-                <li>`https://hooks.zapier.com/...`</li>
+                <li className="break-all font-mono text-xs">https://yourapp.com/api/pactagent/webhook</li>
+                <li className="break-all font-mono text-xs">https://webhook.site/your-test-id</li>
+                <li className="break-all font-mono text-xs">https://hooks.zapier.com/...</li>
               </ul>
-              <div className="ui-panel-flat mt-4 p-3 text-xs text-gray-400">
-                PactAgent sends signed JSON payloads with headers like `X-PactAgent-Event` and `X-PactAgent-Signature`. Use a test receiver first if you just want to inspect the payload.
+              <div className="ui-panel-flat mt-4 break-words p-3 text-xs leading-5 text-gray-400">
+                PactAgent sends signed JSON payloads with headers like X-PactAgent-Event and X-PactAgent-Signature. Use a test receiver first if you just want to inspect the payload.
               </div>
-              <div className="ui-panel-flat mt-4 p-4">
-                <div className="flex items-center justify-between gap-3">
+              <div className="ui-panel-flat mt-4 min-w-0 overflow-hidden p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="text-sm font-semibold text-white">Sample payload</div>
-                  <button type="button" onClick={() => void handleCopySamplePayload()} className="ui-button-secondary-sm rounded-lg px-3 py-1.5 text-xs">
+                  <button type="button" onClick={() => void handleCopySamplePayload()} className="ui-button-secondary-sm ui-mobile-action rounded-lg px-3 py-1.5 text-xs">
                     {copiedSample ? 'Copied' : 'Copy JSON'}
                   </button>
                 </div>
-                <pre className="mt-3 overflow-x-auto rounded-lg bg-agent-bg p-3 text-[11px] text-gray-300">{SAMPLE_PAYLOAD}</pre>
+                <pre className="mt-3 max-w-full overflow-x-auto rounded-lg bg-agent-bg p-3 text-[11px] text-gray-300">
+                  <code>{SAMPLE_PAYLOAD}</code>
+                </pre>
               </div>
             </div>
           </div>
         </section>
 
-        <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-          <section className="ui-panel p-6">
+        <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+          <section className="ui-panel min-w-0 overflow-hidden p-5 sm:p-6">
             <div className="mb-6">
               <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Create Endpoint</div>
               <h2 className="mt-2 text-xl font-bold text-white">Tell PactAgent where to send events</h2>
@@ -306,12 +308,12 @@ export default function WebhookSettingsPage() {
                   {targetUrlError && (submitAttempted || form.targetUrl.trim()) ? (
                     <p className={fieldErrorClass}>{targetUrlError}</p>
                   ) : (
-                    <p className={helperClass}>This must be a public URL that accepts JSON `POST` requests from PactAgent.</p>
+                    <p className={helperClass}>This must be a public URL that accepts JSON POST requests from PactAgent.</p>
                   )}
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   {EVENT_OPTIONS.map((eventType) => (
-                    <label key={eventType} className="flex items-center gap-3 rounded-xl border border-agent-border bg-agent-bg/50 px-3 py-2 text-sm text-gray-300">
+                    <label key={eventType} className="flex min-w-0 items-start gap-3 rounded-xl border border-agent-border bg-agent-bg/50 px-3 py-2 text-sm text-gray-300">
                       <input
                         type="checkbox"
                         checked={form.eventTypes.includes(eventType)}
@@ -324,9 +326,9 @@ export default function WebhookSettingsPage() {
                           }))
                         }
                       />
-                      <span>
-                        <span className="block text-sm text-white">{EVENT_LABELS[eventType]?.title || eventType}</span>
-                        <span className="block text-xs text-gray-500">{EVENT_LABELS[eventType]?.description || eventType}</span>
+                      <span className="min-w-0">
+                        <span className="block break-words text-sm text-white">{EVENT_LABELS[eventType]?.title || eventType}</span>
+                        <span className="block break-words text-xs leading-5 text-gray-500">{EVENT_LABELS[eventType]?.description || eventType}</span>
                       </span>
                     </label>
                   ))}
@@ -336,11 +338,11 @@ export default function WebhookSettingsPage() {
                 ) : (
                   <p className={helperClass}>Pick only the lifecycle events this endpoint actually needs.</p>
                 )}
-                <div className="grid gap-3 sm:grid-cols-3">
+                <div className="grid gap-3 md:grid-cols-3">
                   {endpointTrustNotes.map((note) => (
-                    <div key={note.label} className="ui-panel-soft p-4">
+                    <div key={note.label} className="ui-panel-soft min-w-0 p-4">
                       <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">{note.label}</div>
-                      <p className="mt-2 text-sm text-gray-400">{note.detail}</p>
+                      <p className="mt-2 break-words text-sm leading-6 text-gray-400">{note.detail}</p>
                     </div>
                   ))}
                 </div>
@@ -353,7 +355,7 @@ export default function WebhookSettingsPage() {
             )}
           </section>
 
-          <section className="ui-panel p-6">
+          <section className="ui-panel min-w-0 overflow-hidden p-5 sm:p-6">
             <div className="mb-5 flex items-center gap-2 text-white">
               <LinkIcon className="h-4 w-4 text-agent-accent" />
               Endpoint Activity
@@ -371,12 +373,12 @@ export default function WebhookSettingsPage() {
                 </div>
                 <div className="space-y-2">
                   {endpoints.length ? endpoints.map((endpoint) => (
-                    <button key={endpoint.id} type="button" onClick={() => void handleSelectEndpoint(endpoint.id)} className={`w-full rounded-xl border px-4 py-3 text-left transition-colors ${selectedEndpointId === endpoint.id ? 'border-agent-accent bg-agent-bg/80' : 'border-agent-border bg-agent-bg/45 hover:bg-agent-bg/65'}`}>
-                      <div className="text-sm font-medium text-white">{endpoint.label || endpoint.targetUrl}</div>
-                      <div className="mt-1 text-xs text-gray-500">{endpoint.targetUrl}</div>
+                    <button key={endpoint.id} type="button" onClick={() => void handleSelectEndpoint(endpoint.id)} className={`w-full min-w-0 rounded-xl border px-4 py-3 text-left cursor-pointer transition-colors ${selectedEndpointId === endpoint.id ? 'border-agent-accent bg-agent-bg/80' : 'border-agent-border bg-agent-bg/45 hover:bg-agent-bg/65'}`}>
+                      <div className="break-words text-sm font-medium text-white">{endpoint.label || endpoint.targetUrl}</div>
+                      <div className="mt-1 break-all text-xs text-gray-500">{endpoint.targetUrl}</div>
                       <div className="mt-2 flex flex-wrap gap-2">
                         {(endpoint.eventTypes || []).slice(0, 3).map((eventType: string) => (
-                          <span key={eventType} className="rounded-full border border-agent-border bg-agent-card/70 px-2 py-1 text-[10px] text-gray-400">
+                          <span key={eventType} className="max-w-full break-words rounded-full border border-agent-border bg-agent-card/70 px-2 py-1 text-[10px] text-gray-400">
                             {EVENT_LABELS[eventType]?.title || eventType}
                           </span>
                         ))}
@@ -395,11 +397,11 @@ export default function WebhookSettingsPage() {
                 </div>
                 <div className="space-y-3">
                   {deliveries.length ? deliveries.map((delivery) => (
-                    <div key={delivery.id} className="rounded-xl border border-agent-border bg-agent-bg/50 p-4">
-                      <div className="flex items-center justify-between gap-4">
-                        <div>
-                          <div className="text-sm font-medium text-white">{EVENT_LABELS[delivery.eventType]?.title || delivery.eventType}</div>
-                          <div className="mt-1 text-xs text-gray-500">{EVENT_LABELS[delivery.eventType]?.description || delivery.eventType}</div>
+                    <div key={delivery.id} className="min-w-0 rounded-xl border border-agent-border bg-agent-bg/50 p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                        <div className="min-w-0">
+                          <div className="break-words text-sm font-medium text-white">{EVENT_LABELS[delivery.eventType]?.title || delivery.eventType}</div>
+                          <div className="mt-1 break-words text-xs leading-5 text-gray-500">{EVENT_LABELS[delivery.eventType]?.description || delivery.eventType}</div>
                           <div className="mt-1 text-xs text-gray-500">{new Date(delivery.createdAt).toLocaleString()}</div>
                         </div>
                         <div className={`text-xs uppercase tracking-wide ${
