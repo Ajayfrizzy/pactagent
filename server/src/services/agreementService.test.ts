@@ -4,6 +4,8 @@ import {
   getImportedCommencementDetails,
   buildRefundConsensusState,
   buildSplitConsensusState,
+  getBlockingDisputeSettlementProposal,
+  getAllowedDisputeResolutionChoices,
   matchOnchainFundingOutputsToMilestones,
   isSponsorControlledImportedAgreement,
 } from './agreementService';
@@ -112,6 +114,93 @@ test('buildSplitConsensusState marks split settlement complete after both approv
   assert.equal(state.clientRefundAmount, '300');
   assert.equal(state.fullyApproved, true);
   assert.equal(state.awaitingAddress, null);
+});
+
+test('getBlockingDisputeSettlementProposal blocks unresolved split but not completed split', () => {
+  const pendingSplit = getBlockingDisputeSettlementProposal({
+    dispute: {
+      id: 'dispute-1',
+      splitConsensus: {
+        proposedBy: clientAddress,
+        proposedAt: '2026-04-30T11:00:00.000Z',
+        clientApprovedAt: '2026-04-30T11:00:00.000Z',
+        workerApprovedAt: null,
+        workerAmount: '700',
+        clientRefundAmount: '300',
+        fullyApproved: false,
+        awaitingAddress: workerAddress,
+      },
+    },
+  });
+
+  assert.equal(pendingSplit?.type, 'SPLIT');
+  assert.equal(pendingSplit?.awaitingAddress, workerAddress);
+
+  const completedSplit = getBlockingDisputeSettlementProposal({
+    dispute: {
+      id: 'dispute-2',
+      splitConsensus: {
+        proposedBy: clientAddress,
+        proposedAt: '2026-04-30T11:00:00.000Z',
+        clientApprovedAt: '2026-04-30T11:00:00.000Z',
+        workerApprovedAt: '2026-04-30T11:05:00.000Z',
+        workerAmount: '700',
+        clientRefundAmount: '300',
+        fullyApproved: true,
+        awaitingAddress: null,
+      },
+    },
+  });
+
+  assert.equal(completedSplit, null);
+});
+
+test('getBlockingDisputeSettlementProposal blocks unresolved mutual refund proposal', () => {
+  const pendingRefund = getBlockingDisputeSettlementProposal({
+    dispute: {
+      id: 'dispute-3',
+      refundConsensus: {
+        proposedBy: clientAddress,
+        proposedAt: '2026-04-30T12:00:00.000Z',
+        clientApprovedAt: '2026-04-30T12:00:00.000Z',
+        workerApprovedAt: null,
+        fullyApproved: false,
+        awaitingAddress: workerAddress,
+      },
+    },
+  });
+
+  assert.equal(pendingRefund?.type, 'REFUND');
+  assert.equal(pendingRefund?.awaitingAddress, workerAddress);
+});
+
+test('getAllowedDisputeResolutionChoices separates client and worker dispute outcomes', () => {
+  assert.deepEqual(
+    getAllowedDisputeResolutionChoices({
+      actorAddress: clientAddress,
+      clientAddress,
+      workerAddress,
+    }),
+    ['REFUND', 'SPLIT'],
+  );
+
+  assert.deepEqual(
+    getAllowedDisputeResolutionChoices({
+      actorAddress: workerAddress,
+      clientAddress,
+      workerAddress,
+    }),
+    ['PAYOUT', 'SPLIT'],
+  );
+
+  assert.deepEqual(
+    getAllowedDisputeResolutionChoices({
+      actorAddress: 'ckt1-observer',
+      clientAddress,
+      workerAddress,
+    }),
+    [],
+  );
 });
 
 test('matchOnchainFundingOutputsToMilestones pairs milestones with final on-chain output indices by cell data', () => {

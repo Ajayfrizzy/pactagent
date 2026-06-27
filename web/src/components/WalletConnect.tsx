@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ccc } from '@ckb-ccc/connector-react';
 import { fetchAuthChallenge, fetchCurrentSession, verifyWalletAuth } from '@/lib/api';
 import { useStore } from '@/lib/store';
-import { LinkIcon } from './Icons';
+import { CopyIcon, LinkIcon } from './Icons';
 
 type PersistedCccConnection = {
   signerName?: string;
@@ -51,6 +51,7 @@ export function WalletConnect({ compact = false }: { compact?: boolean }) {
   }));
   const [working, setWorking] = useState(false);
   const [connectedAddress, setConnectedAddress] = useState<string | null>(walletAddress);
+  const [copied, setCopied] = useState(false);
   const authenticatedAddressRef = useRef<string | null>(null);
   const manualConnectRequestedRef = useRef(false);
   const autoReconnectAttemptedRef = useRef<string | null>(null);
@@ -365,6 +366,20 @@ export function WalletConnect({ compact = false }: { compact?: boolean }) {
     }
   }
 
+  async function handleCopyAddress() {
+    if (!displayAddress) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(displayAddress);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setCopied(false);
+    }
+  }
+
   const authHint = hasAuthenticatedSession
     ? hasLiveSigner
       ? walletSummary || 'Wallet connected and ready for agreement actions.'
@@ -390,8 +405,17 @@ export function WalletConnect({ compact = false }: { compact?: boolean }) {
             <span className="text-xs font-medium text-white">
               {displayAddress.slice(0, 6)}...{displayAddress.slice(-4)}
             </span>
+            <button
+              type="button"
+              onClick={handleCopyAddress}
+              title="Copy wallet address"
+              aria-label="Copy wallet address"
+              className="inline-flex h-5 w-5 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-agent-bg hover:text-white"
+            >
+              <CopyIcon className="h-3 w-3" />
+            </button>
             <span className="hidden text-[11px] text-gray-400 lg:inline">
-              {connectionLabel}
+              {copied ? 'Copied' : connectionLabel}
             </span>
           </div>
           {needsAuthentication ? (
@@ -442,13 +466,24 @@ export function WalletConnect({ compact = false }: { compact?: boolean }) {
                 </span>
               ))}
             </div>
-            <span className="truncate text-xs font-mono text-gray-300">
-              {displayAddress.slice(0, 12)}...{displayAddress.slice(-8)}
-            </span>
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="truncate text-xs font-mono text-gray-300">
+                {displayAddress.slice(0, 12)}...{displayAddress.slice(-8)}
+              </span>
+              <button
+                type="button"
+                onClick={handleCopyAddress}
+                title="Copy wallet address"
+                aria-label="Copy wallet address"
+                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-agent-bg hover:text-white"
+              >
+                <CopyIcon className="h-3.5 w-3.5" />
+              </button>
+            </div>
             <span className={`mt-1 text-[10px] font-medium ${
               hasAuthenticatedSession ? 'text-gray-500' : 'text-gray-300'
             }`}>
-              {connectionLabel}
+              {copied ? 'Wallet address copied' : connectionLabel}
             </span>
             <span className={`mt-1 max-w-full break-words text-[10px] ${
               hasAuthenticatedSession ? 'text-gray-500' : authStatus === 'error' ? 'text-red-200' : 'text-gray-400'

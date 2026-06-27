@@ -225,18 +225,17 @@ export function evaluateProofCompleteness(input: {
     txHashExpected
       ? buildChecklistItem({
           key: 'tx_hash',
-          label: 'Tx hash present',
-          status: txHashes.length ? 'PRESENT' : 'MISSING',
+          label: txHashes.length ? 'Tx hash present' : 'Tx hash optional',
+          status: txHashes.length ? 'PRESENT' : 'NOT_APPLICABLE',
           detail: txHashes.length
             ? `${txHashes.length} transaction hash${txHashes.length === 1 ? '' : 'es'} detected.`
-            : 'No transaction hash was detected even though the milestone or proof suggests on-chain evidence matters.',
-          warning: txHashes.length ? undefined : 'Include the relevant transaction hash so the reviewer can verify the on-chain step.',
+            : 'No transaction hash was included. Transaction hashes are optional unless the reviewer specifically requests one.',
         })
       : buildChecklistItem({
           key: 'tx_hash',
-          label: 'Tx hash present',
+          label: 'Tx hash optional',
           status: 'NOT_APPLICABLE',
-          detail: 'No on-chain evidence requirement was inferred for this milestone.',
+          detail: 'No transaction hash is required for this proof submission.',
         }),
     screenshotExpected
       ? buildChecklistItem({
@@ -361,6 +360,7 @@ async function evaluateProofCompletenessWithAI(input: {
     'Assess whether the submitted proof is complete enough for a human reviewer to efficiently review it.',
     'Be conservative and only mark READY_FOR_HUMAN_REVIEW when the proof clearly covers the basics.',
     'You must return exactly four checklist items with keys links, tx_hash, screenshots, and scope.',
+    'A missing transaction hash must not block readiness. Mark tx_hash NOT_APPLICABLE when no transaction hash is supplied unless one is already present.',
     'Use NOT_APPLICABLE only when that evidence truly does not matter for this milestone.',
     'Warnings should be actionable and short.',
   ].join(' ');

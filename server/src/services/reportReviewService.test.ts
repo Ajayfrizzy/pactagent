@@ -57,3 +57,30 @@ test('evaluateProofCompleteness asks for more info when basic evidence is missin
   assert.equal(result.issueCount >= 2, true);
   assert.equal(result.warnings.length >= 2, true);
 });
+
+test('evaluateProofCompleteness keeps transaction hashes optional for worker submissions', () => {
+  const result = evaluateProofCompleteness({
+    agreementId: 'agreement-3',
+    milestoneId: 'milestone-3',
+    proofId: 'proof-3',
+    milestoneTitle: 'CKB deployment package',
+    milestoneDescription: 'Deliver deployment notes for the CKB integration.',
+    proofContent: serializeProofBundle({
+      summary: 'CKB deployment package is ready.',
+      primaryText: 'Deployment notes for the CKB integration are available at https://example.com/deploy-notes.',
+      revision: 1,
+      artifacts: [
+        {
+          kind: 'URL',
+          label: 'Deployment notes',
+          content: 'https://example.com/deploy-notes',
+        },
+      ],
+    }),
+  });
+
+  const txHashItem = result.checklist.find((item) => item.key === 'tx_hash');
+
+  assert.equal(txHashItem?.status, 'NOT_APPLICABLE');
+  assert.equal(result.warnings.some((warning) => warning.toLowerCase().includes('transaction hash')), false);
+});

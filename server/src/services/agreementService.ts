@@ -528,6 +528,75 @@ async function buildSplitConsensusForDispute(
   });
 }
 
+function validateSplitWorkerAmount(workerAmount: string, milestoneAmount: string) {
+  if (!/^[1-9]\d*$/.test(workerAmount)) {
+    throw new Error('Split settlement worker amount must be a positive integer string.');
+  }
+
+  const workerAmountValue = BigInt(workerAmount);
+  const milestoneAmountValue = BigInt(milestoneAmount);
+
+  if (workerAmountValue <= BigInt(0) || workerAmountValue >= milestoneAmountValue) {
+    throw new Error('Split settlement worker amount must be greater than zero and less than the milestone amount.');
+  }
+
+  return {
+    workerAmountValue,
+    milestoneAmountValue,
+    clientRefundAmount: (milestoneAmountValue - workerAmountValue).toString(),
+  };
+}
+
+export function getBlockingDisputeSettlementProposal(params: {
+  dispute: {
+    id: string;
+    refundConsensus?: RefundConsensusState | null;
+    splitConsensus?: SplitConsensusState | null;
+  } | null | undefined;
+}) {
+  const refundConsensus = params.dispute?.refundConsensus || null;
+  if (refundConsensus?.proposedBy && !refundConsensus.fullyApproved) {
+    return {
+      type: 'REFUND' as const,
+      disputeId: params.dispute?.id || null,
+      awaitingAddress: refundConsensus.awaitingAddress,
+    };
+  }
+
+  const splitConsensus = params.dispute?.splitConsensus || null;
+  if (splitConsensus?.proposedBy && !splitConsensus.fullyApproved) {
+    return {
+      type: 'SPLIT' as const,
+      disputeId: params.dispute?.id || null,
+      awaitingAddress: splitConsensus.awaitingAddress,
+      workerAmount: splitConsensus.workerAmount,
+      clientRefundAmount: splitConsensus.clientRefundAmount,
+    };
+  }
+
+  return null;
+}
+
+export function getAllowedDisputeResolutionChoices(params: {
+  actorAddress: string;
+  clientAddress: string;
+  workerAddress: string;
+}) {
+  const actorAddress = normalizeAddress(params.actorAddress);
+  const clientAddress = normalizeAddress(params.clientAddress);
+  const workerAddress = normalizeAddress(params.workerAddress);
+
+  if (actorAddress === clientAddress) {
+    return ['REFUND', 'SPLIT'] as const;
+  }
+
+  if (actorAddress === workerAddress) {
+    return ['PAYOUT', 'SPLIT'] as const;
+  }
+
+  return [] as const;
+}
+
 async function decorateAgreementWithRefundConsensus<
   T extends {
     id: string;
@@ -3117,6 +3186,20 @@ export async function recordOnchainResolutionIntent(params: {
       throw new Error('Milestone is not ready for payout settlement');
     }
 
+    const openDispute = milestone.disputes?.find((item: any) => !item.resolvedAt) || null;
+    if (openDispute) {
+      const decoratedAgreement = await getAgreementById(params.agreementId);
+      const decoratedDispute = decoratedAgreement?.disputes?.find((item: any) => item.id === openDispute.id) || null;
+      const blockingProposal = getBlockingDisputeSettlementProposal({ dispute: decoratedDispute });
+      if (blockingProposal) {
+        throw new Error(
+          blockingProposal.type === 'SPLIT'
+            ? 'A split settlement proposal is still open. The worker must accept it before funds move, or the participants must resolve the dispute before approving a full payout.'
+            : 'A mutual refund proposal is still open. Resolve the refund proposal before approving a full payout.'
+        );
+      }
+    }
+
     await resolveOpenMilestoneDisputes(milestone.id);
     await transitionMilestoneStatus(milestone.id, 'APPROVED');
     await transitionStatus(params.agreementId, 'APPROVED');
@@ -3177,6 +3260,21 @@ export async function openDispute(
     throw new Error('This milestone already has an open dispute');
   }
 
+  let validatedSplit:
+    | {
+        workerAmountValue: bigint;
+        milestoneAmountValue: bigint;
+        clientRefundAmount: string;
+      }
+    | null = null;
+  if (options?.desiredResolution === 'SPLIT') {
+    if (!options.splitWorkerAmount) {
+      throw new Error('Split settlement worker amount is required when requesting a split.');
+    }
+
+    validatedSplit = validateSplitWorkerAmount(options.splitWorkerAmount, milestone.amount);
+  }
+
   const dispute = await prisma.dispute.create({
     data: {
       id: uuid(),
@@ -3200,6 +3298,42 @@ export async function openDispute(
           splitWorkerAmount: options?.splitWorkerAmount || null,
           artifacts: options?.artifacts,
         }),
+      },
+    });
+  }
+
+  if (
+    options?.desiredResolution === 'SPLIT'
+    && validatedSplit
+    && openedBy === agreement.clientAddress
+  ) {
+    await createAuditLog({
+      agreementId,
+      actorAddress: openedBy,
+      action: 'SPLIT_PROPOSED',
+      resourceType: 'DISPUTE',
+      resourceId: dispute.id,
+      metadata: {
+        milestoneId: milestone.id,
+        settlement: 'SPLIT',
+        workerAmount: validatedSplit.workerAmountValue.toString(),
+        clientRefundAmount: validatedSplit.clientRefundAmount,
+        source: 'DISPUTE_OPENED',
+      },
+    });
+  }
+
+  if (options?.desiredResolution === 'REFUND' && openedBy === agreement.clientAddress) {
+    await createAuditLog({
+      agreementId,
+      actorAddress: openedBy,
+      action: 'REFUND_PROPOSED',
+      resourceType: 'DISPUTE',
+      resourceId: dispute.id,
+      metadata: {
+        milestoneId: milestone.id,
+        settlement: 'REFUND',
+        source: 'DISPUTE_OPENED',
       },
     });
   }
@@ -3417,6 +3551,20 @@ export async function approveCurrentMilestone(agreementId: string) {
     throw new Error('Current milestone is not ready for approval');
   }
 
+  const openDispute = milestone.disputes?.find((item: any) => !item.resolvedAt) || null;
+  if (openDispute) {
+    const decoratedAgreement = await getAgreementById(agreementId);
+    const decoratedDispute = decoratedAgreement?.disputes?.find((item: any) => item.id === openDispute.id) || null;
+    const blockingProposal = getBlockingDisputeSettlementProposal({ dispute: decoratedDispute });
+    if (blockingProposal) {
+      throw new Error(
+        blockingProposal.type === 'SPLIT'
+          ? 'A split settlement proposal is still open. The worker must accept it before funds move, or the participants must resolve the dispute before approving a full payout.'
+          : 'A mutual refund proposal is still open. Resolve the refund proposal before approving a full payout.'
+      );
+    }
+  }
+
   await resolveOpenMilestoneDisputes(milestone.id);
   await transitionMilestoneStatus(milestone.id, 'APPROVED');
   await transitionStatus(agreementId, 'APPROVED');
@@ -3487,11 +3635,7 @@ export async function recordSplitSettlementConsent(
     throw new Error('Only the client or worker can approve a split settlement.');
   }
 
-  const workerAmountValue = BigInt(workerAmount);
-  const milestoneAmountValue = BigInt(milestone.amount);
-  if (workerAmountValue <= BigInt(0) || workerAmountValue >= milestoneAmountValue) {
-    throw new Error('Split settlement worker amount must be greater than zero and less than the milestone amount.');
-  }
+  const { milestoneAmountValue } = validateSplitWorkerAmount(workerAmount, milestone.amount);
 
   const dispute = milestone.disputes.find((item: any) => !item.resolvedAt);
   if (!dispute) {
@@ -3523,7 +3667,7 @@ export async function recordSplitSettlementConsent(
     || (actorAddress === agreement.workerAddress && splitConsensus.workerApprovedAt);
 
   if (!actorAlreadyApproved) {
-    const clientRefundAmount = (milestoneAmountValue - workerAmountValue).toString();
+    const clientRefundAmount = (milestoneAmountValue - BigInt(workerAmount)).toString();
     await createAuditLog({
       agreementId,
       actorAddress,
@@ -3587,13 +3731,7 @@ export async function settleCurrentMilestoneSplit(
     throw new Error('Current milestone cannot be split-settled');
   }
 
-  const workerAmountValue = BigInt(workerAmount);
-  const milestoneAmountValue = BigInt(milestone.amount);
-  if (workerAmountValue <= BigInt(0) || workerAmountValue >= milestoneAmountValue) {
-    throw new Error('Split settlement worker amount must be greater than zero and less than the milestone amount.');
-  }
-
-  const clientRefundAmount = (milestoneAmountValue - workerAmountValue).toString();
+  const { workerAmountValue, clientRefundAmount } = validateSplitWorkerAmount(workerAmount, milestone.amount);
 
   await resolveOpenMilestoneDisputes(milestone.id);
   await transitionMilestoneStatus(milestone.id, 'APPROVED');

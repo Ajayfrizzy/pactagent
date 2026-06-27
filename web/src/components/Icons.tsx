@@ -12,6 +12,7 @@ import {
   ChevronDown,
   ChevronRight,
   ClipboardCheck,
+  Copy,
   Clock3,
   FileText,
   FileInput,
@@ -162,6 +163,10 @@ export function ChevronRightIcon({ className = 'w-4 h-4' }: IconProps) {
 
 export function ClipboardDocumentCheckIcon({ className = 'w-5 h-5' }: IconProps) {
   return <ClipboardCheck className={className} />;
+}
+
+export function CopyIcon({ className = 'w-5 h-5' }: IconProps) {
+  return <Copy className={className} />;
 }
 
 export function ScaleIcon({ className = 'w-5 h-5' }: IconProps) {

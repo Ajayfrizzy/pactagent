@@ -43,6 +43,7 @@ import {
   LinkIcon,
   ClipboardDocumentCheckIcon,
   ClockIcon,
+  CopyIcon,
   TrophyIcon,
   SparklesIcon,
 } from '@/components/Icons';
@@ -575,6 +576,58 @@ function getChecklistTone(status: ProofCheckChecklistStatus) {
   }
 }
 
+function CopyableValue({
+  label,
+  value,
+  emptyLabel = 'Pending',
+  compact = false,
+}: {
+  label: string;
+  value: string | null | undefined;
+  emptyLabel?: string;
+  compact?: boolean;
+}) {
+  const [copied, setCopied] = useState(false);
+  const hasValue = Boolean(value && value.trim());
+
+  async function handleCopy() {
+    if (!hasValue) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(value as string);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <div className="min-w-0">
+      <span className="mb-1 block text-[10px] uppercase text-gray-500">{label}</span>
+      <div className="flex min-w-0 items-start gap-2">
+        <span className={`min-w-0 break-all font-mono text-gray-300 ${compact ? 'text-xs' : 'text-xs'}`}>
+          {hasValue ? value : emptyLabel}
+        </span>
+        {hasValue ? (
+          <button
+            type="button"
+            onClick={handleCopy}
+            title={`Copy ${label.toLowerCase()}`}
+            aria-label={`Copy ${label.toLowerCase()}`}
+            className="mt-[-2px] inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-agent-border bg-agent-bg/70 text-gray-300 transition-colors hover:border-agent-accent/40 hover:text-white"
+          >
+            <CopyIcon className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
+      </div>
+      {copied ? <span className="mt-1 block text-[10px] text-emerald-300">Copied</span> : null}
+    </div>
+  );
+}
+
 function ProofCheckPanel({
   result,
   checking,
@@ -587,17 +640,36 @@ function ProofCheckPanel({
   showCheckAction?: boolean;
 }) {
   const lifecycleStatus = checking ? 'CHECKING' : (result?.lifecycleStatus || null);
-  const title = checking
-    ? 'Checking report'
+  const isChecking = checking || lifecycleStatus === 'CHECKING';
+  const [now, setNow] = useState(() => Date.now());
+  const checkStartedAt = result?.checkedAt ? new Date(result.checkedAt).getTime() : null;
+  const elapsedSeconds = checkStartedAt ? Math.max(0, Math.floor((now - checkStartedAt) / 1000)) : null;
+  const elapsedLabel = elapsedSeconds == null
+    ? null
+    : elapsedSeconds < 60
+      ? `${elapsedSeconds}s elapsed`
+      : `${Math.floor(elapsedSeconds / 60)}m ${elapsedSeconds % 60}s elapsed`;
+
+  useEffect(() => {
+    if (!isChecking) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(intervalId);
+  }, [isChecking]);
+
+  const title = isChecking
+    ? 'PactAgent is checking'
     : result?.status === 'READY_FOR_HUMAN_REVIEW'
       ? 'Ready for human review'
       : lifecycleStatus === 'NEEDS_MORE_INFO'
         ? 'Needs more info'
         : result
-          ? 'Issues found'
+          ? 'Needs review context'
           : 'Check report';
-  const subtitle = checking
-    ? 'PactAgent is comparing the submitted proof against the milestone scope and basic evidence signals.'
+  const subtitle = isChecking
+    ? 'PactAgent is comparing the submitted proof against the milestone scope and evidence signals in the background.'
     : result?.status === 'READY_FOR_HUMAN_REVIEW'
       ? result.summary
       : lifecycleStatus === 'NEEDS_MORE_INFO'
@@ -612,7 +684,7 @@ function ProofCheckPanel({
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-semibold text-white">{title}</span>
-            {result && !checking ? (
+            {result && !isChecking ? (
               <span
                 className={`rounded-full px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${result.status === 'READY_FOR_HUMAN_REVIEW'
                   ? 'bg-emerald-950/40 text-emerald-300'
@@ -625,19 +697,24 @@ function ProofCheckPanel({
                   ? 'Ready'
                   : lifecycleStatus === 'NEEDS_MORE_INFO'
                     ? 'Waiting On Info'
-                    : 'Issues Found'}
+                    : 'Review Notes'}
               </span>
             ) : null}
-            {checking ? (
+            {isChecking ? (
               <span className="rounded-full bg-sky-950/40 px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-sky-300">
                 Checking
               </span>
             ) : null}
           </div>
           <p className="mt-2 text-sm text-gray-400">{subtitle}</p>
+          {isChecking && elapsedLabel ? (
+            <p className="mt-2 text-[11px] uppercase tracking-[0.16em] text-sky-300">
+              {elapsedLabel}
+            </p>
+          ) : null}
           {result?.checkedAt ? (
             <p className="mt-2 text-[11px] uppercase tracking-[0.16em] text-gray-500">
-              Last checked {new Date(result.checkedAt).toLocaleString()}
+              {isChecking ? 'Started' : 'Last checked'} {new Date(result.checkedAt).toLocaleString()}
             </p>
           ) : null}
         </div>
@@ -645,10 +722,10 @@ function ProofCheckPanel({
           <button
             type="button"
             onClick={onCheck}
-            disabled={checking}
+            disabled={isChecking}
             className="inline-flex items-center justify-center gap-2 rounded-lg border border-agent-accent/40 px-3 py-2 text-xs font-medium text-agent-accent cursor-pointer transition-colors hover:bg-agent-accent/10 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {checking ? (
+            {isChecking ? (
               <>
                 <div className="h-3 w-3 animate-spin rounded-full border-2 border-agent-accent border-t-transparent" />
                 Checking...
@@ -1784,7 +1861,19 @@ export default function AgreementDetailPage() {
       return;
     }
 
-    if (disputeResolution === 'SPLIT' && splitWorkerAmountError) {
+    if (!isClient && !isWorker) {
+      setError('Only the client or worker can open a milestone dispute.');
+      return;
+    }
+
+    const allowedDisputeResolutions: Array<'PAYOUT' | 'REFUND' | 'SPLIT'> = isWorker
+      ? ['PAYOUT', 'SPLIT']
+      : ['REFUND', 'SPLIT'];
+    const selectedDisputeResolution = allowedDisputeResolutions.includes(disputeResolution)
+      ? disputeResolution
+      : allowedDisputeResolutions[0];
+
+    if (selectedDisputeResolution === 'SPLIT' && splitWorkerAmountError) {
       setError(splitWorkerAmountError);
       return;
     }
@@ -1798,8 +1887,8 @@ export default function AgreementDetailPage() {
         openedBy: walletAddress,
         reason: disputeReason,
         evidenceNotes: evidenceNotes || undefined,
-        desiredResolution: disputeResolution,
-        splitWorkerAmount: disputeResolution === 'SPLIT' && splitWorkerAmountCkb.trim()
+        desiredResolution: selectedDisputeResolution,
+        splitWorkerAmount: selectedDisputeResolution === 'SPLIT' && splitWorkerAmountCkb.trim()
           ? ckbToShannons(splitWorkerAmountCkb).toString()
           : undefined,
         artifacts: disputeArtifacts,
@@ -1878,6 +1967,11 @@ export default function AgreementDetailPage() {
     }
 
     if (action === 'APPROVE') {
+      if (hasBlockingSettlementProposal) {
+        setError(blockingSettlementProposalText || 'Resolve the open settlement proposal before approving a full payout.');
+        return;
+      }
+
       if (!humanApprovalConfirmed) {
         setError('Confirm the final human decision before approving payout.');
         return;
@@ -2449,6 +2543,20 @@ export default function AgreementDetailPage() {
     && splitConsensus?.proposedBy === agreement.clientAddress
     && !splitConsensus?.workerApprovedAt
     && !splitConsensus?.fullyApproved;
+  const disputeResolutionOptions: Array<{
+    value: 'PAYOUT' | 'REFUND' | 'SPLIT';
+    label: string;
+  }> = isWorker
+    ? [
+      { value: 'PAYOUT', label: 'Request Payout' },
+      { value: 'SPLIT', label: 'Request Split Settlement' },
+    ]
+    : isClient
+      ? [
+      { value: 'REFUND', label: 'Request Refund' },
+      { value: 'SPLIT', label: 'Request Split Settlement' },
+      ]
+      : [];
   const openerEvidenceEntry = currentOpenDispute
     ? (currentOpenDispute.evidenceEntries || []).find((entry: any) => entry.submittedBy === currentOpenDispute.openedBy)
     : null;
@@ -2531,6 +2639,17 @@ export default function AgreementDetailPage() {
     : isWorker
       ? 'Waiting for Client Proposal'
       : 'Propose Split Settlement';
+  const hasBlockingSettlementProposal =
+    Boolean(currentOpenDispute)
+    && (
+      (refundConsensus?.proposedBy && !refundConsensus.fullyApproved)
+      || (splitConsensus?.proposedBy && !splitConsensus.fullyApproved)
+    );
+  const blockingSettlementProposalText = hasBlockingSettlementProposal
+    ? splitConsensus?.proposedBy && !splitConsensus.fullyApproved
+      ? 'A split settlement proposal is open. Use the split settlement controls below instead of approving a full payout.'
+      : 'A mutual refund proposal is open. Resolve that proposal before approving a full payout.'
+    : null;
   const settlementHistory = agreement.settlements || [];
   const escrowAddress = agreement.escrowAddress || publicConfig?.treasuryAddress || null;
   const canReconcileSettlement =
@@ -3366,14 +3485,8 @@ export default function AgreementDetailPage() {
 
                 <div className={`mt-4 grid gap-4 border-t border-agent-border pt-4 ${agreement.payoutNetwork === 'FIBER' && agreement.workerFiberPubkey ? 'grid-cols-1 md:grid-cols-4' : 'grid-cols-3'
                   }`}>
-                  <div>
-                    <span className="mb-1 block text-[10px] uppercase text-gray-500">Client</span>
-                    <span className="text-xs font-mono text-gray-300">{agreement.clientAddress.slice(0, 20)}...</span>
-                  </div>
-                  <div>
-                    <span className="mb-1 block text-[10px] uppercase text-gray-500">Worker</span>
-                    <span className="text-xs font-mono text-gray-300">{agreement.workerAddress.slice(0, 20)}...</span>
-                  </div>
+                  <CopyableValue label="Client" value={agreement.clientAddress} compact />
+                  <CopyableValue label="Worker" value={agreement.workerAddress} compact />
                   <div>
                     <span className="mb-1 block text-[10px] uppercase text-gray-500">Refund Rule</span>
                     <span className="text-xs text-gray-300">
@@ -3381,20 +3494,12 @@ export default function AgreementDetailPage() {
                     </span>
                   </div>
                   {agreement.payoutNetwork === 'FIBER' && agreement.workerFiberPubkey && (
-                    <div>
-                      <span className="mb-1 block text-[10px] uppercase text-gray-500">Worker Fiber Key</span>
-                      <span className="break-all text-xs font-mono text-gray-300">{agreement.workerFiberPubkey}</span>
-                    </div>
+                    <CopyableValue label="Worker Fiber Key" value={agreement.workerFiberPubkey} compact />
                   )}
                 </div>
 
                 <div className="mt-4 grid grid-cols-1 gap-4 border-t border-agent-border pt-4 md:grid-cols-2">
-                  <div>
-                    <span className="mb-1 block text-[10px] uppercase text-gray-500">Funding Address</span>
-                    <span className="break-all text-xs font-mono text-gray-300">
-                      {escrowAddress || 'Awaiting configuration'}
-                    </span>
-                  </div>
+                  <CopyableValue label="Funding Address" value={escrowAddress} emptyLabel="Awaiting configuration" />
                   <div>
                     <span className="mb-1 block text-[10px] uppercase text-gray-500">Agreement Digest</span>
                     <span className="break-all text-xs font-mono text-gray-300">
@@ -4549,17 +4654,25 @@ export default function AgreementDetailPage() {
                 <p className="text-sm text-gray-400 mb-4">
                   {canResubmitProofAfterInfoRequest
                     ? 'A reviewer requested more information. Submit an updated proof bundle so PactAgent can re-check it against the milestone and the outstanding questions.'
-                    : 'Submit a proof bundle with notes, links, files, or images for the active milestone before the agent reviews it.'}
+                    : isImportedGrant
+                      ? 'Submit your own short agreement summary and detailed delivery notes for this imported grant milestone. Use the agreement scope as context, but write the proof in your own words.'
+                      : 'Submit your own short summary and detailed delivery notes for this milestone. PactAgent checks for useful context, not exact agreement wording.'}
                 </p>
+                <label className="mb-1 block text-xs font-medium text-gray-300">
+                  Short summary
+                </label>
                 <textarea
                   className="w-full bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-agent-accent mb-3 h-20 resize-none"
-                  placeholder="Short proof summary..."
+                  placeholder={isImportedGrant ? 'Summarize what you delivered for this grant milestone...' : 'Summarize what you delivered...'}
                   value={proofSummary}
                   onChange={(e) => setProofSummary(e.target.value)}
                 />
+                <label className="mb-1 block text-xs font-medium text-gray-300">
+                  Detailed proof notes
+                </label>
                 <textarea
                   className="w-full bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-agent-accent mb-3 h-24 resize-none"
-                  placeholder="Detailed notes, delivery explanation, or acceptance context..."
+                  placeholder={isImportedGrant ? 'Describe the work, links, evidence, and how it matches the grant milestone...' : 'Describe the work, evidence, links, or review context in your own words...'}
                   value={proofContent}
                   onChange={(e) => setProofContent(e.target.value)}
                 />
@@ -4583,7 +4696,7 @@ export default function AgreementDetailPage() {
                   <input
                     type="text"
                     className="flex-1 bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-agent-accent"
-                    placeholder="0x transaction hash..."
+                    placeholder="0x transaction hash (optional)..."
                     value={proofTxHashDraft}
                     onChange={(e) => setProofTxHashDraft(e.target.value)}
                   />
@@ -4596,7 +4709,7 @@ export default function AgreementDetailPage() {
                   </button>
                 </div>
                 <p className="mb-3 text-xs text-gray-500">
-                  Add the on-chain transaction hash here when the milestone includes deploys, transfers, or payout-related proof.
+                  Transaction hashes are optional. Add one only when it helps the reviewer verify an on-chain deploy, transfer, or payout-related step.
                 </p>
                 <input
                   type="file"
@@ -4616,11 +4729,17 @@ export default function AgreementDetailPage() {
                   <div className="mt-4 rounded-xl border border-agent-border bg-agent-bg/60 p-4">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-sm font-semibold text-white">
-                        {submitAreaProofCheck.lifecycleStatus === 'NEEDS_MORE_INFO' ? 'Outstanding checker warnings' : 'Latest checker result'}
+                        {submitAreaProofCheck.lifecycleStatus === 'CHECKING'
+                          ? 'PactAgent is checking'
+                          : submitAreaProofCheck.lifecycleStatus === 'NEEDS_MORE_INFO'
+                            ? 'Outstanding checker warnings'
+                            : 'Latest checker result'}
                       </span>
                       <span
                         className={`rounded-full px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${submitAreaProofCheck.status === 'READY_FOR_HUMAN_REVIEW'
                           ? 'bg-emerald-950/40 text-emerald-300'
+                          : submitAreaProofCheck.lifecycleStatus === 'CHECKING'
+                            ? 'bg-sky-950/40 text-sky-300'
                           : submitAreaProofCheck.lifecycleStatus === 'NEEDS_MORE_INFO'
                             ? 'bg-orange-950/40 text-orange-300'
                             : 'bg-amber-950/40 text-amber-300'
@@ -4628,9 +4747,11 @@ export default function AgreementDetailPage() {
                       >
                         {submitAreaProofCheck.status === 'READY_FOR_HUMAN_REVIEW'
                           ? 'Ready'
+                          : submitAreaProofCheck.lifecycleStatus === 'CHECKING'
+                            ? 'Checking'
                           : submitAreaProofCheck.lifecycleStatus === 'NEEDS_MORE_INFO'
                             ? 'Waiting On Info'
-                            : 'Issues Found'}
+                            : 'Review Notes'}
                       </span>
                     </div>
                     <p className="mt-2 text-sm text-gray-300">{submitAreaProofCheck.summary}</p>
@@ -4821,11 +4942,17 @@ export default function AgreementDetailPage() {
                   currentOpenInfoRequestsCount={currentOpenInfoRequests.length}
                   waitingForReview={currentMilestone.status === 'PROOF_SUBMITTED'}
                 />
+                {blockingSettlementProposalText ? (
+                  <div className="mb-4 rounded-xl border border-cyan-800/40 bg-cyan-950/20 px-4 py-3 text-sm text-cyan-100">
+                    {blockingSettlementProposalText}
+                  </div>
+                ) : null}
                 <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
                   <button
                     onClick={() => handleReviewAction('APPROVE')}
                     disabled={
                       !!actionLoading
+                      || hasBlockingSettlementProposal
                       || !humanApprovalConfirmed
                       || !reviewerDecisionNote.trim()
                       || !acknowledgeProofCheck
@@ -4880,7 +5007,7 @@ export default function AgreementDetailPage() {
               </div>
             ) : null}
 
-            {['FUNDED', 'PROOF_SUBMITTED', 'UNDER_REVIEW'].includes(agreement.status) && currentMilestone && !isImportedGrant && (
+            {['FUNDED', 'PROOF_SUBMITTED', 'UNDER_REVIEW'].includes(agreement.status) && currentMilestone && (isClient || isWorker) && !isImportedGrant && (
               <div className="bg-agent-card border border-red-800/30 rounded-xl p-6">
                 <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
                   <ExclamationTriangleIcon className="w-5 h-5 text-orange-400" />
@@ -4904,12 +5031,16 @@ export default function AgreementDetailPage() {
                 <div className="mb-3 grid gap-3 md:grid-cols-2">
                   <select
                     className="bg-agent-bg border border-agent-border rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-red-500"
-                    value={disputeResolution}
+                    value={disputeResolutionOptions.some((option) => option.value === disputeResolution)
+                      ? disputeResolution
+                      : disputeResolutionOptions[0].value}
                     onChange={(e) => setDisputeResolution(e.target.value as 'PAYOUT' | 'REFUND' | 'SPLIT')}
                   >
-                    <option value="REFUND">Request Refund</option>
-                    <option value="PAYOUT">Request Payout</option>
-                    <option value="SPLIT">Request Split Settlement</option>
+                    {disputeResolutionOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
                   </select>
                   {disputeResolution === 'SPLIT' ? (
                     <div>
@@ -5405,6 +5536,17 @@ export default function AgreementDetailPage() {
           <div className="lg:col-span-1">
             <div className="space-y-5 lg:sticky lg:top-24">
               <div className="ui-panel p-5">
+                <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Jump Links</div>
+                <div className="mt-4 flex flex-col gap-2 text-sm">
+                  <a href="#overview" className="app-nav-link">Overview</a>
+                  <a href="#milestones" className="app-nav-link">Milestones</a>
+                  <a href="#review" className="app-nav-link">Proof & Review</a>
+                  <a href="#funding" className="app-nav-link">Funding & Settlement</a>
+                  <a href="#timeline" className="app-nav-link">Timeline</a>
+                </div>
+              </div>
+
+              <div className="ui-panel p-5">
                 <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Case Rail</div>
                 <h2 className="mt-2 text-xl font-semibold text-white">Next move</h2>
                 <p className="mt-2 text-sm text-gray-400">{nextActionSummary}</p>
@@ -5430,17 +5572,6 @@ export default function AgreementDetailPage() {
                       <div className="mt-2 text-sm font-mono text-white">{shannonsToCKB(agreement.amount)} CKB</div>
                     </div>
                   </div>
-                </div>
-              </div>
-
-              <div className="ui-panel p-5">
-                <div className="text-[11px] uppercase tracking-[0.16em] text-agent-accent">Jump Links</div>
-                <div className="mt-4 flex flex-col gap-2 text-sm">
-                  <a href="#overview" className="app-nav-link">Overview</a>
-                  <a href="#milestones" className="app-nav-link">Milestones</a>
-                  <a href="#review" className="app-nav-link">Proof & Review</a>
-                  <a href="#funding" className="app-nav-link">Funding & Settlement</a>
-                  <a href="#timeline" className="app-nav-link">Timeline</a>
                 </div>
               </div>
 

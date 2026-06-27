@@ -799,6 +799,23 @@ router.post('/:id/onchain-resolution', actionRateLimit, async (req: Request, res
       return res.status(409).json({ success: false, error: 'Imported grant milestones do not support worker refund settlement.' });
     }
 
+    if (direction === 'PAYOUT') {
+      const currentMilestone = agreement.milestones?.find((item: any) => item.id === milestoneId) || null;
+      const openDispute = currentMilestone?.disputes?.find((item: any) => !item.resolvedAt) || null;
+      const blockingSettlementProposal = agreementService.getBlockingDisputeSettlementProposal({
+        dispute: openDispute,
+      });
+
+      if (blockingSettlementProposal) {
+        return res.status(409).json({
+          success: false,
+          error: blockingSettlementProposal.type === 'SPLIT'
+            ? 'A split settlement proposal is still open. The worker must accept it before funds move, or the dispute must be resolved before a full payout can be approved.'
+            : 'A mutual refund proposal is still open. Resolve the refund proposal before approving a full payout.',
+        });
+      }
+    }
+
     const updated = await agreementService.recordOnchainResolutionIntent({
       agreementId: req.params.id,
       milestoneId,
@@ -947,6 +964,31 @@ router.post('/:id/open-dispute', actionRateLimit, async (req: Request, res: Resp
       return res.status(409).json({
         success: false,
         error: 'Imported grant milestones do not use disputes. Use reviewer follow-up messages instead.',
+      });
+    }
+
+    const allowedResolutionChoices = agreementService.getAllowedDisputeResolutionChoices({
+      actorAddress: data.openedBy,
+      clientAddress: result.agreement.clientAddress,
+      workerAddress: result.agreement.workerAddress,
+    });
+    if (!allowedResolutionChoices.length) {
+      return res.status(403).json({
+        success: false,
+        error: 'Only the client or worker can open a milestone dispute.',
+      });
+    }
+
+    if (
+      data.desiredResolution
+      && !(allowedResolutionChoices as readonly string[]).includes(data.desiredResolution)
+    ) {
+      return res.status(400).json({
+        success: false,
+        error:
+          data.desiredResolution === 'PAYOUT'
+            ? 'Clients should approve payout from the review panel, not request payout inside a dispute.'
+            : 'This dispute resolution option is not available for your agreement role.',
       });
     }
 
@@ -1155,6 +1197,9 @@ router.post('/:id/review-action', actionRateLimit, async (req: Request, res: Res
       );
       const openDispute = currentMilestone?.disputes?.find((item: any) => !item.resolvedAt) || null;
       const milestoneReviewable = currentMilestone && ['PROOF_SUBMITTED', 'UNDER_REVIEW', 'DISPUTED'].includes(currentMilestone.status);
+      const blockingSettlementProposal = agreementService.getBlockingDisputeSettlementProposal({
+        dispute: openDispute,
+      });
 
       if (!confirmation?.confirmed || !confirmation.summary.trim()) {
         return res.status(400).json({
@@ -1167,6 +1212,15 @@ router.post('/:id/review-action', actionRateLimit, async (req: Request, res: Res
         return res.status(409).json({
           success: false,
           error: 'Current milestone is not ready for payout approval.',
+        });
+      }
+
+      if (blockingSettlementProposal) {
+        return res.status(409).json({
+          success: false,
+          error: blockingSettlementProposal.type === 'SPLIT'
+            ? 'A split settlement proposal is still open. The worker must accept it before funds move, or the dispute must be resolved before a full payout can be approved.'
+            : 'A mutual refund proposal is still open. Resolve the refund proposal before approving a full payout.',
         });
       }
 
