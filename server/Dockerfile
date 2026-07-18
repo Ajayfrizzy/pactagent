@@ -36,5 +36,8 @@ CMD ["node", "dist/index.js"]
 FROM build AS migrate
 ENV NODE_ENV=production
 RUN groupadd --system --gid 1001 pactagent && useradd --system --uid 1001 --gid pactagent pactagent
+RUN corepack disable \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
+    && rm -rf node_modules/@cyclonedx node_modules/.bin/cyclonedx-npm package.json package-lock.json
 USER pactagent
-CMD ["npx", "prisma", "migrate", "deploy"]
+CMD ["node", "node_modules/prisma/build/index.js", "migrate", "deploy"]
