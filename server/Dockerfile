@@ -8,7 +8,9 @@ COPY server/prisma ./prisma
 COPY server/prisma.config.ts server/tsconfig.json ./
 COPY server/src ./src
 COPY shared ../shared
-RUN npx prisma generate && npm run build
+RUN DATABASE_URL=postgresql://localhost:5432/pactagent \
+  DIRECT_URL=postgresql://localhost:5432/pactagent \
+  npx prisma generate && npm run build
 
 FROM node:20.19.5-bookworm-slim@sha256:9e70124bd00f47dd023e349cd587132ae61892acc0e47ed641416c3e18f401c3 AS production-deps
 WORKDIR /app/server
