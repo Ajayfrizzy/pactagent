@@ -44,7 +44,7 @@ checksum = "1bc221d4b9d6d39215b1d62be855861b8b0c8d668ca29874903b0bf5d0b4d9fa"
 dependencies = [
  "cfg-if",
  "ckb-hash",
- "molecule",
+ "molecule 0.8.0",
 ]
 
 [[package]]
@@ -91,11 +91,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "molecule"
+version = "0.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "314eebe1fb025f681c1d6a62fdacbe831027177c1046503a8d73d8027fe19e16"
+dependencies = [
+ "bytes",
+ "cfg-if",
+]
+
+[[package]]
 name = "pact-escrow-lock"
 version = "0.1.0"
 dependencies = [
  "ckb-std",
- "molecule",
+ "molecule 0.9.2",
 ]
 
 [[package]]
