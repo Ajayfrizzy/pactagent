@@ -174,7 +174,6 @@ export async function createAgreement(data: {
   description: string;
   clientAddress: string;
   workerAddress: string;
-  workerFiberPubkey?: string;
   deadlineAt: string;
   disputeWindowSecs: number;
   proofType: string;
@@ -210,7 +209,6 @@ export async function importBountyAgreement(data: {
     description: string;
     clientAddress: string;
     workerAddress: string;
-    workerFiberPubkey?: string;
     deadlineAt: string;
     disputeWindowSecs: number;
     proofType: string;
@@ -281,7 +279,6 @@ export async function updateDraftAgreement(id: string, data: {
   title: string;
   description: string;
   workerAddress: string;
-  workerFiberPubkey?: string;
   deadlineAt: string;
   disputeWindowSecs: number;
   proofType: string;
@@ -549,7 +546,6 @@ export async function proposeAgreementAmendment(id: string, data: {
   disputeWindowSecs?: number;
   releaseMode?: string;
   payoutNetwork?: string;
-  workerFiberPubkey?: string;
   milestones?: Array<{
     id: string;
     title?: string;
@@ -610,7 +606,6 @@ export async function updateMyProfile(data: {
   avatarUrl?: string;
   skills?: string[];
   links?: Array<{ label: string; url: string }>;
-  fiberPubkey?: string;
   visibility?: 'PUBLIC' | 'PRIVATE';
 }) {
   return request<any>('/me/profile', {
@@ -655,7 +650,6 @@ export async function createInvite(data: {
     releaseMode: string;
     payoutNetwork: string;
     escrowModel?: string;
-    workerFiberPubkey?: string;
     milestones: Array<{
       title: string;
       description: string;
@@ -712,61 +706,6 @@ export async function replayAgreementJob(id: string, jobId: string) {
   });
 }
 
-export async function fetchFiberAdminHealth() {
-  return request<any>('/fiber/health');
-}
-
-export async function fetchFiberAdminInfo() {
-  return request<any>('/fiber/info');
-}
-
-export async function fetchFiberAdminChannels() {
-  return request<any>('/fiber/channels');
-}
-
-export async function fetchFiberDiagnostics() {
-  return request<{
-    status: string;
-    summary: string;
-    interpretation: string;
-    evidenceReasons: string[];
-    config: {
-      fiberEnabled: boolean;
-      fiberNodeUrl: string;
-      hasApiKey: boolean;
-    };
-    live: {
-      healthy: boolean;
-      nodeInfo: any | null;
-      nodePublicKey: string | null;
-      peerCount: number;
-      openChannelCount: number;
-      pendingChannelCount: number;
-      channels: Array<{
-        channelId: string;
-        peerId: string;
-        stateName: string;
-        localBalance: string;
-        remoteBalance: string;
-        outboundReady: boolean;
-      }>;
-      usableOutboundChannelCount: number;
-    };
-    history: {
-      agreementsConfiguredForFiber: number;
-      settlementsOnFiber: number;
-      confirmedFiberSettlements: number;
-      attemptedFiberPayoutLogs: number;
-      confirmedFiberPayoutLogs: number;
-      fallbackReleaseLogs: number;
-      lastConfirmedFiberSettlementAt: string | null;
-      lastFallbackAt: string | null;
-      likelyNeverPaymentCapable: boolean;
-      evidence: string[];
-    };
-  }>('/fiber-diagnostics');
-}
-
 export async function fetchConfig() {
   return request<any>('/config');
 }
@@ -777,4 +716,418 @@ export async function fetchConfigFresh() {
 
 export async function fetchHealth() {
   return request<any>('/health');
+}
+
+const V1_BASE = process.env.NEXT_PUBLIC_V1_API_BASE_URL || '/v1';
+
+export const INFRASTRUCTURE_EVENT_TYPES = [
+  'agreement.created',
+  'agreement.accepted',
+  'agreement.cancelled',
+  'agreement.funding_required',
+  'agreement.funded',
+  'agreement.in_progress',
+  'agreement.released',
+  'agreement.refunded',
+  'milestone.created',
+  'milestone.funded',
+  'milestone.proof_submitted',
+  'milestone.approved',
+  'milestone.released',
+  'escrow.created',
+  'escrow.funding_detected',
+  'escrow.funded',
+  'escrow.release_pending',
+  'escrow.released',
+  'escrow.refund_pending',
+  'escrow.refunded',
+  'escrow.failed',
+  'proof.submitted',
+  'proof.under_review',
+  'proof.approved',
+  'proof.rejected',
+  'proof.needs_changes',
+  'dispute.opened',
+  'dispute.resolved',
+  'webhook.delivery_failed',
+] as const;
+
+export const INFRASTRUCTURE_API_KEY_SCOPES = [
+  'apps:read',
+  'agreements:create',
+  'agreements:read',
+  'agreements:update',
+  'agreements:cancel',
+  'milestones:create',
+  'milestones:read',
+  'escrows:create',
+  'escrows:read',
+  'escrows:fund',
+  'escrows:release',
+  'escrows:refund',
+  'proofs:create',
+  'proofs:read',
+  'proofs:review',
+  'disputes:create',
+  'disputes:read',
+  'disputes:resolve',
+  'events:read',
+  'webhooks:manage',
+  'webhooks:read',
+  'admin:read',
+  'admin:write',
+] as const;
+
+type V1Envelope<T> = {
+  data?: T;
+  pagination?: {
+    limit: number;
+    cursor: string | null;
+  };
+  requestId?: string;
+  error?: {
+    type: string;
+    code: string;
+    message: string;
+    requestId?: string;
+  };
+};
+
+type V1RequestOptions = RequestInit & {
+  apiKey?: string | null;
+  authToken?: string | null;
+  idempotencyKey?: string;
+};
+
+function formatV1Error(path: string, status: number, body: string, parsed: V1Envelope<unknown> | null) {
+  if (parsed?.error?.message) {
+    const suffix = parsed.error.code ? ` (${parsed.error.code})` : '';
+    return `${parsed.error.message}${suffix}`;
+  }
+
+  return formatApiError(path, status, body);
+}
+
+async function v1Request<T>(path: string, options: V1RequestOptions = {}): Promise<T> {
+  const apiKey = Object.prototype.hasOwnProperty.call(options, 'apiKey')
+    ? options.apiKey
+    : useStore.getState().infrastructureApiKey;
+  const authToken = Object.prototype.hasOwnProperty.call(options, 'authToken')
+    ? options.authToken
+    : useStore.getState().authToken;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...((options.headers as Record<string, string> | undefined) || {}),
+  };
+
+  if (apiKey) {
+    headers['x-api-key'] = apiKey;
+  } else if (authToken) {
+    headers.Authorization = `Bearer ${authToken}`;
+  }
+
+  if (options.idempotencyKey) {
+    headers['Idempotency-Key'] = options.idempotencyKey;
+  }
+
+  const res = await fetch(`${V1_BASE}${path}`, {
+    ...options,
+    headers,
+  });
+  const rawBody = await res.text();
+  let parsed: V1Envelope<T> | null = null;
+
+  if (rawBody) {
+    try {
+      parsed = JSON.parse(rawBody) as V1Envelope<T>;
+    } catch {
+      throw new Error(formatApiError(path, res.status, rawBody));
+    }
+  }
+
+  if (!res.ok || parsed?.error) {
+    throw new Error(formatV1Error(path, res.status, rawBody, parsed));
+  }
+
+  return parsed?.data as T;
+}
+
+async function v1ListRequest<T>(path: string, options: V1RequestOptions = {}) {
+  const apiKey = Object.prototype.hasOwnProperty.call(options, 'apiKey')
+    ? options.apiKey
+    : useStore.getState().infrastructureApiKey;
+  const authToken = Object.prototype.hasOwnProperty.call(options, 'authToken')
+    ? options.authToken
+    : useStore.getState().authToken;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...((options.headers as Record<string, string> | undefined) || {}),
+  };
+
+  if (apiKey) {
+    headers['x-api-key'] = apiKey;
+  } else if (authToken) {
+    headers.Authorization = `Bearer ${authToken}`;
+  }
+
+  const res = await fetch(`${V1_BASE}${path}`, {
+    ...options,
+    headers,
+  });
+  const rawBody = await res.text();
+  let parsed: V1Envelope<T[]> | null = null;
+
+  if (rawBody) {
+    try {
+      parsed = JSON.parse(rawBody) as V1Envelope<T[]>;
+    } catch {
+      throw new Error(formatApiError(path, res.status, rawBody));
+    }
+  }
+
+  if (!res.ok || parsed?.error) {
+    throw new Error(formatV1Error(path, res.status, rawBody, parsed));
+  }
+
+  return {
+    data: parsed?.data || [],
+    pagination: parsed?.pagination || { limit: 20, cursor: null },
+    requestId: parsed?.requestId || null,
+  };
+}
+
+function withQuery(path: string, params: Record<string, string | number | null | undefined>) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      query.set(key, String(value));
+    }
+  });
+  const queryString = query.toString();
+  return queryString ? `${path}?${queryString}` : path;
+}
+
+export function createIdempotencyKey(prefix: string) {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+}
+
+export function fetchInfrastructureHealth() {
+  return fetch('/health').then(async (res) => {
+    const body = await res.json().catch(() => null);
+    if (!res.ok) {
+      throw new Error('Health check failed');
+    }
+    return body;
+  });
+}
+
+export function fetchInfrastructureReady() {
+  return fetch('/ready').then(async (res) => {
+    const body = await res.json().catch(() => null);
+    if (!res.ok) {
+      throw new Error('Readiness check failed');
+    }
+    return body;
+  });
+}
+
+export function fetchInfrastructureApps(limit = 100) {
+  return v1ListRequest<any>(withQuery('/apps', { limit }), { apiKey: null });
+}
+
+export function createInfrastructureApp(data: {
+  name: string;
+  slug: string;
+  environment: 'sandbox' | 'production';
+  defaultCurrency: string;
+  defaultNetwork: string;
+}) {
+  return v1Request<any>('/apps', {
+    apiKey: null,
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateInfrastructureApp(id: string, data: Record<string, unknown>) {
+  return v1Request<any>(`/apps/${id}`, {
+    apiKey: null,
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export function disableInfrastructureApp(id: string) {
+  return v1Request<any>(`/apps/${id}/disable`, { apiKey: null, method: 'POST' });
+}
+
+export function fetchInfrastructureCurrentApp(apiKey?: string | null) {
+  return v1Request<any>('/apps/current', { apiKey });
+}
+
+export function fetchInfrastructureApiKeys(appId?: string | null, limit = 100) {
+  return v1ListRequest<any>(withQuery('/api-keys', { appId, limit }), { apiKey: null });
+}
+
+export function createInfrastructureApiKey(data: {
+  appId: string;
+  name: string;
+  scopes: string[];
+}) {
+  return v1Request<any>('/api-keys', {
+    apiKey: null,
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function revokeInfrastructureApiKey(id: string) {
+  return v1Request<any>(`/api-keys/${id}`, { apiKey: null, method: 'DELETE' });
+}
+
+export function fetchInfrastructureAgreements(limit = 25) {
+  return v1ListRequest<any>(withQuery('/agreements', { limit }));
+}
+
+export function createInfrastructureAgreement(data: Record<string, unknown>, idempotencyKey: string) {
+  return v1Request<any>('/agreements', {
+    method: 'POST',
+    idempotencyKey,
+    body: JSON.stringify(data),
+  });
+}
+
+export function acceptInfrastructureAgreement(id: string) {
+  return v1Request<any>(`/agreements/${id}/accept`, { method: 'POST' });
+}
+
+export function moveInfrastructureAgreementToFundingRequired(id: string) {
+  return v1Request<any>(`/agreements/${id}/funding-required`, { method: 'POST' });
+}
+
+export function fetchInfrastructureMilestones(limit = 50) {
+  return v1ListRequest<any>(withQuery('/milestones', { limit }));
+}
+
+export function createInfrastructureMilestone(agreementId: string, data: Record<string, unknown>) {
+  return v1Request<any>(`/agreements/${agreementId}/milestones`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function fetchInfrastructureEscrows(limit = 50) {
+  return v1ListRequest<any>(withQuery('/escrows', { limit }));
+}
+
+export function createInfrastructureEscrow(data: Record<string, unknown>, idempotencyKey: string) {
+  return v1Request<any>('/escrows', {
+    method: 'POST',
+    idempotencyKey,
+    body: JSON.stringify(data),
+  });
+}
+
+export function markInfrastructureEscrowFunded(id: string, txHash?: string) {
+  return v1Request<any>(`/escrows/${id}/mark-funded`, {
+    method: 'POST',
+    body: JSON.stringify(txHash ? { txHash } : {}),
+  });
+}
+
+export function releaseInfrastructureEscrow(id: string, idempotencyKey: string) {
+  return v1Request<any>(`/escrows/${id}/release`, {
+    method: 'POST',
+    idempotencyKey,
+    body: JSON.stringify({}),
+  });
+}
+
+export function refundInfrastructureEscrow(id: string, idempotencyKey: string) {
+  return v1Request<any>(`/escrows/${id}/refund`, {
+    method: 'POST',
+    idempotencyKey,
+    body: JSON.stringify({}),
+  });
+}
+
+export function fetchInfrastructureProofs(limit = 50) {
+  return v1ListRequest<any>(withQuery('/proofs', { limit }));
+}
+
+export function createInfrastructureProof(data: Record<string, unknown>, idempotencyKey: string) {
+  return v1Request<any>('/proofs', {
+    method: 'POST',
+    idempotencyKey,
+    body: JSON.stringify(data),
+  });
+}
+
+export function reviewInfrastructureProof(id: string, data: Record<string, unknown>) {
+  return v1Request<any>(`/proofs/${id}/review`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function fetchInfrastructureReviews(limit = 50) {
+  return v1ListRequest<any>(withQuery('/reviews', { limit }));
+}
+
+export function fetchInfrastructureDisputes(limit = 50) {
+  return v1ListRequest<any>(withQuery('/disputes', { limit }));
+}
+
+export function fetchInfrastructureEvents(limit = 50) {
+  return v1ListRequest<any>(withQuery('/events', { limit }));
+}
+
+export function fetchInfrastructureAuditLogs(limit = 50) {
+  return v1ListRequest<any>(withQuery('/audit-logs', { limit }));
+}
+
+export function fetchInfrastructureTransactions(limit = 50) {
+  return v1ListRequest<any>(withQuery('/transactions', { limit }));
+}
+
+export function fetchInfrastructureWebhookEndpoints(limit = 50) {
+  return v1ListRequest<any>(withQuery('/webhook-endpoints', { limit }));
+}
+
+export function createInfrastructureWebhookEndpoint(data: {
+  url: string;
+  description?: string;
+  subscribedEvents: string[];
+}) {
+  return v1Request<any>('/webhook-endpoints', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateInfrastructureWebhookEndpoint(id: string, data: Record<string, unknown>) {
+  return v1Request<any>(`/webhook-endpoints/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteInfrastructureWebhookEndpoint(id: string) {
+  return v1Request<any>(`/webhook-endpoints/${id}`, { method: 'DELETE' });
+}
+
+export function fetchInfrastructureWebhookDeliveries(limit = 50, endpointId?: string | null) {
+  return v1ListRequest<any>(withQuery('/webhook-deliveries', { limit, endpointId }));
+}
+
+export function retryInfrastructureWebhookDelivery(id: string) {
+  return v1Request<any>(`/webhook-deliveries/${id}/retry`, { method: 'POST' });
+}
+
+export function fetchInfrastructureAdminHealth() {
+  return v1Request<any>('/admin/system-health', { apiKey: null });
+}
+
+export function fetchInfrastructureAdminList(kind: 'apps' | 'agreements' | 'escrows' | 'events' | 'webhook-deliveries' | 'audit-logs', limit = 25) {
+  return v1ListRequest<any>(withQuery(`/admin/${kind}`, { limit }), { apiKey: null });
 }

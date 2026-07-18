@@ -1,8 +1,6 @@
-import { createHash, createHmac, randomBytes, randomUUID } from 'crypto';
-import { config } from '../config';
+import { createHash, randomUUID } from 'crypto';
 import { prisma } from '../db';
 import { normalizeWalletAddress } from './authService';
-import { createLog } from './logService';
 import { enqueueJob } from './jobQueueService';
 
 type WebhookEventType =
@@ -36,20 +34,8 @@ function parseJson<T>(value: string | null | undefined, fallback: T): T {
   }
 }
 
-function createSigningSecret() {
-  return randomBytes(24).toString('hex');
-}
-
 function buildPayloadHash(payloadJson: string) {
   return createHash('sha256').update(payloadJson).digest('hex');
-}
-
-function buildSignature(secret: string, payloadJson: string) {
-  return createHmac('sha256', secret).update(payloadJson).digest('hex');
-}
-
-function getRetryDelayMs(attempts: number) {
-  return Math.min(60_000, Math.max(5_000, attempts * 5_000));
 }
 
 function serializeEndpoint(endpoint: {
@@ -70,7 +56,6 @@ function serializeEndpoint(endpoint: {
     label: endpoint.label,
     targetUrl: endpoint.targetUrl,
     eventTypes: parseJson<string[]>(endpoint.eventTypesJson, []),
-    signingSecret: endpoint.signingSecret,
     isActive: endpoint.isActive,
     createdAt: endpoint.createdAt.toISOString(),
     updatedAt: endpoint.updatedAt.toISOString(),
@@ -293,20 +278,9 @@ export async function enqueueWebhookEventsForLog(log: {
   metadataJson: string | null;
   createdAt: Date;
 }) {
-  if (!log.agreementId) {
-    return;
-  }
-
-  await queueWebhookEventsForAgreement({
-    agreementId: log.agreementId,
-    source: {
-      kind: 'log',
-      eventType: log.eventType,
-      message: log.message,
-      metadataJson: log.metadataJson,
-      createdAt: log.createdAt,
-    },
-  });
+  // Legacy wallet webhooks are disabled. App-scoped /v1 webhooks are published
+  // through the infrastructure event service and worker.
+  void log;
 }
 
 export async function enqueueWebhookEventsForAuditLog(audit: {
@@ -316,20 +290,9 @@ export async function enqueueWebhookEventsForAuditLog(audit: {
   metadataJson: string | null;
   createdAt: Date;
 }) {
-  if (!audit.agreementId) {
-    return;
-  }
-
-  await queueWebhookEventsForAgreement({
-    agreementId: audit.agreementId,
-    source: {
-      kind: 'audit',
-      action: audit.action,
-      actorAddress: audit.actorAddress,
-      metadataJson: audit.metadataJson,
-      createdAt: audit.createdAt,
-    },
-  });
+  // Legacy wallet webhooks are disabled. App-scoped /v1 webhooks are published
+  // through the infrastructure event service and worker.
+  void audit;
 }
 
 export async function createWebhookEndpoint(params: {
@@ -338,32 +301,8 @@ export async function createWebhookEndpoint(params: {
   targetUrl: string;
   eventTypes: WebhookEventType[];
 }) {
-  const ownerAddress = normalizeWalletAddress(params.ownerAddress);
-  let parsedUrl: URL;
-
-  try {
-    parsedUrl = new URL(params.targetUrl);
-  } catch {
-    throw new Error('Webhook URL must be valid.');
-  }
-
-  if (!['https:', 'http:'].includes(parsedUrl.protocol)) {
-    throw new Error('Webhook URL must use http or https.');
-  }
-
-  const endpoint = await prisma.webhookEndpoint.create({
-    data: {
-      id: randomUUID(),
-      ownerAddress,
-      label: params.label?.trim() || null,
-      targetUrl: parsedUrl.toString(),
-      eventTypesJson: JSON.stringify(params.eventTypes),
-      signingSecret: createSigningSecret(),
-      isActive: true,
-    },
-  });
-
-  return serializeEndpoint(endpoint);
+  void params;
+  throw new Error('Legacy webhooks are disabled. Use /v1/webhook-endpoints.');
 }
 
 export async function listWebhookEndpoints(ownerAddress: string) {
@@ -407,82 +346,20 @@ export async function getWebhookEndpointDeliveries(ownerAddress: string, endpoin
 export async function deliverWebhookDelivery(deliveryId: string) {
   const delivery = await prisma.webhookDelivery.findUnique({
     where: { id: deliveryId },
-    include: {
-      endpoint: true,
-    },
   });
 
   if (!delivery) {
     throw new Error(`Webhook delivery ${deliveryId} not found.`);
   }
 
-  if (!delivery.endpoint.isActive) {
-    return prisma.webhookDelivery.update({
-      where: { id: delivery.id },
-      data: {
-        status: 'FAILED',
-        lastError: 'Webhook endpoint is inactive.',
-        attempts: delivery.attempts + 1,
-      },
-    });
-  }
-
-  const timeoutSignal = AbortSignal.timeout(config.webhookTimeoutMs);
-  try {
-    const response = await fetch(delivery.endpoint.targetUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-PactAgent-Event': delivery.eventType,
-        'X-PactAgent-Delivery': delivery.id,
-        'X-PactAgent-Signature': buildSignature(delivery.endpoint.signingSecret, delivery.payloadJson),
-      },
-      body: delivery.payloadJson,
-      signal: timeoutSignal,
-    });
-
-    if (!response.ok) {
-      throw new Error(`Webhook responded with status ${response.status}`);
-    }
-
-    return prisma.webhookDelivery.update({
-      where: { id: delivery.id },
-      data: {
-        status: 'DELIVERED',
-        statusCode: response.status,
-        attempts: delivery.attempts + 1,
-        lastError: null,
-        nextRetryAt: null,
-        deliveredAt: new Date(),
-      },
-    });
-  } catch (error) {
-    const attempts = delivery.attempts + 1;
-    const shouldRetry = attempts < config.webhookMaxAttempts;
-    const nextRetryAt = shouldRetry ? new Date(Date.now() + getRetryDelayMs(attempts)) : null;
-    const updated = await prisma.webhookDelivery.update({
-      where: { id: delivery.id },
-      data: {
-        status: shouldRetry ? 'RETRY' : 'FAILED',
-        attempts,
-        statusCode: null,
-        lastError: error instanceof Error ? error.message : 'Webhook delivery failed',
-        nextRetryAt,
-      },
-    });
-
-    if (shouldRetry) {
-      await enqueueJob({
-        agreementId: delivery.agreementId,
-        kind: 'DELIVER_WEBHOOK',
-        payload: {
-          agreementId: delivery.agreementId ?? undefined,
-          deliveryId: delivery.id,
-        },
-        availableAt: nextRetryAt || new Date(),
-      });
-    }
-
-    return updated;
-  }
+  return prisma.webhookDelivery.update({
+    where: { id: delivery.id },
+    data: {
+      status: 'FAILED',
+      attempts: delivery.attempts + 1,
+      statusCode: null,
+      lastError: 'Legacy webhook deliveries are disabled. Use app-scoped /v1 webhook endpoints.',
+      nextRetryAt: null,
+    },
+  });
 }

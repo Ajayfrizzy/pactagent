@@ -1,0 +1,296 @@
+import type { Event, Prisma, PrismaClient } from '@prisma/client';
+import { createHash } from 'crypto';
+import { prisma } from '../../db';
+import type {
+  CreateWebhookEndpointInput,
+  UpdateWebhookEndpointInput,
+  WebhookDeliveryListQuery,
+  WebhookEndpointListQuery,
+} from './webhook.validation';
+import { getWebhookEncryptionKeyId } from './webhook.signing';
+
+type PrismaTransaction = Omit<
+  PrismaClient,
+  '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
+>;
+
+function getClient(tx?: Prisma.TransactionClient | PrismaTransaction) {
+  return tx ?? prisma;
+}
+
+function hashPayload(payload: string) {
+  return createHash('sha256').update(payload).digest('hex');
+}
+
+function parsePayload(payloadJson: string) {
+  try {
+    return JSON.parse(payloadJson) as unknown;
+  } catch {
+    return {};
+  }
+}
+
+function buildDeliveryPayload(event: Event) {
+  return JSON.stringify({
+    id: event.id,
+    appId: event.appId,
+    type: event.type,
+    agreementId: event.agreementId,
+    milestoneId: event.milestoneId,
+    escrowId: event.escrowId,
+    proofSubmissionId: event.proofSubmissionId,
+    disputeId: event.disputeId,
+    data: parsePayload(event.payloadJson),
+    createdAt: event.createdAt.toISOString(),
+  });
+}
+
+function deliveryStatusFilter(status?: string) {
+  switch (status) {
+    case 'delivered':
+      return 'DELIVERED';
+    case 'failed':
+      return 'FAILED';
+    case 'pending':
+      return { in: ['PENDING', 'RETRY'] };
+    default:
+      return undefined;
+  }
+}
+
+export function createWebhookEndpoint(params: {
+  appId: string;
+  input: CreateWebhookEndpointInput;
+  normalizedUrl: string;
+  secretHash: string;
+  secretCiphertext: string;
+}) {
+  return prisma.webhookEndpoint.create({
+    data: {
+      appId: params.appId,
+      ownerAddress: params.appId,
+      label: params.input.description ?? null,
+      targetUrl: params.normalizedUrl,
+      url: params.normalizedUrl,
+      description: params.input.description ?? null,
+      eventTypesJson: JSON.stringify(params.input.subscribedEvents),
+      subscribedEvents: params.input.subscribedEvents,
+      signingSecret: params.secretHash,
+      secretHash: params.secretHash,
+      secretCiphertext: params.secretCiphertext,
+      encryptionKeyVersion: getWebhookEncryptionKeyId(params.secretCiphertext),
+      status: 'active',
+      isActive: true,
+    },
+  });
+}
+
+export function listWebhookEndpointsForApp(appId: string, params: WebhookEndpointListQuery) {
+  return prisma.webhookEndpoint.findMany({
+    where: {
+      appId,
+      deletedAt: null,
+      ...(params.status ? { status: params.status } : {}),
+    },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: params.limit + 1,
+    ...(params.cursor ? { cursor: { id: params.cursor }, skip: 1 } : {}),
+  });
+}
+
+export function findWebhookEndpointForApp(
+  appId: string,
+  endpointId: string,
+  tx?: Prisma.TransactionClient | PrismaTransaction,
+) {
+  return getClient(tx).webhookEndpoint.findFirst({
+    where: {
+      id: endpointId,
+      appId,
+      deletedAt: null,
+    },
+  });
+}
+
+export function updateWebhookEndpointForApp(
+  appId: string,
+  endpointId: string,
+  input: UpdateWebhookEndpointInput & { normalizedUrl?: string },
+) {
+  const data: Prisma.WebhookEndpointUpdateInput = {};
+
+  if (input.normalizedUrl) {
+    data.url = input.normalizedUrl;
+    data.targetUrl = input.normalizedUrl;
+  }
+
+  if ('description' in input) {
+    data.description = input.description ?? null;
+    data.label = input.description ?? null;
+  }
+
+  if (input.subscribedEvents) {
+    data.subscribedEvents = input.subscribedEvents;
+    data.eventTypesJson = JSON.stringify(input.subscribedEvents);
+  }
+
+  if (input.status) {
+    data.status = input.status;
+    data.isActive = input.status === 'active';
+  }
+
+  return prisma.webhookEndpoint.update({
+    where: { id: endpointId },
+    data,
+  });
+}
+
+export function deleteWebhookEndpointForApp(appId: string, endpointId: string) {
+  return prisma.webhookEndpoint.update({
+    where: { id: endpointId },
+    data: {
+      status: 'disabled',
+      isActive: false,
+      deletedAt: new Date(),
+    },
+  });
+}
+
+export async function createWebhookDeliveriesForEvent(
+  event: Event,
+  tx?: Prisma.TransactionClient | PrismaTransaction,
+) {
+  const client = getClient(tx);
+  const endpoints = await client.webhookEndpoint.findMany({
+    where: {
+      appId: event.appId,
+      status: 'active',
+      isActive: true,
+      deletedAt: null,
+      subscribedEvents: { has: event.type },
+    },
+  });
+
+  const payloadJson = buildDeliveryPayload(event);
+  const payloadHash = hashPayload(payloadJson);
+  const deliveries = [];
+
+  for (const endpoint of endpoints) {
+    deliveries.push(await client.webhookDelivery.create({
+      data: {
+        appId: event.appId,
+        endpointId: endpoint.id,
+        eventId: event.id,
+        agreementId: event.agreementId,
+        eventType: event.type,
+        payloadJson,
+        payloadHash,
+        status: 'PENDING',
+        attempts: 0,
+      },
+    }));
+
+    await client.agentJob.create({
+      data: {
+        agreementId: event.agreementId,
+        kind: 'DELIVER_WEBHOOK',
+        status: 'QUEUED',
+        dedupeKey: `INFRA_WEBHOOK_DELIVERY:${deliveries[deliveries.length - 1].id}:0`,
+        payloadJson: JSON.stringify({
+          agreementId: event.agreementId ?? undefined,
+          deliveryId: deliveries[deliveries.length - 1].id,
+        }),
+        maxAttempts: 1,
+      },
+    });
+  }
+
+  return deliveries;
+}
+
+export function listWebhookDeliveriesForApp(appId: string, params: WebhookDeliveryListQuery) {
+  return prisma.webhookDelivery.findMany({
+    where: {
+      appId,
+      ...(params.endpointId ? { endpointId: params.endpointId } : {}),
+      ...(params.eventId ? { eventId: params.eventId } : {}),
+      ...(params.status ? { status: deliveryStatusFilter(params.status) } : {}),
+    },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: params.limit + 1,
+    ...(params.cursor ? { cursor: { id: params.cursor }, skip: 1 } : {}),
+  });
+}
+
+export function findWebhookDeliveryForApp(appId: string, deliveryId: string) {
+  return prisma.webhookDelivery.findFirst({
+    where: {
+      id: deliveryId,
+      appId,
+    },
+  });
+}
+
+export function findWebhookDeliveryWithEndpoint(deliveryId: string) {
+  return prisma.webhookDelivery.findUnique({
+    where: { id: deliveryId },
+    include: {
+      endpoint: {
+        include: {
+          app: true,
+        },
+      },
+    },
+  });
+}
+
+export function markWebhookDeliveryForRetry(appId: string, deliveryId: string) {
+  return prisma.webhookDelivery.update({
+    where: { id: deliveryId },
+    data: {
+      status: 'PENDING',
+      nextRetryAt: new Date(),
+      lastError: null,
+    },
+  });
+}
+
+export function listDueWebhookDeliveries(limit: number) {
+  return prisma.webhookDelivery.findMany({
+    where: {
+      appId: { not: null },
+      status: { in: ['PENDING', 'RETRY'] },
+      OR: [
+        { nextRetryAt: null },
+        { nextRetryAt: { lte: new Date() } },
+      ],
+    },
+    orderBy: [
+      { nextRetryAt: 'asc' },
+      { createdAt: 'asc' },
+    ],
+    take: limit,
+  });
+}
+
+export function updateWebhookDeliveryResult(deliveryId: string, data: {
+  status: 'PENDING' | 'DELIVERED' | 'FAILED' | 'RETRY';
+  statusCode?: number | null;
+  responseBodySnippet?: string | null;
+  lastError?: string | null;
+  nextRetryAt?: Date | null;
+  deliveredAt?: Date | null;
+}) {
+  return prisma.webhookDelivery.update({
+    where: { id: deliveryId },
+    data: {
+      status: data.status,
+      statusCode: data.statusCode ?? null,
+      responseBodySnippet: data.responseBodySnippet ?? null,
+      lastError: data.lastError ?? null,
+      nextRetryAt: data.nextRetryAt ?? null,
+      deliveredAt: data.deliveredAt ?? null,
+      attempts: { increment: 1 },
+    },
+  });
+}

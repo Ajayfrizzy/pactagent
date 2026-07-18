@@ -5,16 +5,12 @@ import Link from 'next/link';
 import { WalletConnect } from '@/components/WalletConnect';
 import { NavbarMenu } from '@/components/NavbarMenu';
 import { BrandLogo } from '@/components/BrandLogo';
-import { StatusBadge, NetworkBadge } from '@/components/StatusBadge';
+import { StatusBadge } from '@/components/StatusBadge';
 import { useStore } from '@/lib/store';
 import {
   fetchAgreements,
   fetchAgreementJobs,
   fetchConfig,
-  fetchFiberAdminChannels,
-  fetchFiberDiagnostics,
-  fetchFiberAdminHealth,
-  fetchFiberAdminInfo,
   replayAgreementJob,
   syncAgreementSource,
   updateAgreementSourcePublishState,
@@ -29,10 +25,6 @@ export default function AdminPage() {
   const [selectedAgreementId, setSelectedAgreementId] = useState<string | null>(null);
   const [jobs, setJobs] = useState<any[]>([]);
   const [publicConfig, setPublicConfig] = useState<any>(null);
-  const [fiberHealth, setFiberHealth] = useState<any>(null);
-  const [fiberInfo, setFiberInfo] = useState<any>(null);
-  const [fiberChannels, setFiberChannels] = useState<any>(null);
-  const [fiberDiagnostics, setFiberDiagnostics] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [jobLoadingId, setJobLoadingId] = useState<string | null>(null);
   const [sourceActionLoading, setSourceActionLoading] = useState<string | null>(null);
@@ -52,13 +44,9 @@ export default function AdminPage() {
       }
 
       try {
-        const [agreementList, health, info, channels, configData, diagnostics] = await Promise.all([
+        const [agreementList, configData] = await Promise.all([
           fetchAgreements(),
-          fetchFiberAdminHealth(),
-          fetchFiberAdminInfo().catch(() => null),
-          fetchFiberAdminChannels().catch(() => null),
           fetchConfig().catch(() => null),
-          fetchFiberDiagnostics().catch(() => null),
         ]);
 
         if (cancelled) {
@@ -67,11 +55,7 @@ export default function AdminPage() {
 
         setAgreements(agreementList);
         setSelectedAgreementId((current) => current || agreementList[0]?.id || null);
-        setFiberHealth(health);
-        setFiberInfo(info);
-        setFiberChannels(channels);
         setPublicConfig(configData);
-        setFiberDiagnostics(diagnostics);
         setError(null);
       } catch (err) {
         if (!cancelled) {
@@ -137,10 +121,6 @@ export default function AdminPage() {
         : !sourceDraftUpdate.trim()
           ? 'Add or save a draft update before publishing.'
           : null;
-  const fiberStatus = fiberDiagnostics?.status || (fiberHealth?.healthy ? 'CONFIRMED' : 'FAILED');
-  const fiberNodePublicKey = fiberDiagnostics?.live?.nodePublicKey || fiberInfo?.public_key || fiberInfo?.node_id || 'Unavailable';
-  const fiberChannelCount = fiberDiagnostics?.live?.openChannelCount ?? fiberChannels?.count ?? 0;
-  const fiberUsableOutboundCount = fiberDiagnostics?.live?.usableOutboundChannelCount ?? 0;
 
   useEffect(() => {
     setSourceThreadUrl(selectedAgreement?.source?.forumThreadUrl || selectedAgreement?.source?.externalUrl || '');
@@ -326,12 +306,11 @@ export default function AdminPage() {
               </div>
               <h1 className="text-2xl font-bold text-white">Operational Controls</h1>
               <p className="mt-2 text-sm text-gray-400">
-                Monitor worker jobs, replay failed automation, and inspect Fiber admin state from one place.
+                Monitor infrastructure jobs and review app backend state.
               </p>
             </div>
             <div className="flex flex-wrap gap-3">
-              <StatusBadge status={fiberStatus} />
-              <NetworkBadge network="CKB" />
+              <StatusBadge status="CONFIRMED" />
             </div>
           </div>
         </div>
@@ -349,50 +328,6 @@ export default function AdminPage() {
         ) : (
           <div className="grid grid-cols-1 gap-8 xl:grid-cols-[320px_minmax(0,1fr)]">
             <section className="space-y-6">
-              <div className="rounded-2xl border border-agent-border bg-agent-card/70 p-5">
-                <h2 className="text-lg font-semibold text-white mb-3">Fiber Node</h2>
-                <div className="space-y-2 text-sm text-gray-300">
-                  <div>Healthy: {String(Boolean(fiberHealth?.healthy))}</div>
-                  <div>Channels: {fiberChannelCount}</div>
-                  <div>Usable Outbound Channels: {fiberUsableOutboundCount}</div>
-                  <div className="break-all">Node Public Key: {fiberNodePublicKey}</div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-agent-border bg-agent-card/70 p-5">
-                <h2 className="text-lg font-semibold text-white mb-3">Fiber Diagnosis</h2>
-                <div className="mb-3 flex items-center gap-2">
-                  <StatusBadge status={fiberStatus} />
-                </div>
-                <div className="space-y-3 text-sm text-gray-300">
-                  <p>{fiberDiagnostics?.summary || 'No Fiber diagnostics available yet.'}</p>
-                  {fiberDiagnostics?.interpretation ? (
-                    <p className="text-gray-400">{fiberDiagnostics.interpretation}</p>
-                  ) : null}
-                  {fiberDiagnostics?.history?.evidence?.length ? (
-                    <div>
-                      <div className="mb-2 text-xs uppercase tracking-wide text-gray-500">Evidence</div>
-                      <ul className="space-y-1 text-xs text-gray-400">
-                        {fiberDiagnostics.history.evidence.map((item: string, index: number) => (
-                          <li key={`${index}-${item}`}>{item}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-                  {fiberDiagnostics ? (
-                    <div className="grid gap-2 text-xs text-gray-400">
-                      <div>Configured for Fiber Agreements: {fiberDiagnostics.history.agreementsConfiguredForFiber}</div>
-                      <div>Confirmed Fiber Settlements: {fiberDiagnostics.history.confirmedFiberSettlements}</div>
-                      <div>Fiber Payout Initiations: {fiberDiagnostics.history.attemptedFiberPayoutLogs}</div>
-                      <div>Fiber Confirmation Logs: {fiberDiagnostics.history.confirmedFiberPayoutLogs}</div>
-                      <div>Fallback Release Logs: {fiberDiagnostics.history.fallbackReleaseLogs}</div>
-                      <div>Last Confirmed Fiber Settlement: {fiberDiagnostics.history.lastConfirmedFiberSettlementAt || 'Never'}</div>
-                      <div>Last CKB Fallback: {fiberDiagnostics.history.lastFallbackAt || 'Never recorded'}</div>
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-
               <div className="rounded-2xl border border-agent-border bg-agent-card/70 p-5">
                 <h2 className="text-lg font-semibold text-white mb-3">Agreements</h2>
                 <div className="space-y-2">
@@ -413,6 +348,7 @@ export default function AdminPage() {
                   ))}
                 </div>
               </div>
+
             </section>
 
             <section className="space-y-6">
@@ -475,7 +411,7 @@ export default function AdminPage() {
               <div className="rounded-2xl border border-agent-border bg-agent-card/70 p-5">
                 <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                   <div>
-                    <h2 className="text-lg font-semibold text-white">Source Sync Controls</h2>
+                    <h2 className="text-lg font-semibold text-white">Legacy Source Sync Controls</h2>
                     <p className="text-sm text-gray-400">
                       {selectedAgreement?.source
                         ? 'Capture the source thread, refresh the latest forum summary, draft the outbound update, and require reviewer approval before publication.'

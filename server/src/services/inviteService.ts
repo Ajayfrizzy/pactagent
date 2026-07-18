@@ -14,7 +14,6 @@ type AgreementTemplateInput = {
   releaseMode: string;
   payoutNetwork: string;
   escrowModel?: string;
-  workerFiberPubkey?: string;
   milestones: Array<{
     title: string;
     description: string;
@@ -153,27 +152,14 @@ export async function acceptInviteLink(token: string, acceptingAddress: string) 
   }
 
   const template = parseTemplate(invite.agreementTemplateJson);
-  const creatorProfile = await prisma.publicProfile.findUnique({
-    where: { walletAddress: invite.createdByAddress },
-  });
-  const acceptingProfile = await prisma.publicProfile.findUnique({
-    where: { walletAddress: normalizedAcceptingAddress },
-  });
-
   const clientAddress =
     invite.creatorRole === 'CLIENT' ? invite.createdByAddress : normalizedAcceptingAddress;
   const workerAddress =
     invite.creatorRole === 'WORKER' ? invite.createdByAddress : normalizedAcceptingAddress;
-  const workerFiberPubkey =
-    template.workerFiberPubkey
-    || (workerAddress === invite.createdByAddress ? creatorProfile?.fiberPubkey : acceptingProfile?.fiberPubkey)
-    || undefined;
-
   const agreement = await createAgreement({
     ...template,
     clientAddress,
     workerAddress,
-    workerFiberPubkey,
   });
 
   const now = new Date();

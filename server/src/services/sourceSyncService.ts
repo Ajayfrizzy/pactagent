@@ -1,6 +1,7 @@
 import { config } from '../config';
 import { prisma } from '../db';
 import { createAuditLog } from './auditLogService';
+import { assertProviderResponse, executeProviderRequest } from '../common/resilience/provider';
 import {
   fetchDiscourseTopicJson,
   parseDiscourseTopicTarget,
@@ -91,18 +92,18 @@ async function publishToDiscourse(params: {
     throw new Error('The source thread URL is not a supported Discourse topic URL.');
   }
 
-  const response = await fetch(`${target.apiBaseUrl}/posts.json`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Api-Key': config.forumPublishApiKey,
-      'Api-Username': config.forumPublishApiUsername,
+  const response = await executeProviderRequest({
+    provider: 'forum', operation: 'publish_discourse', timeoutMs: config.forumPublishTimeoutMs, maxAttempts: 1,
+    run: async ({ signal, requestId }) => {
+      const result = await fetch(`${target.apiBaseUrl}/posts.json`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Api-Key': config.forumPublishApiKey,
+          'Api-Username': config.forumPublishApiUsername, 'x-request-id': requestId },
+        body: JSON.stringify({ topic_id: target.topicId, raw: params.raw }), signal,
+      });
+      assertProviderResponse(result, 'forum', requestId);
+      return result;
     },
-    body: JSON.stringify({
-      topic_id: target.topicId,
-      raw: params.raw,
-    }),
-    signal: AbortSignal.timeout(config.forumPublishTimeoutMs),
   });
 
   const responseText = await response.text();
@@ -148,18 +149,17 @@ async function publishToWebhookRelay(params: {
     throw new Error('Forum publish relay URL is not configured on the server.');
   }
 
-  const response = await fetch(config.forumPublishWebhookUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
+  const response = await executeProviderRequest({
+    provider: 'forum', operation: 'publish_relay', timeoutMs: config.forumPublishTimeoutMs, maxAttempts: 1,
+    run: async ({ signal, requestId }) => {
+      const result = await fetch(config.forumPublishWebhookUrl, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-request-id': requestId },
+        body: JSON.stringify({ agreementId: params.agreementId, threadUrl: params.threadUrl,
+          sourceLabel: params.sourceLabel, content: params.raw }), signal,
+      });
+      assertProviderResponse(result, 'forum', requestId);
+      return result;
     },
-    body: JSON.stringify({
-      agreementId: params.agreementId,
-      threadUrl: params.threadUrl,
-      sourceLabel: params.sourceLabel,
-      content: params.raw,
-    }),
-    signal: AbortSignal.timeout(config.forumPublishTimeoutMs),
   });
 
   const responseText = await response.text();

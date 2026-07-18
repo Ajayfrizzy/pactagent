@@ -6,7 +6,6 @@ The project combines:
 - wallet-native authentication
 - milestone-based payment agreements
 - an autonomous backend worker that enforces state transitions
-- real CKB settlement with optional Fiber payout support
 - live operational logs and agreement updates in the UI
 
 ## Why PactAgent Exists
@@ -22,6 +21,715 @@ Common problems include:
 
 PactAgent solves this by turning freelance or service payments into a programmable process. Instead of "trust me" coordination, users get a structured agreement with milestones, proof requirements, deadlines, dispute windows, reviewer modes, and automated settlement logic.
 
+## PactAgent Infrastructure
+
+PactAgent infrastructure is the reusable backend layer behind agreement-driven products. External applications can use it to create agreements, split work into milestones, track escrow, accept proof, approve or reject work, resolve disputes, receive lifecycle events, and consume signed webhooks.
+
+The infrastructure API is mounted under `/v1`. It is app-scoped: every external product is represented by an app/project, and every API-key request is resolved to exactly one `appId`. Agreements, milestones, escrows, proofs, reviews, disputes, events, webhook endpoints, webhook deliveries, transactions, idempotency keys, and audit logs created through the infrastructure API belong to that app boundary.
+
+The legacy wallet application API remains mounted under `/api` while the infrastructure API grows alongside it.
+
+### Current Architecture Boundary
+
+The production core is the `/v1` infrastructure API. Legacy wallet-product routes under `/api` are disabled unless `ENABLE_LEGACY_PRODUCT_API=true`; production deployments should keep them disabled and integrate through `/v1`.
+
+Run the API and background worker as separate processes:
+
+```bash
+cd server
+npm run dev
+npm run worker
+```
+
+Database changes are deployed from committed Prisma migrations:
+
+```bash
+cd server
+npm run db:migrate:deploy
+```
+
+Do not use `prisma db push` against production. Existing databases that predate the migration history must follow `server/prisma/MIGRATIONS.md` before the first migration deployment.
+
+### Container deployment
+
+The repository builds separate API, worker, migration, and web roles. For a local production-shaped stack:
+
+```bash
+cp .env.compose.example .env
+# Replace every placeholder in .env before starting the stack.
+docker compose up --build
+```
+
+The migration container must complete successfully before the API and worker start. In a managed deployment, run the `migrate` target once per release, then roll out the API and worker from the `runtime` target. Do not run migrations independently from every API replica.
+
+Runtime containers use non-root users and read-only filesystems. The API is exposed on port `4000` and the web application on port `3000` in the Compose stack.
+
+Integrator documentation is served by the API server:
+
+- `GET /docs` for generated endpoint docs
+- `GET /openapi.json` for the OpenAPI spec
+- `server/docs/examples/integrator-quickstart.md` for curl examples
+
+
+### Response Format
+
+Successful single-resource responses use:
+
+```json
+{
+  "data": {},
+  "requestId": "req_xxx"
+}
+```
+
+List responses use cursor pagination:
+
+```json
+{
+  "data": [],
+  "pagination": {
+    "limit": 20,
+    "cursor": "next_cursor_or_null"
+  },
+  "requestId": "req_xxx"
+}
+```
+
+Errors use a stable envelope:
+
+```json
+{
+  "error": {
+    "type": "invalid_request_error",
+    "code": "invalid_state_transition",
+    "message": "Agreement cannot be released before proof approval.",
+    "requestId": "req_xxx"
+  }
+}
+```
+
+Every response includes a request ID, and the same value is also returned in the `X-Request-Id` response header.
+
+### 1. What PactAgent Infrastructure Is
+
+PactAgent infrastructure is not a marketplace and does not hardcode any external app. It provides neutral primitives that other products can build on:
+
+- app/project tenancy
+- scoped API keys
+- agreement lifecycle state machines
+- milestone records
+- sandbox mock escrow and manual escrow operations
+- proof submission and human review decisions
+- dispute records and dispute resolution
+- app-scoped lifecycle events
+- signed webhooks and retryable webhook deliveries
+- app-scoped audit logs
+- internal admin monitoring
+- health and readiness checks
+
+### 2. How Apps Work
+
+Apps are the tenant boundary. Each app has its own environment, status, default currency, default network, API keys, agreements, events, webhooks, and audit logs. API-key requests can only access records whose `appId` matches the authenticated key.
+
+App management currently uses the existing wallet JWT owner session, not an app API key.
+
+Create an app:
+
+```http
+POST /v1/apps
+Authorization: Bearer <wallet-jwt>
+Content-Type: application/json
+```
+
+```json
+{
+  "name": "Example Product",
+  "slug": "example-product",
+  "environment": "sandbox",
+  "defaultCurrency": "CKB",
+  "defaultNetwork": "sandbox"
+}
+```
+
+Useful app routes:
+
+```http
+POST   /v1/apps
+GET    /v1/apps
+GET    /v1/apps/current
+GET    /v1/apps/:id
+PATCH  /v1/apps/:id
+POST   /v1/apps/:id/disable
+```
+
+`GET /v1/apps/current` uses API-key authentication and returns the app resolved from the key.
+
+### 3. How API Keys Work
+
+API keys authenticate server-to-server integrator calls. They are app-scoped and environment-specific:
+
+- sandbox keys start with `pa_test_`
+- production keys start with `pa_live_`
+- raw keys are returned only once during creation
+- PactAgent stores `keyPrefix` and a SHA-256 hash, never the raw API key
+- keys have explicit scopes
+- keys can be revoked
+- successful authentication updates `lastUsedAt`
+
+Create an API key:
+
+```http
+POST /v1/api-keys
+Authorization: Bearer <wallet-jwt>
+Content-Type: application/json
+```
+
+```json
+{
+  "appId": "app_uuid",
+  "name": "Server integration key",
+  "scopes": [
+    "apps:read",
+    "agreements:create",
+    "agreements:read",
+    "agreements:update",
+    "milestones:create",
+    "milestones:read",
+    "escrows:create",
+    "escrows:read",
+    "escrows:fund",
+    "escrows:release",
+    "escrows:refund",
+    "proofs:create",
+    "proofs:read",
+    "proofs:review",
+    "events:read",
+    "webhooks:manage",
+    "webhooks:read"
+  ]
+}
+```
+
+Use an API key with either header form:
+
+```http
+X-API-Key: pa_test_xxx
+```
+
+or:
+
+```http
+Authorization: Bearer pa_test_xxx
+```
+
+API key routes:
+
+```http
+POST   /v1/api-keys
+GET    /v1/api-keys
+DELETE /v1/api-keys/:id
+```
+
+### 4. How To Create An Agreement
+
+Agreements represent the top-level work/payment lifecycle. Each agreement belongs to the app resolved from the API key and may include an `externalReferenceId` so the integrating product can map PactAgent records back to its own database.
+
+```http
+POST /v1/agreements
+X-API-Key: pa_test_xxx
+Content-Type: application/json
+```
+
+```json
+{
+  "externalReferenceId": "order_123",
+  "title": "Landing page implementation",
+  "description": "Implement the approved landing page design.",
+  "clientExternalId": "client_456",
+  "workerExternalId": "contractor_789",
+  "totalAmount": "10000000000",
+  "currency": "CKB",
+  "releaseMode": "milestone",
+  "disputeMode": "app_managed",
+  "sourceType": "api",
+  "metadata": {
+    "projectId": "project_abc"
+  }
+}
+```
+
+Agreement metadata is JSON and is limited to 16KB. Amounts are positive integer strings so large token amounts can be stored without floating point loss.
+
+Common agreement routes:
+
+```http
+POST   /v1/agreements
+GET    /v1/agreements
+GET    /v1/agreements/:id
+POST   /v1/agreements/:id/accept
+POST   /v1/agreements/:id/funding-required
+POST   /v1/agreements/:id/cancel
+```
+
+Infrastructure agreement statuses are lowercase states such as `draft`, `accepted`, `funding_required`, `funded`, `in_progress`, `proof_submitted`, `under_review`, `approved`, `released`, `cancelled`, `refunded`, and `disputed`. Invalid transitions are rejected by the state machine.
+
+### 5. How To Create Milestones
+
+Milestones split an agreement into separately tracked work units. A single-payment agreement can be represented as one milestone. Milestones must belong to the same app as their agreement, and the total milestone amount cannot exceed the agreement total.
+
+```http
+POST /v1/agreements/:agreementId/milestones
+X-API-Key: pa_test_xxx
+Content-Type: application/json
+```
+
+```json
+{
+  "externalReferenceId": "task_1",
+  "title": "Design implementation",
+  "description": "Build the responsive landing page.",
+  "amount": "6000000000",
+  "currency": "CKB",
+  "order": 1,
+  "dueDate": "2026-07-15T00:00:00.000Z"
+}
+```
+
+Milestone routes:
+
+```http
+POST   /v1/agreements/:id/milestones
+GET    /v1/agreements/:id/milestones
+GET    /v1/milestones/:id
+```
+
+### 6. How To Create Escrow In Sandbox/Mock Mode
+
+Sandbox mock escrow lets integrators test lifecycle behavior without moving real funds. Use `rail: "mock"` and `network: "sandbox"`.
+
+Escrow creation requires an `Idempotency-Key` header.
+
+```http
+POST /v1/escrows
+X-API-Key: pa_test_xxx
+Idempotency-Key: escrow_create_order_123_m1
+Content-Type: application/json
+```
+
+```json
+{
+  "agreementId": "agreement_uuid",
+  "milestoneId": "milestone_uuid",
+  "amount": "6000000000",
+  "currency": "CKB",
+  "rail": "mock",
+  "network": "sandbox"
+}
+```
+
+Mark the mock escrow funded:
+
+```http
+POST /v1/escrows/:id/mark-funded
+X-API-Key: pa_test_xxx
+Content-Type: application/json
+```
+
+```json
+{
+  "txHash": "mock_funding_tx_123"
+}
+```
+
+Escrow routes:
+
+```http
+POST   /v1/escrows
+GET    /v1/escrows
+GET    /v1/escrows/:id
+POST   /v1/escrows/:id/mark-funded
+POST   /v1/escrows/:id/release
+POST   /v1/escrows/:id/refund
+```
+
+### 7. How To Submit Proof
+
+Proof submissions attach work evidence to an agreement and milestone. Proof creation requires an `Idempotency-Key` header.
+
+```http
+POST /v1/proofs
+X-API-Key: pa_test_xxx
+Idempotency-Key: proof_order_123_m1_v1
+Content-Type: application/json
+```
+
+```json
+{
+  "agreementId": "agreement_uuid",
+  "milestoneId": "milestone_uuid",
+  "submittedByExternalId": "contractor_789",
+  "type": "url",
+  "content": "https://example.com/work/landing-page",
+  "links": ["https://example.com/work/landing-page"],
+  "fileRefs": []
+}
+```
+
+Proof cannot be submitted for released, refunded, cancelled, or expired agreements. A successful submission emits `proof.submitted` and moves active funded work toward `proof_submitted`.
+
+### 8. How To Approve Or Reject Proof
+
+Review decisions are submitted through the proof review endpoint. This route requires the `proofs:review` scope.
+
+```http
+POST /v1/proofs/:proofId/review
+X-API-Key: pa_test_xxx
+Content-Type: application/json
+```
+
+Approve proof:
+
+```json
+{
+  "reviewerExternalId": "client_456",
+  "decision": "approved",
+  "note": "Work accepted."
+}
+```
+
+Reject proof:
+
+```json
+{
+  "reviewerExternalId": "client_456",
+  "decision": "rejected",
+  "note": "Please fix the mobile spacing issues."
+}
+```
+
+Request changes:
+
+```json
+{
+  "reviewerExternalId": "client_456",
+  "decision": "needs_changes",
+  "note": "Please upload the final deployment URL."
+}
+```
+
+`approved` moves the proof to `accepted` and the agreement/milestone to `approved`. `rejected` records rejection. `needs_changes` records the request and moves the agreement/milestone back toward `in_progress`.
+
+### 9. How To Release Or Refund Escrow
+
+Escrow release and refund require idempotency keys and database transactions.
+
+Release is only allowed when escrow is funded and the related proof has been approved, or when dispute resolution authorizes release.
+
+```http
+POST /v1/escrows/:id/release
+X-API-Key: pa_test_xxx
+Idempotency-Key: release_order_123_m1
+Content-Type: application/json
+```
+
+```json
+{}
+```
+
+Refund is forbidden after release. Release is forbidden after refund.
+
+```http
+POST /v1/escrows/:id/refund
+X-API-Key: pa_test_xxx
+Idempotency-Key: refund_order_123_m1
+Content-Type: application/json
+```
+
+```json
+{}
+```
+
+Release/refund operations create transaction records, audit logs, and lifecycle events.
+
+### 10. How Events Work
+
+Events are durable, app-scoped lifecycle records. They are created for important actions such as agreement creation, milestone creation, escrow creation/funding/release/refund, proof submission, proof review, dispute opening/resolution, and final webhook delivery failure.
+
+Query events:
+
+```http
+GET /v1/events?limit=20
+X-API-Key: pa_test_xxx
+```
+
+Filter by type:
+
+```http
+GET /v1/events?type=proof.submitted
+X-API-Key: pa_test_xxx
+```
+
+Useful event types include:
+
+- `agreement.created`
+- `agreement.accepted`
+- `agreement.funding_required`
+- `agreement.funded`
+- `agreement.released`
+- `agreement.refunded`
+- `milestone.created`
+- `milestone.proof_submitted`
+- `milestone.approved`
+- `escrow.created`
+- `escrow.funded`
+- `escrow.released`
+- `escrow.refunded`
+- `escrow.failed`
+- `proof.submitted`
+- `proof.approved`
+- `proof.rejected`
+- `proof.needs_changes`
+- `dispute.opened`
+- `dispute.resolved`
+- `webhook.delivery_failed`
+
+Events are also used to enqueue webhook deliveries for matching app webhook endpoints.
+
+### 11. How Webhooks Are Signed
+
+Webhook endpoints are app-scoped. Create one with the `webhooks:manage` scope:
+
+```http
+POST /v1/webhook-endpoints
+X-API-Key: pa_test_xxx
+Content-Type: application/json
+```
+
+```json
+{
+  "url": "https://example.com/pactagent/webhook",
+  "description": "Production event receiver",
+  "subscribedEvents": [
+    "agreement.created",
+    "proof.submitted",
+    "proof.approved",
+    "escrow.released",
+    "dispute.opened"
+  ]
+}
+```
+
+The response includes a raw webhook signing secret only once. PactAgent stores a hash plus an encrypted copy for delivery signing.
+
+Each webhook delivery is signed with HMAC SHA-256 over:
+
+```text
+timestamp + "." + rawBody
+```
+
+Webhook requests include:
+
+```http
+PactAgent-Event-Id: event_uuid
+PactAgent-Timestamp: 1782518400
+PactAgent-Signature: sha256=<hex_digest>
+```
+
+Failed webhook deliveries are retried on this bounded schedule:
+
+- 1 minute
+- 5 minutes
+- 15 minutes
+- 1 hour
+- 6 hours
+
+Delivery logs are available through:
+
+```http
+GET  /v1/webhook-deliveries
+GET  /v1/webhook-deliveries/:id
+POST /v1/webhook-deliveries/:id/retry
+```
+
+### 12. How To Verify Webhooks
+
+Consumers must verify the signature against the exact raw request body before parsing JSON.
+
+```ts
+import crypto from 'crypto';
+
+export function verifyPactAgentWebhook(params: {
+  secret: string;
+  timestamp: string;
+  rawBody: string;
+  signature: string;
+}) {
+  const expected = `sha256=${crypto
+    .createHmac('sha256', params.secret)
+    .update(`${params.timestamp}.${params.rawBody}`)
+    .digest('hex')}`;
+
+  if (expected.length !== params.signature.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(
+    Buffer.from(expected),
+    Buffer.from(params.signature),
+  );
+}
+```
+
+Recommended consumer behavior:
+
+- reject requests with missing webhook headers
+- reject old timestamps according to your replay tolerance
+- verify the HMAC before parsing the body
+- process webhook event IDs idempotently
+- return a 2xx response only after the event is safely accepted
+
+### 13. How Idempotency Works
+
+Sensitive lifecycle actions use an `Idempotency-Key` header. The key is scoped to the current app.
+
+If the same key is reused with the same request body, PactAgent returns the stored response. If the same key is reused with a different request body, PactAgent returns a conflict error.
+
+Currently enforced idempotent routes:
+
+- `POST /v1/escrows`
+- `POST /v1/escrows/:id/release`
+- `POST /v1/escrows/:id/refund`
+- `POST /v1/proofs`
+- `POST /v1/disputes/:id/resolve`
+
+Example:
+
+```http
+POST /v1/escrows/:id/release
+X-API-Key: pa_test_xxx
+Idempotency-Key: release_order_123_m1
+Content-Type: application/json
+```
+
+Use stable, operation-specific keys from your own system, such as `release_<orderId>_<milestoneId>`.
+
+### 14. How Sandbox Mode Works
+
+Sandbox mode is for integration testing without real value transfer.
+
+Sandbox conventions:
+
+- apps use `environment: "sandbox"`
+- sandbox API keys start with `pa_test_`
+- mock escrow uses `rail: "mock"` and `network: "sandbox"`
+- manual escrow transitions are available for controlled testing
+- production webhook URLs must be HTTPS, while sandbox can use HTTP only for public non-local test hosts
+- sandbox still enforces app scoping, scopes, validation, idempotency checks, and webhook URL SSRF protections
+
+Seed data includes a generic `Sandbox Demo App`, a disabled `Production Demo App`, sandbox API keys, a sandbox agreement, milestone, mock escrow, proof submission, and a safe test webhook endpoint. It does not seed app-specific marketplace, ProofPay, DAO, or bounty-import infrastructure logic.
+
+### 15. Security Notes For Integrators
+
+Integrator responsibilities:
+
+- store PactAgent API keys only in server-side secret storage
+- never expose `pa_test_` or `pa_live_` keys in browsers or mobile apps
+- use the minimum required scopes for each key
+- rotate and revoke keys when access changes
+- always send idempotency keys for sensitive lifecycle writes
+- verify webhook signatures before parsing or trusting webhook payloads
+- deduplicate webhook events by event ID or delivery ID
+- use HTTPS webhook endpoints in production
+- return 2xx only after webhook processing is safely persisted
+- treat all IDs from your app as external references, not authorization proof
+
+PactAgent security controls:
+
+- raw API keys are never stored
+- API keys are hashed and scoped to one app
+- every infrastructure query is app-scoped
+- request bodies and query parameters are validated
+- metadata and proof links have size/count limits
+- invalid state transitions are rejected
+- duplicate release/refund paths are blocked
+- audit logs are written for sensitive operations
+- webhook endpoint creation blocks localhost, private IP ranges, metadata IPs, file URLs, credentials, and non-HTTP protocols
+- webhooks are signed with HMAC SHA-256
+- internal `/v1/admin` routes require a wallet JWT from the `ADMIN_ADDRESSES` allowlist; app API keys cannot access global admin data
+
+### Infrastructure Routes
+
+```http
+POST   /v1/apps
+GET    /v1/apps
+GET    /v1/apps/current
+GET    /v1/apps/:id
+PATCH  /v1/apps/:id
+POST   /v1/apps/:id/disable
+
+POST   /v1/api-keys
+GET    /v1/api-keys
+DELETE /v1/api-keys/:id
+
+POST   /v1/agreements
+GET    /v1/agreements
+GET    /v1/agreements/:id
+POST   /v1/agreements/:id/accept
+POST   /v1/agreements/:id/funding-required
+POST   /v1/agreements/:id/cancel
+
+POST   /v1/agreements/:id/milestones
+GET    /v1/agreements/:id/milestones
+GET    /v1/milestones/:id
+
+POST   /v1/escrows
+GET    /v1/escrows
+GET    /v1/escrows/:id
+POST   /v1/escrows/:id/mark-funded
+POST   /v1/escrows/:id/release
+POST   /v1/escrows/:id/refund
+
+GET    /v1/transactions
+
+POST   /v1/proofs
+GET    /v1/proofs
+GET    /v1/proofs/:id
+POST   /v1/proofs/:id/review
+
+POST   /v1/disputes
+GET    /v1/disputes
+GET    /v1/disputes/:id
+POST   /v1/disputes/:id/resolve
+
+GET    /v1/events
+GET    /v1/events/:id
+
+POST   /v1/webhook-endpoints
+GET    /v1/webhook-endpoints
+GET    /v1/webhook-endpoints/:id
+PATCH  /v1/webhook-endpoints/:id
+DELETE /v1/webhook-endpoints/:id
+
+GET    /v1/webhook-deliveries
+GET    /v1/webhook-deliveries/:id
+POST   /v1/webhook-deliveries/:id/retry
+
+GET    /v1/audit-logs
+
+GET    /v1/admin/system-health
+GET    /v1/admin/apps
+GET    /v1/admin/agreements
+GET    /v1/admin/escrows
+GET    /v1/admin/events
+GET    /v1/admin/webhook-deliveries
+GET    /v1/admin/audit-logs
+
+GET    /health
+GET    /ready
+```
+
+`GET /health` is a lightweight liveness check. `GET /ready` verifies the database can answer a simple query and returns `503` when the backend is not ready to serve traffic.
+
 ## What The Project Does
 
 PactAgent allows two participants to coordinate work and payment through a milestone contract flow:
@@ -30,7 +738,6 @@ PactAgent allows two participants to coordinate work and payment through a miles
 2. The client creates a milestone agreement with:
    - title and description
    - worker address
-   - optional worker Fiber public key
    - dispute window and deadline
    - proof type
    - reviewer mode
@@ -40,7 +747,6 @@ PactAgent allows two participants to coordinate work and payment through a miles
 4. The worker submits proof for the active milestone.
 5. The agent validates the next step and moves the agreement into review.
 6. Depending on reviewer mode, the agent or client approves payout, or a dispute is opened.
-7. Settlement is attempted over Fiber when configured, otherwise on CKB L1.
 8. After a milestone is paid, the next one becomes active until the agreement is complete.
 
 PactAgent also supports imported grant and bounty workflows:
@@ -65,7 +771,6 @@ What is already implemented:
 - real on-chain CKB milestone escrow funding with one escrow cell per milestone
 - manual on-chain escrow payout and refund transaction signing paths for CKB
 - treasury-driven funding and settlement path for agreements that still use `TREASURY_BRIDGE`
-- Fiber payout attempt path with CKB fallback
 - live agent logs and agreement updates via WebSocket
 - dispute creation and follow-up evidence submission
 - advisory AI dispute recommendation flow
@@ -93,7 +798,6 @@ At the same time, the broader agreement coordination layer is still off-chain. A
 1. Connect wallet and sign in.
 2. Create a new agreement.
 3. Define milestones and total escrow amount.
-4. Choose CKB or Fiber as the payout path.
 5. Fund the agreement on CKB.
 6. Watch milestones progress in the dashboard.
 7. Approve payout, reject for refund, or open a dispute when needed.
@@ -106,7 +810,6 @@ At the same time, the broader agreement coordination layer is still off-chain. A
 4. Review any structured info request if the proof checker or reviewer needs more context.
 5. Submit revised proof when follow-up is requested.
 6. Add more context if a dispute is opened.
-7. Receive payout through Fiber when available, otherwise on CKB.
 
 ### Imported Grant / Bounty Flow
 
@@ -205,7 +908,6 @@ The frontend is built with Next.js and provides three main surfaces:
 ### Agreement Detail Page
 
 - displays agreement metadata and milestone timeline
-- shows funding, settlement, and Fiber references
 - allows funding, proof submission, proof checking, review actions, info requests, dispute actions, and evidence submission
 - displays submitted proofs and agreement-specific logs
 - surfaces imported source metadata, source sync controls, and operational history
@@ -215,7 +917,6 @@ The frontend is built with Next.js and provides three main surfaces:
 The codebase is split into three packages:
 
 - `web/`: Next.js frontend with CCC wallet integration
-- `server/`: Express API, Prisma persistence, agent loop, CKB/Fiber services, and WebSocket server
 - `shared/`: shared enums, types, and state machine helpers
 
 Core backend responsibilities:
@@ -226,7 +927,6 @@ Core backend responsibilities:
 - settlement orchestration
 - realtime event broadcasting
 
-## CKB, Fiber, And Chain-Adjacent Infrastructure
 
 PactAgent currently uses:
 
@@ -241,7 +941,6 @@ PactAgent currently uses:
   - client wallet can fund milestone escrow cells on-chain through the Pact escrow lock
   - on-chain escrow payout and refund transactions can be signed manually against funded milestone cells
   - treasury wallet still supports the `TREASURY_BRIDGE` settlement path where used
-- Fiber JSON-RPC integration
   - node health checks
   - node info
   - channel listing/open/close
@@ -255,8 +954,6 @@ How settlement works today:
 - when a milestone is approved, PactAgent prepares the milestone for manual on-chain payout settlement
 - when a refund is needed, PactAgent supports manual on-chain refund settlement for escrow-backed milestones
 - for `TREASURY_BRIDGE` agreements, the treasury-driven settlement path still exists and remains server-managed
-- if Fiber is enabled and appropriate for a treasury-bridge agreement, the server attempts Fiber payout first
-- if Fiber is unavailable or unsuitable, the server falls back to a CKB transfer
 - settlement references and audit history are saved on the agreement
 
 What is not yet implemented:
@@ -413,7 +1110,6 @@ Not implemented yet:
 - PostgreSQL
 - Supabase-compatible Prisma configuration
 - CKB RPC node
-- optional Fiber node
 - optional OpenAI API access
 
 ## Repository Structure
@@ -502,9 +1198,6 @@ ONCHAIN_LOCK_INDEX=
 ONCHAIN_LOCK_DEP_TYPE=code
 ONCHAIN_ESCROW_ARGS_SALT=
 
-FIBER_ENABLED=false
-FIBER_NODE_URL=http://127.0.0.1:8227
-FIBER_API_KEY=
 
 FORUM_PUBLISH_ENABLED=false
 FORUM_PUBLISH_PROVIDER=DISCOURSE
@@ -534,10 +1227,9 @@ Notes:
 - if you are using a plain local PostgreSQL instance, you can set `DIRECT_URL` to the same value as `DATABASE_URL`
 - `TREASURY_CKB_PRIVATE_KEY` is required for payout and refund execution
 - `TREASURY_CKB_ADDRESS` is optional and can be derived from the private key
-- `ADMIN_ADDRESSES` is a comma-separated allowlist for Fiber admin actions
+- `SEED_SANDBOX_API_KEY` is optional; if set before running the seed, the demo sandbox API key will use that raw key value and store only its hash
 - auth and agreement write endpoints now have in-memory rate limits; tune them with the `*_RATE_LIMIT_*` variables
 - set `ONCHAIN_ESCROW_ENABLED=true` together with `ONCHAIN_LOCK_CODE_HASH`, `ONCHAIN_LOCK_TX_HASH`, and `ONCHAIN_LOCK_INDEX` once you have a deployed lock script and want the app to expose the `ONCHAIN_LOCK` escrow model
-- enable `FIBER_ENABLED=true` only if you have a reachable Fiber node
 - set `FORUM_PUBLISH_ENABLED=true` to let Phase 4 publish approved source-thread updates directly
 - `FORUM_PUBLISH_PROVIDER=DISCOURSE` posts replies to Discourse topic URLs using `FORUM_PUBLISH_API_KEY` and `FORUM_PUBLISH_API_USERNAME`
 - `FORUM_PUBLISH_PROVIDER=WEBHOOK` sends the approved update payload to `FORUM_PUBLISH_WEBHOOK_URL` so you can bridge to other governance/forum systems
@@ -602,7 +1294,6 @@ The app will be available at:
 - the treasury wallet must actually hold enough CKB to send payouts and refunds
 - `ONCHAIN_LOCK` agreements fund milestone escrow cells directly on-chain, while `TREASURY_BRIDGE` agreements still use the treasury-managed path
 - the frontend validates a minimum 61 CKB output requirement for CKB transaction outputs
-- Fiber settlement still depends on a reachable and healthy Fiber backend
 - agreement routes are protected and require an authenticated wallet session
 
 ## Current Limitations
@@ -626,7 +1317,6 @@ Potential next steps:
 - add arbitrator and admin tooling
 - support multi-party agreements
 - build marketplace, DAO, or bounty integrations on top of the API
-- improve Fiber channel management and routing strategies
 - add notifications, audit exports, and compliance-friendly reporting
 - expose PactAgent as infrastructure for third-party apps
 - add Phase 7 premium automation controls, feature gating, and usage metering
@@ -690,7 +1380,6 @@ This would make the automation layer more production-ready and easier to operate
 ### 5. Access Control, Privacy, And Security Hardening
 
 - authenticate WebSocket connections and scope updates by agreement participant
-- protect Fiber admin routes behind admin-only authentication
 - add role-separated admin, operator, and arbitrator permissions
 - store less sensitive operational data in public feeds
 - add rate limiting on auth, funding, dispute, and recommendation endpoints
@@ -748,7 +1437,6 @@ Reporting turns PactAgent into something teams and organizations can rely on ope
 ### 9. Engineering Quality And Developer Experience
 
 - add unit tests for state transitions, auth validation, and dispute logic
-- add integration tests for funding, payout, refund, and Fiber fallback behavior
 - add end-to-end tests for the main client and worker flows
 - remove duplicated transition rules by using the shared state machine as the single source of truth
 - add schema-level indexes for status, participant address, and log-heavy queries
@@ -810,7 +1498,6 @@ If you want to inspect the most important implementation entry points, start her
 - [server/src/services/agreementService.ts](/c:/Users/ajayh/Desktop/pactagent/server/src/services/agreementService.ts)
 - [server/src/worker/agentLoop.ts](/c:/Users/ajayh/Desktop/pactagent/server/src/worker/agentLoop.ts)
 - [server/src/services/ckbService.ts](/c:/Users/ajayh/Desktop/pactagent/server/src/services/ckbService.ts)
-- [server/src/services/fiberService.ts](/c:/Users/ajayh/Desktop/pactagent/server/src/services/fiberService.ts)
 - [server/src/services/disputeService.ts](/c:/Users/ajayh/Desktop/pactagent/server/src/services/disputeService.ts)
 - [server/prisma/schema.prisma](/c:/Users/ajayh/Desktop/pactagent/server/prisma/schema.prisma)
 

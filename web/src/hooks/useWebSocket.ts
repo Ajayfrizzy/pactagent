@@ -54,13 +54,13 @@ export function useWebSocket() {
   const triggerAgreementUpdate = useStore((s) => s.triggerAgreementUpdate);
 
   useEffect(() => {
+    let stopped = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
     function connect() {
       const url = new URL(resolveWebSocketUrl(), typeof window !== 'undefined' ? window.location.href : 'http://localhost');
-      if (authToken) {
-        url.searchParams.set('token', authToken);
-      }
-
-      const ws = new WebSocket(url.toString());
+      const protocols = authToken ? ['pactagent', `auth.${authToken}`] : ['pactagent'];
+      const ws = new WebSocket(url.toString(), protocols);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -82,9 +82,8 @@ export function useWebSocket() {
       };
 
       ws.onclose = () => {
-        console.log('[WS] Disconnected, reconnecting in 3s...');
         setWsConnected(false);
-        setTimeout(connect, 3000);
+        if (!stopped) reconnectTimer = setTimeout(connect, 3000);
       };
 
       ws.onerror = () => {
@@ -95,7 +94,10 @@ export function useWebSocket() {
     connect();
 
     return () => {
+      stopped = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       wsRef.current?.close();
+      setWsConnected(false);
     };
   }, [addLog, authToken, setWsConnected, triggerAgreementUpdate]);
 }

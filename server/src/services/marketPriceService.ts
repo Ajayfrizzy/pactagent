@@ -1,4 +1,5 @@
 import { config } from '../config';
+import { assertProviderResponse, executeProviderRequest } from '../common/resilience/provider';
 
 type CachedQuote = {
   expiresAt: number;
@@ -84,13 +85,14 @@ export async function fetchCkbPriceQuote(forceFresh = false): Promise<CkbPriceQu
   inflightQuote = (async () => {
     const url = buildCoinGeckoPriceUrl();
 
-    const response = await fetch(url.toString(), {
-      headers: getApiHeaders(),
+    const response = await executeProviderRequest({
+      provider: 'market_price', operation: 'ckb_usd_quote', timeoutMs: 8_000,
+      run: async ({ signal, requestId }) => {
+        const result = await fetch(url.toString(), { headers: { ...getApiHeaders(), 'x-request-id': requestId }, signal });
+        assertProviderResponse(result, 'market_price', requestId);
+        return result;
+      },
     });
-
-    if (!response.ok) {
-      throw new Error(`CoinGecko price request failed with status ${response.status}`);
-    }
 
     const data = await response.json() as {
       ['nervos-network']?: {
@@ -120,6 +122,9 @@ export async function fetchCkbPriceQuote(forceFresh = false): Promise<CkbPriceQu
 
   try {
     return await inflightQuote;
+  } catch (error) {
+    if (cachedQuote) return cachedQuote.value;
+    throw error;
   } finally {
     inflightQuote = null;
   }

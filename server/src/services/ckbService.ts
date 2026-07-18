@@ -2,22 +2,15 @@ import {
   Address,
   ClientPublicMainnet,
   ClientPublicTestnet,
-  SignerCkbPrivateKey,
-  Transaction,
 } from '@ckb-ccc/core';
-import { config, requireConfig } from '../config';
+import { config } from '../config';
+import { getTreasurySignerProvider } from './treasurySignerProvider';
+import { assertProviderResponse, executeProviderRequest } from '../common/resilience/provider';
 
 function getClient() {
   return config.ckbNetwork === 'mainnet'
     ? new ClientPublicMainnet({ url: config.ckbNodeUrl })
     : new ClientPublicTestnet({ url: config.ckbNodeUrl });
-}
-
-function getTreasurySigner() {
-  return new SignerCkbPrivateKey(
-    getClient(),
-    requireConfig(config.treasuryPrivateKey, 'TREASURY_CKB_PRIVATE_KEY')
-  );
 }
 
 type CkbTxStatus = 'pending' | 'proposed' | 'committed' | 'rejected' | 'unknown';
@@ -104,10 +97,14 @@ export function scriptsEqual(left: unknown, right: unknown) {
 }
 
 async function rpcCall<T>(method: string, params: unknown[] = []): Promise<T> {
-  const response = await fetch(config.ckbNodeUrl, {
+  const response = await executeProviderRequest({
+    provider: 'ckb', operation: method, timeoutMs: 15_000,
+    run: async ({ signal, requestId }) => {
+      const result = await fetch(config.ckbNodeUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      'x-request-id': requestId,
     },
     body: JSON.stringify({
       id: Date.now(),
@@ -115,11 +112,12 @@ async function rpcCall<T>(method: string, params: unknown[] = []): Promise<T> {
       method,
       params,
     }),
+        signal,
+      });
+      assertProviderResponse(result, 'ckb', requestId);
+      return result;
+    },
   });
-
-  if (!response.ok) {
-    throw new Error(`CKB RPC HTTP error: ${response.status} ${response.statusText}`);
-  }
 
   const data = await response.json() as {
     result?: T;
@@ -134,8 +132,7 @@ async function rpcCall<T>(method: string, params: unknown[] = []): Promise<T> {
 }
 
 async function getDerivedTreasuryAddress() {
-  const signer = getTreasurySigner();
-  return String(await signer.getRecommendedAddress());
+  return getTreasurySignerProvider().getAddress();
 }
 
 export async function getTreasuryAddress() {
@@ -156,7 +153,7 @@ export async function getTreasuryAddress() {
     }
 
     console.warn(
-      `[CKB] Configured TREASURY_CKB_ADDRESS does not match TREASURY_CKB_PRIVATE_KEY. Falling back to derived address ${derivedAddress}.`
+      `[CKB] Configured TREASURY_CKB_ADDRESS does not match the treasury signer. Falling back to derived address ${derivedAddress}.`
     );
     return derivedAddress;
   } catch (error) {
@@ -327,15 +324,5 @@ export async function findSpendingTransactionForOutPoint(params: {
 }
 
 export async function sendTreasuryTransfer(toAddress: string, amount: string) {
-  const signer = getTreasurySigner();
-  const tx = Transaction.from({});
-  const to = await Address.fromString(toAddress, signer.client);
-
-  tx.addOutput({
-    lock: to.script,
-    capacity: BigInt(amount),
-  });
-
-  await tx.completeFeeBy(signer, BigInt(config.defaultCkbFeeRate));
-  return signer.sendTransaction(tx);
+  return getTreasurySignerProvider().sendTransfer(toAddress, amount);
 }

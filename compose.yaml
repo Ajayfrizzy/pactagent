@@ -1,0 +1,133 @@
+name: pactagent
+
+x-server-environment: &server-environment
+  NODE_ENV: production
+  SERVICE_ROLE: api
+  DATABASE_URL: postgresql://pactagent:pactagent@postgres:5432/pactagent
+  DIRECT_URL: postgresql://pactagent:pactagent@postgres:5432/pactagent
+  AUTH_JWT_KEYRING_FILE: /run/secrets/jwt_keyring
+  AUTH_JWT_ACTIVE_KID: ${AUTH_JWT_ACTIVE_KID:-jwt-local-1}
+  WEBHOOK_ENCRYPTION_KEYRING_FILE: /run/secrets/webhook_keyring
+  WEBHOOK_ACTIVE_KEY_ID: ${WEBHOOK_ACTIVE_KEY_ID:-webhook-local-1}
+  TREASURY_CKB_PRIVATE_KEY_FILE: /run/secrets/treasury_private_key
+  METRICS_BEARER_TOKEN_FILE: /run/secrets/metrics_bearer_token
+  ADMIN_ADDRESSES: ${ADMIN_ADDRESSES:?Set ADMIN_ADDRESSES}
+  CORS_ORIGIN: ${CORS_ORIGIN:-https://app.example.com}
+  ENABLE_LEGACY_PRODUCT_API: "false"
+  REDIS_URL: redis://redis:6379
+  TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-0}
+
+services:
+  postgres:
+    image: postgres:16.4-bookworm@sha256:e62fbf9d3e2b49816a32c400ed2dba83e3b361e6833e624024309c35d334b412
+    environment:
+      POSTGRES_DB: pactagent
+      POSTGRES_USER: pactagent
+      POSTGRES_PASSWORD: pactagent
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pactagent -d pactagent"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4.0-alpine@sha256:c35af3bbcef51a62c8bae5a9a563c6f1b60d7ebaea4cb5a3ccbcc157580ae098
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory-policy", "noeviction"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+      target: migrate
+    environment: *server-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+      target: runtime
+    environment: *server-environment
+    secrets:
+      - jwt_keyring
+      - webhook_keyring
+      - treasury_private_key
+      - metrics_bearer_token
+    ports:
+      - "4000:4000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+      target: runtime
+    command: ["node", "dist/worker/index.js"]
+    environment:
+      <<: *server-environment
+      SERVICE_ROLE: worker
+      OTEL_SERVICE_NAME: pactagent-worker
+    secrets:
+      - webhook_keyring
+      - treasury_private_key
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+      target: runtime
+    environment:
+      API_PROXY_TARGET: http://api:4000
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/.next/cache
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+
+secrets:
+  jwt_keyring:
+    file: ${AUTH_JWT_KEYRING_SOURCE:?Set AUTH_JWT_KEYRING_SOURCE}
+  webhook_keyring:
+    file: ${WEBHOOK_KEYRING_SOURCE:?Set WEBHOOK_KEYRING_SOURCE}
+  treasury_private_key:
+    file: ${TREASURY_PRIVATE_KEY_SOURCE:?Set TREASURY_PRIVATE_KEY_SOURCE}
+  metrics_bearer_token:
+    file: ${METRICS_BEARER_TOKEN_SOURCE:?Set METRICS_BEARER_TOKEN_SOURCE}

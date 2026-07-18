@@ -208,7 +208,7 @@ export function evaluateProofCompleteness(input: {
   const screenshotExpected = /ui|ux|design|frontend|screen|demo|landing|page|visual|mockup/i.test(
     `${input.milestoneTitle} ${input.milestoneDescription}`
   );
-  const txHashExpected = /deploy|transaction|tx|hash|wallet|ckb|fiber|payment|transfer|onchain|on-chain/i.test(
+  const txHashExpected = /deploy|transaction|tx|hash|wallet|ckb|payment|transfer|onchain|on-chain/i.test(
     `${input.milestoneTitle} ${input.milestoneDescription} ${combinedProofText}`
   );
 

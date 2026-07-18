@@ -65,8 +65,9 @@ function serializeProfile(profile: {
   createdAt: Date;
   updatedAt: Date;
 }) {
+  const { fiberPubkey: _deprecatedFiberPubkey, ...publicProfile } = profile;
   return {
-    ...profile,
+    ...publicProfile,
     skills: parseJsonArray<string>(profile.skillsJson),
     links: parseJsonArray<ProfileLink>(profile.linksJson),
     createdAt: profile.createdAt.toISOString(),
@@ -116,7 +117,6 @@ export async function updateMyProfile(walletAddress: string, input: {
   avatarUrl?: string;
   skills?: string[];
   links?: ProfileLink[];
-  fiberPubkey?: string;
   visibility?: 'PUBLIC' | 'PRIVATE';
 }) {
   const normalizedAddress = normalizeWalletAddress(walletAddress);
@@ -134,7 +134,6 @@ export async function updateMyProfile(walletAddress: string, input: {
       avatarUrl: input.avatarUrl?.trim() || null,
       skillsJson: input.skills ? JSON.stringify(input.skills.filter(Boolean)) : undefined,
       linksJson: input.links ? JSON.stringify(input.links.filter((link) => link.url)) : undefined,
-      fiberPubkey: input.fiberPubkey?.trim() || null,
       visibility: input.visibility || undefined,
     },
   });

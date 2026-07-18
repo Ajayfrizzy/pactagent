@@ -1,4 +1,5 @@
 import { config } from '../config';
+import { assertProviderResponse, executeProviderRequest } from '../common/resilience/provider';
 
 type OpenAIResponse = {
   output_text?: string;
@@ -25,15 +26,15 @@ export async function generateStructuredAiOutput<T>(params: {
     throw new Error('OpenAI structured output is not configured');
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), config.aiTimeoutMs);
-
-  try {
-    const response = await fetch('https://api.openai.com/v1/responses', {
+  const response = await executeProviderRequest({
+    provider: 'ai', operation: 'structured_output', timeoutMs: config.aiTimeoutMs, maxAttempts: 2, concurrency: 4,
+    run: async ({ signal, requestId }) => {
+      const result = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${config.openaiApiKey}`,
+        'x-request-id': requestId,
       },
       body: JSON.stringify({
         model: config.openaiModel,
@@ -56,13 +57,12 @@ export async function generateStructuredAiOutput<T>(params: {
           },
         },
       }),
-      signal: controller.signal,
+      signal,
     });
-
-    if (!response.ok) {
-      const rawError = await response.text();
-      throw new Error(`OpenAI API error ${response.status}: ${rawError}`);
-    }
+      assertProviderResponse(result, 'ai', requestId);
+      return result;
+    },
+  });
 
     const data = await response.json() as OpenAIResponse;
     const rawOutput = data.output_text?.trim();
@@ -70,8 +70,5 @@ export async function generateStructuredAiOutput<T>(params: {
       throw new Error(data.error?.message || 'OpenAI response did not include structured output');
     }
 
-    return JSON.parse(rawOutput) as T;
-  } finally {
-    clearTimeout(timeout);
-  }
+  return JSON.parse(rawOutput) as T;
 }

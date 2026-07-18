@@ -18,7 +18,6 @@ import {
   generateRecommendation,
   saveRecommendation,
 } from '../services/disputeService';
-import { attemptFiberPayout } from '../services/fiberService';
 import {
   claimAvailableJobs,
   completeJob,
@@ -33,7 +32,10 @@ import {
   startProofReview,
 } from '../services/reportReviewService';
 import { listSourceSyncCandidates, syncAgreementSource } from '../services/sourceSyncService';
-import { deliverWebhookDelivery } from '../services/webhookService';
+import { deliverWebhookDelivery as deliverInfrastructureWebhookDelivery } from '../modules/webhooks/webhook.service';
+import { cleanupExpiredIdempotencyKeys } from '../common/idempotency/idempotency.repository';
+
+let lastIdempotencyCleanupAt = 0;
 
 let cycleInProgress = false;
 const workerId = `embedded-worker:${process.pid}`;
@@ -135,14 +137,18 @@ function buildProcessKey(agreement: any, now: Date) {
   return parts.join(':');
 }
 
-export async function runAgentCycle(): Promise<void> {
+export async function runAgentCycle(): Promise<boolean> {
   if (cycleInProgress) {
-    return;
+    return true;
   }
 
   cycleInProgress = true;
 
   try {
+    if (Date.now() - lastIdempotencyCleanupAt >= 10 * 60 * 1000) {
+      await cleanupExpiredIdempotencyKeys();
+      lastIdempotencyCleanupAt = Date.now();
+    }
     await releaseStaleLocks();
     await scheduleSystemJobs();
     const claimedJobs = await claimAvailableJobs(workerId, 12);
@@ -170,9 +176,11 @@ export async function runAgentCycle(): Promise<void> {
     }
   } catch (err) {
     console.error('[AGENT] Cycle error:', err);
+    return false;
   } finally {
     cycleInProgress = false;
   }
+  return true;
 }
 
 async function scheduleSystemJobs() {
@@ -342,7 +350,24 @@ async function processJob(job: {
       return;
     case 'DELIVER_WEBHOOK':
       if (payload.deliveryId) {
-        await deliverWebhookDelivery(payload.deliveryId);
+        const delivery = await prisma.webhookDelivery.findUnique({
+          where: { id: payload.deliveryId },
+          select: { appId: true },
+        });
+
+        if (delivery?.appId) {
+          await deliverInfrastructureWebhookDelivery(payload.deliveryId);
+        } else {
+          await prisma.webhookDelivery.update({
+            where: { id: payload.deliveryId },
+            data: {
+              status: 'FAILED',
+              attempts: { increment: 1 },
+              lastError: 'Legacy webhook deliveries are disabled. Use app-scoped /v1 webhook endpoints.',
+              nextRetryAt: null,
+            },
+          });
+        }
       }
       return;
     case 'SYNC_SOURCE_THREAD':

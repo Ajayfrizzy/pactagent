@@ -12,7 +12,6 @@ import {
   generateRecommendation,
   saveRecommendation,
 } from '../services/disputeService';
-import { isValidFiberPublicKey } from '../services/fiberService';
 import { normalizeWalletAddress } from '../services/authService';
 import {
   buildInfoRequestComment,
@@ -85,13 +84,12 @@ const createAgreementSchema = z.object({
   description: z.string().min(1).max(2000),
   clientAddress: z.string().min(1),
   workerAddress: z.string().min(1),
-  workerFiberPubkey: z.string().min(1).optional(),
   deadlineAt: z.string().datetime(),
   disputeWindowSecs: z.number().int().min(3600).default(86400),
   proofType: z.enum(['URL', 'TEXT', 'FILE_HASH']).default('URL'),
   reviewerMode: z.enum(['AUTO', 'HYBRID', 'MANUAL']).default('AUTO'),
   releaseMode: z.enum(['FULL', 'PARTIAL']).default('FULL'),
-  payoutNetwork: z.enum(['CKB', 'FIBER']).default('CKB'),
+  payoutNetwork: z.literal('CKB').default('CKB'),
   escrowModel: z.enum(['TREASURY_BRIDGE', 'ONCHAIN_LOCK']).default('TREASURY_BRIDGE'),
   milestones: z
     .array(
@@ -284,13 +282,12 @@ const updateDraftSchema = z.object({
   title: z.string().min(1).max(200),
   description: z.string().min(1).max(2000),
   workerAddress: z.string().min(1),
-  workerFiberPubkey: z.string().min(1).optional(),
   deadlineAt: z.string().datetime(),
   disputeWindowSecs: z.number().int().min(3600),
   proofType: z.enum(['URL', 'TEXT', 'FILE_HASH']),
   reviewerMode: z.enum(['AUTO', 'HYBRID', 'MANUAL']),
   releaseMode: z.enum(['FULL', 'PARTIAL']),
-  payoutNetwork: z.enum(['CKB', 'FIBER']),
+  payoutNetwork: z.literal('CKB'),
   milestones: z.array(z.object({
     id: z.string().optional(),
     title: z.string().min(1).max(120),
@@ -312,8 +309,7 @@ const createAmendmentSchema = z.object({
   deadlineAt: z.string().datetime().optional(),
   disputeWindowSecs: z.number().int().min(3600).optional(),
   releaseMode: z.enum(['FULL', 'PARTIAL']).optional(),
-  payoutNetwork: z.enum(['CKB', 'FIBER']).optional(),
-  workerFiberPubkey: z.string().optional(),
+  payoutNetwork: z.literal('CKB').optional(),
   milestones: z.array(z.object({
     id: z.string().min(1),
     title: z.string().max(120).optional(),
@@ -400,20 +396,6 @@ router.post('/', actionRateLimit, async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, error: 'Authenticated wallet must match the client address' });
     }
 
-    if (data.payoutNetwork === 'FIBER' && !data.workerFiberPubkey) {
-      return res.status(400).json({
-        success: false,
-        error: 'Fiber payouts require the worker Fiber public key.',
-      });
-    }
-
-    if (data.workerFiberPubkey && !isValidFiberPublicKey(data.workerFiberPubkey)) {
-      return res.status(400).json({
-        success: false,
-        error: 'The worker Fiber public key format is invalid.',
-      });
-    }
-
     const agreement = await agreementService.createAgreement(data);
     await createAuditLog({
       agreementId: agreement.id,
@@ -442,20 +424,6 @@ router.post('/import-bounty', actionRateLimit, async (req: Request, res: Respons
 
     if (normalizeWalletAddress(data.agreement.clientAddress) !== authAddress) {
       return res.status(403).json({ success: false, error: 'Authenticated wallet must match the client address' });
-    }
-
-    if (data.agreement.payoutNetwork === 'FIBER' && !data.agreement.workerFiberPubkey) {
-      return res.status(400).json({
-        success: false,
-        error: 'Fiber payouts require the worker Fiber public key.',
-      });
-    }
-
-    if (data.agreement.workerFiberPubkey && !isValidFiberPublicKey(data.agreement.workerFiberPubkey)) {
-      return res.status(400).json({
-        success: false,
-        error: 'The worker Fiber public key format is invalid.',
-      });
     }
 
     const agreement = await agreementService.createAgreement({

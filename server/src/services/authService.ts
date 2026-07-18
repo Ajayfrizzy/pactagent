@@ -17,6 +17,25 @@ type ChallengeRecord = {
 
 const challengeStore = new Map<string, ChallengeRecord>();
 
+function jwtSigningKey() {
+  return requireConfig(
+    config.authJwtKeys[config.authJwtActiveKid] || config.authJwtSecret,
+    `JWT signing key ${config.authJwtActiveKid}`,
+  );
+}
+
+function jwtVerificationKey(token: string) {
+  const decoded = jwt.decode(token, { complete: true });
+  const kid = decoded?.header.kid;
+  if (kid && config.authJwtKeys[kid]) {
+    return config.authJwtKeys[kid];
+  }
+  if (!kid || kid === 'legacy') {
+    return requireConfig(config.authJwtSecret || config.authJwtKeys.legacy, 'legacy JWT verification key');
+  }
+  throw new Error('Unknown authentication token key ID.');
+}
+
 function getClient() {
   return config.ckbNetwork === 'mainnet'
     ? new ClientPublicMainnet({ url: config.ckbNodeUrl })
@@ -150,8 +169,8 @@ export async function verifyChallenge(params: {
 
   const token = jwt.sign(
     { address: normalized },
-    requireConfig(config.authJwtSecret, 'AUTH_JWT_SECRET'),
-    { expiresIn: config.authTokenTtlSecs }
+    jwtSigningKey(),
+    { expiresIn: config.authTokenTtlSecs, keyid: config.authJwtActiveKid, algorithm: 'HS256' }
   );
 
   return {
@@ -165,7 +184,8 @@ export async function verifyChallenge(params: {
 export function verifyAuthToken(token: string) {
   const decoded = jwt.verify(
     token,
-    requireConfig(config.authJwtSecret, 'AUTH_JWT_SECRET')
+    jwtVerificationKey(token),
+    { algorithms: ['HS256'] },
   ) as jwt.JwtPayload & { address: string };
 
   if (!decoded.address || typeof decoded.address !== 'string') {

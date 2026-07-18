@@ -6,9 +6,7 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider = "postgresql"
 }
 
 model User {
@@ -18,58 +16,127 @@ model User {
   createdAt     DateTime @default(now())
 }
 
-model Agreement {
-  id                    String    @id @default(uuid())
-  title                 String
-  description           String
-  clientAddress         String
-  workerAddress         String
-  arbitratorAddress     String?
-  workerFiberPubkey     String?
-  amount                String    // CKB in shannons, stored as string for bigint safety
-  deadlineAt            DateTime
-  disputeWindowSecs     Int       @default(86400) // 24 hours default
-  proofType             String    @default("URL") // URL | TEXT | FILE_HASH
-  reviewerMode          String    @default("AUTO") // AUTO | HYBRID | MANUAL
-  releaseMode           String    @default("FULL") // FULL | PARTIAL
-  payoutNetwork         String    @default("CKB") // CKB | FIBER
-  escrowModel           String    @default("TREASURY_BRIDGE") // TREASURY_BRIDGE | ONCHAIN_LOCK
-  escrowAddress         String?
-  escrowLockCodeHash    String?
-  escrowLockHashType    String?
-  escrowLockArgs        String?
-  agreementDigest       String?
-  milestoneDigest       String?
-  pricingMode           String    @default("FIXED_CKB") // FIXED_CKB | USD_EQUIVALENT
-  reserveCkbLocked      String    @default("0")
-  reserveCkbRemaining   String    @default("0")
-  reserveFundingQuoteUsdPerCkb Float?
-  reserveHealthStatus   String    @default("HEALTHY") // HEALTHY | TOP_UP_REQUIRED
-  settlementStatus      String    @default("UNFUNDED") // SettlementStatus enum
-  fundingConfirmedAt    DateTime?
-  lastSettlementError   String?
-  ckbTxHashCreate       String?
-  ckbTxHashFund         String?
-  ckbTxHashRelease      String?
-  fiberPaymentReference String?
-  status                String    @default("DRAFT") // AgreementStatus enum
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+model App {
+  id              String   @id @default(uuid())
+  name            String
+  slug            String
+  ownerUserId     String
+  environment     String   @default("sandbox") // sandbox | production
+  status          String   @default("active") // active | disabled | suspended
+  defaultCurrency String   @default("CKB")
+  defaultNetwork  String   @default("sandbox")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  milestones Milestone[]
-  proofs    Proof[]
-  disputes  Dispute[]
-  agentLogs AgentLog[]
-  settlements MilestoneSettlement[]
-  auditLogs AuditLog[]
-  comments AgreementComment[]
-  amendments AgreementAmendment[]
-  jobs AgentJob[]
-  source AgreementSource?
+  apiKeys           ApiKey[]
+  agreements        Agreement[]
+  milestones        Milestone[]
+  escrows           Escrow[]
+  transactions      Transaction[]
+  idempotencyKeys   IdempotencyKey[]
+  proofs            Proof[]
+  reviews           Review[]
+  disputes          Dispute[]
+  events            Event[]
+  auditLogs         AuditLog[]
+  webhookEndpoints  WebhookEndpoint[]
   webhookDeliveries WebhookDelivery[]
-  proofChecks ProofCheck[]
-  infoRequests InfoRequest[]
 
+  @@unique([ownerUserId, slug])
+  @@index([ownerUserId, createdAt])
+  @@index([environment, status])
+}
+
+model ApiKey {
+  id          String    @id @default(uuid())
+  appId       String
+  name        String
+  keyPrefix   String
+  keyHash     String    @unique
+  environment String    @default("sandbox") // sandbox | production
+  status      String    @default("active") // active | revoked
+  scopes      String[]
+  lastUsedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  revokedAt   DateTime?
+
+  app App @relation(fields: [appId], references: [id])
+
+  @@index([appId, status])
+  @@index([keyPrefix])
+  @@index([environment, status])
+}
+
+model Agreement {
+  id                           String    @id @default(uuid())
+  appId                        String
+  externalReferenceId          String?
+  title                        String
+  description                  String
+  clientExternalId             String?
+  workerExternalId             String?
+  clientAddress                String
+  workerAddress                String
+  arbitratorAddress            String?
+  workerFiberPubkey            String? // Deprecated historical data; Fiber is not an active payout rail.
+  amount                       String // CKB in shannons, stored as string for bigint safety
+  currency                     String    @default("CKB")
+  deadlineAt                   DateTime
+  disputeWindowSecs            Int       @default(86400) // 24 hours default
+  proofType                    String    @default("URL") // URL | TEXT | FILE_HASH
+  reviewerMode                 String    @default("AUTO") // AUTO | HYBRID | MANUAL
+  releaseMode                  String    @default("FULL") // FULL | PARTIAL
+  infrastructureReleaseMode    String?
+  disputeMode                  String?
+  sourceType                   String?
+  sourceUrl                    String?
+  metadataJson                 String?
+  payoutNetwork                String    @default("CKB") // New and active agreements use CKB only.
+  escrowModel                  String    @default("TREASURY_BRIDGE") // TREASURY_BRIDGE | ONCHAIN_LOCK
+  escrowAddress                String?
+  escrowLockCodeHash           String?
+  escrowLockHashType           String?
+  escrowLockArgs               String?
+  agreementDigest              String?
+  milestoneDigest              String?
+  pricingMode                  String    @default("FIXED_CKB") // FIXED_CKB | USD_EQUIVALENT
+  reserveCkbLocked             String    @default("0")
+  reserveCkbRemaining          String    @default("0")
+  reserveFundingQuoteUsdPerCkb Decimal?  @db.Decimal(30, 12)
+  reserveHealthStatus          String    @default("HEALTHY") // HEALTHY | TOP_UP_REQUIRED
+  settlementStatus             String    @default("UNFUNDED") // SettlementStatus enum
+  fundingConfirmedAt           DateTime?
+  lastSettlementError          String?
+  ckbTxHashCreate              String?
+  ckbTxHashFund                String?
+  ckbTxHashRelease             String?
+  fiberPaymentReference        String? // Deprecated historical data.
+  status                       String    @default("DRAFT") // AgreementStatus enum
+  createdAt                    DateTime  @default(now())
+  updatedAt                    DateTime  @updatedAt
+
+  app                        App                   @relation(fields: [appId], references: [id])
+  milestones                 Milestone[]
+  proofs                     Proof[]
+  disputes                   Dispute[]
+  agentLogs                  AgentLog[]
+  settlements                MilestoneSettlement[]
+  auditLogs                  AuditLog[]
+  comments                   AgreementComment[]
+  amendments                 AgreementAmendment[]
+  jobs                       AgentJob[]
+  source                     AgreementSource?
+  webhookDeliveries          WebhookDelivery[]
+  proofChecks                ProofCheck[]
+  infoRequests               InfoRequest[]
+  events                     Event[]
+  escrows                    Escrow[]
+  infrastructureTransactions Transaction[]
+  reviews                    Review[]
+
+  @@unique([appId, externalReferenceId])
+  @@unique([id, appId])
+  @@index([appId, createdAt])
   @@index([clientAddress, createdAt])
   @@index([workerAddress, createdAt])
   @@index([status, createdAt])
@@ -96,69 +163,69 @@ model PublicProfile {
 }
 
 model ReputationSnapshot {
-  id                         String   @id @default(uuid())
-  walletAddress              String   @unique
-  completedAgreements        Int      @default(0)
-  totalFundedAmount          String   @default("0")
-  totalPaidAmount            String   @default("0")
-  payoutSuccessRate          Float    @default(0)
-  disputeRate                Float    @default(0)
-  repeatCounterpartyCount    Int      @default(0)
-  onTimeMilestoneRate        Float    @default(0)
-  sourceAgreementCount       Int      @default(0)
-  updatedAt                  DateTime @updatedAt
+  id                      String   @id @default(uuid())
+  walletAddress           String   @unique
+  completedAgreements     Int      @default(0)
+  totalFundedAmount       String   @default("0")
+  totalPaidAmount         String   @default("0")
+  payoutSuccessRate       Float    @default(0)
+  disputeRate             Float    @default(0)
+  repeatCounterpartyCount Int      @default(0)
+  onTimeMilestoneRate     Float    @default(0)
+  sourceAgreementCount    Int      @default(0)
+  updatedAt               DateTime @updatedAt
 
   @@index([walletAddress, updatedAt])
 }
 
 model InviteLink {
-  id                  String   @id @default(uuid())
-  token               String   @unique
-  createdByAddress    String
-  creatorRole         String   // CLIENT | WORKER
-  targetRole          String   // CLIENT | WORKER
-  title               String?
-  description         String?
+  id                    String    @id @default(uuid())
+  token                 String    @unique
+  createdByAddress      String
+  creatorRole           String // CLIENT | WORKER
+  targetRole            String // CLIENT | WORKER
+  title                 String?
+  description           String?
   agreementTemplateJson String
-  expiresAt           DateTime?
-  maxUses             Int      @default(1)
-  useCount            Int      @default(0)
-  acceptedByAddress   String?
-  acceptedAt          DateTime?
-  isActive            Boolean  @default(true)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  expiresAt             DateTime?
+  maxUses               Int       @default(1)
+  useCount              Int       @default(0)
+  acceptedByAddress     String?
+  acceptedAt            DateTime?
+  isActive              Boolean   @default(true)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   @@index([createdByAddress, createdAt])
   @@index([isActive, expiresAt])
 }
 
 model AgreementSource {
-  id                String   @id @default(uuid())
-  agreementId       String   @unique
-  sourceType        String   // DAO | BOUNTY
-  sourceLabel       String
-  externalUrl       String
-  forumThreadUrl    String?
-  sourceReferenceId String?
-  externalMetadataJson String?
-  sponsorName       String?
-  bountyTitle       String
-  bountyDescription String?
-  governanceNotes   String?
-  syncStatus        String   @default("READY_TO_SYNC") // READY_TO_SYNC | SYNCED | DRAFTED | REVIEWED | PUBLISHED | FAILED | NOT_CONFIGURED
-  lastSyncedAt      DateTime?
-  latestSummary     String?
-  draftUpdate       String?
-  lastPublishedAt   DateTime?
-  lastPublishedUrl  String?
+  id                      String    @id @default(uuid())
+  agreementId             String    @unique
+  sourceType              String // DAO | BOUNTY
+  sourceLabel             String
+  externalUrl             String
+  forumThreadUrl          String?
+  sourceReferenceId       String?
+  externalMetadataJson    String?
+  sponsorName             String?
+  bountyTitle             String
+  bountyDescription       String?
+  governanceNotes         String?
+  syncStatus              String    @default("READY_TO_SYNC") // READY_TO_SYNC | SYNCED | DRAFTED | REVIEWED | PUBLISHED | FAILED | NOT_CONFIGURED
+  lastSyncedAt            DateTime?
+  latestSummary           String?
+  draftUpdate             String?
+  lastPublishedAt         DateTime?
+  lastPublishedUrl        String?
   lastPublishedExternalId String?
-  lastPublishError  String?
-  reviewedAt        DateTime?
-  reviewedByAddress String?
-  createdByAddress  String
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  lastPublishError        String?
+  reviewedAt              DateTime?
+  reviewedByAddress       String?
+  createdByAddress        String
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
 
   agreement Agreement @relation(fields: [agreementId], references: [id])
 
@@ -167,113 +234,282 @@ model AgreementSource {
 }
 
 model WebhookEndpoint {
-  id             String   @id @default(uuid())
-  ownerAddress   String
-  label          String?
-  targetUrl      String
-  eventTypesJson String
-  signingSecret  String
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                   String    @id @default(uuid())
+  appId                String?
+  ownerAddress         String
+  label                String?
+  targetUrl            String
+  url                  String?
+  description          String?
+  eventTypesJson       String
+  subscribedEvents     String[]  @default([])
+  signingSecret        String
+  secretHash           String?
+  secretCiphertext     String?
+  encryptionKeyVersion String?
+  status               String    @default("active") // active | disabled
+  isActive             Boolean   @default(true)
+  deletedAt            DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
+  app        App?              @relation(fields: [appId], references: [id])
   deliveries WebhookDelivery[]
 
+  @@unique([id, appId])
+  @@index([appId, status, createdAt])
+  @@index([encryptionKeyVersion])
   @@index([ownerAddress, createdAt])
   @@index([isActive, createdAt])
 }
 
 model WebhookDelivery {
-  id           String    @id @default(uuid())
-  endpointId    String
-  agreementId   String?
-  eventType     String
-  payloadJson   String
-  payloadHash   String
-  status        String    @default("PENDING") // PENDING | DELIVERED | FAILED | RETRY
-  statusCode    Int?
-  attempts      Int       @default(0)
-  lastError     String?
-  nextRetryAt   DateTime?
-  deliveredAt   DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id                  String    @id @default(uuid())
+  appId               String?
+  endpointId          String
+  eventId             String?
+  agreementId         String?
+  eventType           String
+  payloadJson         String
+  payloadHash         String
+  status              String    @default("PENDING") // PENDING | DELIVERED | FAILED | RETRY
+  statusCode          Int?
+  responseBodySnippet String?
+  attempts            Int       @default(0)
+  lastError           String?
+  nextRetryAt         DateTime?
+  deliveredAt         DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   endpoint  WebhookEndpoint @relation(fields: [endpointId], references: [id])
+  app       App?            @relation(fields: [appId], references: [id])
+  event     Event?          @relation(fields: [eventId], references: [id])
   agreement Agreement?      @relation(fields: [agreementId], references: [id])
 
+  @@index([appId, createdAt])
+  @@index([appId, status, nextRetryAt])
   @@index([endpointId, createdAt])
+  @@index([eventId, createdAt])
   @@index([status, nextRetryAt, createdAt])
   @@index([agreementId, createdAt])
 }
 
 model Milestone {
-  id          String   @id @default(uuid())
-  agreementId String
-  title       String
-  description String
-  amount      String
-  targetUsd   Float?
-  releaseQuoteUsdPerCkb Float?
-  releasedCkbAmount String?
-  releasedUsdValue Float?
-  sortOrder   Int
-  status      String   @default("PENDING")
-  escrowFundingTxHash String?
-  escrowOutputIndex   Int?
-  escrowCellData      String?
-  refundTimeoutBlock  BigInt?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                    String    @id @default(uuid())
+  appId                 String
+  agreementId           String
+  externalReferenceId   String?
+  title                 String
+  description           String
+  amount                String
+  currency              String?
+  targetUsd             Decimal?  @db.Decimal(30, 12)
+  releaseQuoteUsdPerCkb Decimal?  @db.Decimal(30, 12)
+  releasedCkbAmount     String?
+  releasedUsdValue      Decimal?  @db.Decimal(30, 12)
+  sortOrder             Int
+  status                String    @default("PENDING")
+  escrowFundingTxHash   String?
+  escrowOutputIndex     Int?
+  escrowCellData        String?
+  refundTimeoutBlock    BigInt?
+  dueDate               DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
-  agreement Agreement @relation(fields: [agreementId], references: [id])
-  proofs    Proof[]
-  disputes  Dispute[]
-  settlements MilestoneSettlement[]
-  proofChecks ProofCheck[]
-  infoRequests InfoRequest[]
+  app                        App                   @relation(fields: [appId], references: [id])
+  agreement                  Agreement             @relation(fields: [agreementId], references: [id])
+  proofs                     Proof[]
+  disputes                   Dispute[]
+  reviews                    Review[]
+  settlements                MilestoneSettlement[]
+  proofChecks                ProofCheck[]
+  infoRequests               InfoRequest[]
+  events                     Event[]
+  escrows                    Escrow[]
+  infrastructureTransactions Transaction[]
 
+  @@unique([appId, externalReferenceId])
   @@unique([agreementId, sortOrder])
+  @@unique([id, appId])
+  @@index([appId, createdAt])
   @@index([agreementId, status])
 }
 
-model Proof {
-  id          String   @id @default(uuid())
-  agreementId String
-  milestoneId String
-  proofType   String   // URL | TEXT | FILE_HASH
-  content     String
-  contentHash String
-  submittedAt DateTime @default(now())
-  reviewStatus String  @default("UNREVIEWED") // UNREVIEWED | CHECKING | ISSUES_FOUND | READY_FOR_HUMAN_REVIEW | NEEDS_MORE_INFO
-  lastCheckedAt DateTime?
+model Event {
+  id                String   @id @default(uuid())
+  appId             String
+  type              String
+  agreementId       String?
+  milestoneId       String?
+  escrowId          String?
+  proofSubmissionId String?
+  disputeId         String?
+  payloadJson       String
+  createdAt         DateTime @default(now())
 
-  agreement Agreement @relation(fields: [agreementId], references: [id])
-  milestone Milestone @relation(fields: [milestoneId], references: [id])
-  proofChecks ProofCheck[]
+  app               App               @relation(fields: [appId], references: [id])
+  agreement         Agreement?        @relation(fields: [agreementId], references: [id])
+  milestone         Milestone?        @relation(fields: [milestoneId], references: [id])
+  escrow            Escrow?           @relation(fields: [escrowId], references: [id])
+  webhookDeliveries WebhookDelivery[]
+
+  @@unique([id, appId])
+  @@index([appId, createdAt])
+  @@index([appId, type, createdAt])
+  @@index([agreementId, createdAt])
+  @@index([milestoneId, createdAt])
+}
+
+model Escrow {
+  id            String   @id @default(uuid())
+  appId         String
+  agreementId   String
+  milestoneId   String?
+  amount        String
+  currency      String
+  rail          String   @default("mock") // mock | manual | ckb | future_fiat | future_usdt
+  network       String   @default("sandbox") // sandbox | testnet | mainnet
+  status        String   @default("not_created")
+  lockAddress   String?
+  lockTxHash    String?
+  releaseTxHash String?
+  refundTxHash  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  app          App           @relation(fields: [appId], references: [id])
+  agreement    Agreement     @relation(fields: [agreementId], references: [id])
+  milestone    Milestone?    @relation(fields: [milestoneId], references: [id])
+  events       Event[]
+  transactions Transaction[]
+
+  @@unique([id, appId])
+  @@index([appId, createdAt])
+  @@index([appId, status, createdAt])
+  @@index([agreementId, createdAt])
+  @@index([milestoneId, createdAt])
+}
+
+model Transaction {
+  id             String   @id @default(uuid())
+  appId          String
+  agreementId    String?
+  milestoneId    String?
+  escrowId       String?
+  type           String // lock | release | refund | manual_adjustment
+  rail           String // mock | manual | ckb | future_fiat | future_usdt
+  network        String // sandbox | testnet | mainnet
+  status         String   @default("pending") // pending | confirmed | failed
+  txHash         String?
+  amount         String
+  currency       String
+  rawPayloadJson String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  app       App        @relation(fields: [appId], references: [id])
+  agreement Agreement? @relation(fields: [agreementId], references: [id])
+  milestone Milestone? @relation(fields: [milestoneId], references: [id])
+  escrow    Escrow?    @relation(fields: [escrowId], references: [id])
+
+  @@index([appId, createdAt])
+  @@index([escrowId, type, createdAt])
+  @@index([agreementId, createdAt])
+  @@index([milestoneId, createdAt])
+}
+
+model IdempotencyKey {
+  id                  String   @id @default(uuid())
+  appId               String
+  key                 String
+  requestHash         String
+  status              String   @default("pending") // pending | completed
+  responseStatus      Int?
+  responseBodyJson    String?
+  responseBytes       Int?
+  processingExpiresAt DateTime
+  expiresAt           DateTime
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  app App @relation(fields: [appId], references: [id])
+
+  @@unique([appId, key])
+  @@index([appId, createdAt])
+  @@index([expiresAt])
+  @@index([status, processingExpiresAt])
+}
+
+model Proof {
+  id                    String    @id @default(uuid())
+  appId                 String
+  agreementId           String
+  milestoneId           String
+  submittedByExternalId String?
+  proofType             String // URL | TEXT | FILE_HASH
+  content               String
+  contentHash           String
+  linksJson             String?
+  fileRefsJson          String?
+  status                String    @default("submitted")
+  submittedAt           DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  reviewStatus          String    @default("UNREVIEWED") // UNREVIEWED | CHECKING | ISSUES_FOUND | READY_FOR_HUMAN_REVIEW | NEEDS_MORE_INFO
+  lastCheckedAt         DateTime?
+
+  app          App           @relation(fields: [appId], references: [id])
+  agreement    Agreement     @relation(fields: [agreementId], references: [id])
+  milestone    Milestone     @relation(fields: [milestoneId], references: [id])
+  reviews      Review[]
+  proofChecks  ProofCheck[]
   infoRequests InfoRequest[]
 
+  @@unique([id, appId])
+  @@index([appId, submittedAt])
   @@index([agreementId, milestoneId, submittedAt])
   @@index([milestoneId, reviewStatus, submittedAt])
 }
 
+model Review {
+  id                 String   @id @default(uuid())
+  appId              String
+  agreementId        String
+  milestoneId        String?
+  proofSubmissionId  String
+  reviewerExternalId String
+  decision           String // approved | rejected | needs_changes
+  note               String?
+  createdAt          DateTime @default(now())
+
+  app       App        @relation(fields: [appId], references: [id])
+  agreement Agreement  @relation(fields: [agreementId], references: [id])
+  milestone Milestone? @relation(fields: [milestoneId], references: [id])
+  proof     Proof      @relation(fields: [proofSubmissionId], references: [id])
+
+  @@index([appId, createdAt])
+  @@index([proofSubmissionId, createdAt])
+  @@index([agreementId, createdAt])
+}
+
 model ProofCheck {
-  id           String   @id @default(uuid())
-  agreementId   String
-  milestoneId   String
-  proofId       String
-  status        String   // CHECKING | ISSUES_FOUND | READY_FOR_HUMAN_REVIEW | NEEDS_MORE_INFO
-  issueCount    Int      @default(0)
-  warningCount  Int      @default(0)
-  summary       String
-  warningsJson  String?
-  checklistJson String?
+  id                 String    @id @default(uuid())
+  agreementId        String
+  milestoneId        String
+  proofId            String
+  status             String // CHECKING | ISSUES_FOUND | READY_FOR_HUMAN_REVIEW | NEEDS_MORE_INFO
+  issueCount         Int       @default(0)
+  warningCount       Int       @default(0)
+  summary            String
+  warningsJson       String?
+  checklistJson      String?
   triggeredByAddress String?
-  triggeredByType String  @default("USER") // USER | SYSTEM
-  asyncJobId    String?
-  completedAt   DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  triggeredByType    String    @default("USER") // USER | SYSTEM
+  asyncJobId         String?
+  completedAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   agreement Agreement @relation(fields: [agreementId], references: [id])
   milestone Milestone @relation(fields: [milestoneId], references: [id])
@@ -285,22 +521,22 @@ model ProofCheck {
 }
 
 model InfoRequest {
-  id             String   @id @default(uuid())
-  agreementId     String
-  milestoneId     String
-  proofId         String?
-  requestType     String   @default("STRUCTURED_REVIEW_REQUEST") // STRUCTURED_REVIEW_REQUEST | MESSAGE
-  status          String   @default("OPEN") // OPEN | RESPONDED | CLOSED
-  requestedBy     String
-  note            String?
-  questionsJson   String
-  responseContent String?
-  respondedBy     String?
-  respondedAt     DateTime?
-  commentId       String?
+  id                String    @id @default(uuid())
+  agreementId       String
+  milestoneId       String
+  proofId           String?
+  requestType       String    @default("STRUCTURED_REVIEW_REQUEST") // STRUCTURED_REVIEW_REQUEST | MESSAGE
+  status            String    @default("OPEN") // OPEN | RESPONDED | CLOSED
+  requestedBy       String
+  note              String?
+  questionsJson     String
+  responseContent   String?
+  respondedBy       String?
+  respondedAt       DateTime?
+  commentId         String?
   responseCommentId String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   agreement Agreement @relation(fields: [agreementId], references: [id])
   milestone Milestone @relation(fields: [milestoneId], references: [id])
@@ -311,23 +547,34 @@ model InfoRequest {
 }
 
 model Dispute {
-  id               String    @id @default(uuid())
-  agreementId      String
-  milestoneId      String
-  openedBy         String    // wallet address
-  reason           String
-  evidenceNotes    String?
-  aiSummary        String?
-  aiRecommendation String?   // DisputeRecommendation enum
-  aiConfidence     Float?
-  aiRationale      String?
-  resolvedAt       DateTime?
-  createdAt        DateTime  @default(now())
+  id                 String    @id @default(uuid())
+  appId              String
+  agreementId        String
+  milestoneId        String
+  openedByExternalId String?
+  openedBy           String // wallet address
+  reason             String
+  evidenceLinksJson  String?
+  status             String    @default("open")
+  resolutionType     String?
+  resolutionNote     String?
+  workerAmount       String?
+  clientAmount       String?
+  evidenceNotes      String?
+  aiSummary          String?
+  aiRecommendation   String? // DisputeRecommendation enum
+  aiConfidence       Float?
+  aiRationale        String?
+  resolvedAt         DateTime?
+  createdAt          DateTime  @default(now())
 
-  agreement       Agreement       @relation(fields: [agreementId], references: [id])
-  milestone       Milestone       @relation(fields: [milestoneId], references: [id])
+  app             App               @relation(fields: [appId], references: [id])
+  agreement       Agreement         @relation(fields: [agreementId], references: [id])
+  milestone       Milestone         @relation(fields: [milestoneId], references: [id])
   evidenceEntries DisputeEvidence[]
 
+  @@unique([id, appId])
+  @@index([appId, createdAt])
   @@index([agreementId, milestoneId, resolvedAt])
 }
 
@@ -346,10 +593,10 @@ model DisputeEvidence {
 model AgentLog {
   id           String   @id @default(uuid())
   agreementId  String?
-  level        String   // INFO | WARN | ERROR | SUCCESS
-  eventType    String   // AgentEventType enum
+  level        String // INFO | WARN | ERROR | SUCCESS
+  eventType    String // AgentEventType enum
   message      String
-  metadataJson String?  // JSON string for flexible metadata
+  metadataJson String? // JSON string for flexible metadata
   createdAt    DateTime @default(now())
 
   agreement Agreement? @relation(fields: [agreementId], references: [id])
@@ -360,38 +607,52 @@ model AgentLog {
 
 model AuditLog {
   id           String   @id @default(uuid())
+  appId        String?
   agreementId  String?
   actorAddress String?
-  actorType    String   // USER | SYSTEM
+  actorType    String // USER | SYSTEM
+  actorId      String?
   action       String
-  resourceType String   // AGREEMENT | DISPUTE | SETTLEMENT | FIBER
+  resourceType String // AGREEMENT | DISPUTE | SETTLEMENT | FIBER
   resourceId   String
+  targetType   String?
+  targetId     String?
   metadataJson String?
+  beforeJson   String?
+  afterJson    String?
+  ipAddress    String?
+  userAgent    String?
+  requestId    String?
+  previousHash String?
+  recordHash   String?  @unique
   createdAt    DateTime @default(now())
 
+  app       App?       @relation(fields: [appId], references: [id])
   agreement Agreement? @relation(fields: [agreementId], references: [id])
 
+  @@index([appId, createdAt])
   @@index([agreementId, createdAt])
   @@index([actorAddress, createdAt])
+  @@index([requestId, createdAt])
   @@index([resourceType, resourceId, createdAt])
 }
 
 model MilestoneSettlement {
-  id               String   @id @default(uuid())
-  agreementId       String
-  milestoneId       String?
-  direction         String   // FUNDING | PAYOUT | REFUND
-  network           String   // CKB | FIBER | INTERNAL
-  status            String   @default("PENDING") // PENDING | CONFIRMED | FAILED
-  amount            String
-  txHash            String?
-  paymentReference  String?
-  errorMessage      String?
-  confirmedAt       DateTime?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id               String    @id @default(uuid())
+  agreementId      String
+  milestoneId      String?
+  direction        String // FUNDING | PAYOUT | REFUND
+  network          String // CKB | FIBER | INTERNAL
+  status           String    @default("PENDING") // PENDING | CONFIRMED | FAILED
+  amount           String
+  txHash           String?
+  paymentReference String?
+  errorMessage     String?
+  confirmedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  agreement Agreement @relation(fields: [agreementId], references: [id])
+  agreement Agreement  @relation(fields: [agreementId], references: [id])
   milestone Milestone? @relation(fields: [milestoneId], references: [id])
 
   @@index([agreementId, direction, status, createdAt])
@@ -400,11 +661,11 @@ model MilestoneSettlement {
 
 model AgreementComment {
   id            String   @id @default(uuid())
-  agreementId    String
-  authorAddress  String
-  content        String
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  agreementId   String
+  authorAddress String
+  content       String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   agreement Agreement @relation(fields: [agreementId], references: [id])
 
@@ -412,10 +673,10 @@ model AgreementComment {
 }
 
 model AgreementAmendment {
-  id               String   @id @default(uuid())
+  id                String    @id @default(uuid())
   agreementId       String
   proposedBy        String
-  status            String   @default("PROPOSED")
+  status            String    @default("PROPOSED")
   reason            String?
   title             String?
   description       String?
@@ -427,8 +688,8 @@ model AgreementAmendment {
   milestonesJson    String?
   responseNote      String?
   respondedAt       DateTime?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   agreement Agreement @relation(fields: [agreementId], references: [id])
 
@@ -437,7 +698,7 @@ model AgreementAmendment {
 
 model AgentJob {
   id             String    @id @default(uuid())
-  agreementId     String?
+  agreementId    String?
   kind           String
   status         String    @default("QUEUED")
   dedupeKey      String?   @unique
@@ -457,4 +718,25 @@ model AgentJob {
 
   @@index([status, availableAt, createdAt])
   @@index([agreementId, createdAt])
+}
+
+model WorkerHeartbeat {
+  id                  String    @id
+  service             String    @default("agent")
+  status              String    @default("starting")
+  hostname            String
+  processId           Int
+  version             String
+  startedAt           DateTime  @default(now())
+  lastHeartbeatAt     DateTime  @default(now())
+  lastCycleAt         DateTime?
+  lastCycleDurationMs Int?
+  cyclesSucceeded     Int       @default(0)
+  cyclesFailed        Int       @default(0)
+  lastError           String?
+  stoppedAt           DateTime?
+  updatedAt           DateTime  @updatedAt
+
+  @@index([service, lastHeartbeatAt])
+  @@index([status, lastHeartbeatAt])
 }

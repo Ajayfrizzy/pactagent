@@ -15,9 +15,8 @@ const agreementTemplateSchema = z.object({
   proofType: z.enum(['URL', 'TEXT', 'FILE_HASH']),
   reviewerMode: z.enum(['AUTO', 'HYBRID', 'MANUAL']),
   releaseMode: z.enum(['FULL', 'PARTIAL']),
-  payoutNetwork: z.enum(['CKB', 'FIBER']),
+  payoutNetwork: z.literal('CKB'),
   escrowModel: z.enum(['TREASURY_BRIDGE', 'ONCHAIN_LOCK']).optional(),
-  workerFiberPubkey: z.string().optional(),
   milestones: z.array(z.object({
     title: z.string().min(1).max(120),
     description: z.string().min(1).max(1000),

@@ -1,6 +1,6 @@
 import { prisma } from '../db';
 import { broadcast } from '../ws';
-import { v4 as uuid } from 'uuid';
+import { randomUUID as uuid } from 'crypto';
 import { normalizeWalletAddress } from './authService';
 import { enqueueWebhookEventsForLog } from './webhookService';
 

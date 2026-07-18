@@ -147,11 +147,6 @@ function isLikelyCkbAddress(value: string) {
   return /^(ckt|ckb)1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]{20,}$/i.test(trimmed);
 }
 
-function isValidFiberPublicKey(value: string) {
-  const trimmed = value.trim();
-  return /^(?:0x)?(?:02|03)[0-9a-f]{64}$/i.test(trimmed) || /^(?:0x)?04[0-9a-f]{128}$/i.test(trimmed);
-}
-
 function getMilestoneAmountError(amountCkb: string, minimumMilestoneCkb: string) {
   const trimmed = amountCkb.trim();
   if (!trimmed) {
@@ -205,7 +200,6 @@ export default function ImportBountyPage() {
     agreementTitle: '',
     agreementDescription: '',
     workerAddress: '',
-    workerFiberPubkey: '',
     deadlineDays: '7',
     disputeWindowHours: '24',
     proofType: 'URL',
@@ -552,16 +546,6 @@ export default function ImportBountyPage() {
       return;
     }
 
-    if (form.payoutNetwork === 'FIBER' && !form.workerFiberPubkey.trim()) {
-      setError('Fiber payouts require the worker Fiber public key.');
-      return;
-    }
-
-    if (form.workerFiberPubkey.trim() && !isValidFiberPublicKey(form.workerFiberPubkey)) {
-      setError('The worker Fiber public key format is invalid.');
-      return;
-    }
-
     setSaving(true);
     setError(null);
 
@@ -596,7 +580,6 @@ export default function ImportBountyPage() {
           description: form.agreementDescription || form.bountyDescription,
           clientAddress: walletAddress,
           workerAddress: form.workerAddress,
-          workerFiberPubkey: form.workerFiberPubkey.trim() || undefined,
           deadlineAt,
           disputeWindowSecs: Number(form.disputeWindowHours) * 3600,
           proofType: form.proofType,
@@ -650,12 +633,6 @@ export default function ImportBountyPage() {
         ? 'Enter the builder wallet that should receive approved milestone payouts.'
         : !isLikelyCkbAddress(form.workerAddress)
           ? 'Use a valid CKB address starting with ckt1 or ckb1.'
-          : null,
-    workerFiberPubkey:
-      form.payoutNetwork === 'FIBER' && !form.workerFiberPubkey.trim()
-        ? 'Fiber payouts require the worker public key.'
-        : form.workerFiberPubkey.trim() && !isValidFiberPublicKey(form.workerFiberPubkey)
-          ? 'Use a compressed 33-byte or uncompressed 65-byte Fiber public key.'
           : null,
     deadlineDays:
       !Number.isInteger(Number(form.deadlineDays)) || Number(form.deadlineDays) < 1
@@ -1053,22 +1030,6 @@ export default function ImportBountyPage() {
                 <p className={helperClass}>Optional only if the bounty description above already explains the work clearly.</p>
               )}
                   </div>
-                  <div className="mt-4">
-              <input
-                className={`${inputClass} ${shouldShowFieldError(form.workerFiberPubkey, fieldErrors.workerFiberPubkey) ? errorInputClass : ''}`}
-                value={form.workerFiberPubkey}
-                onChange={(e) => updateField('workerFiberPubkey', e.target.value)}
-                placeholder="02abcd... or 04abcd..."
-                autoCapitalize="none"
-                spellCheck={false}
-              />
-              {shouldShowFieldError(form.workerFiberPubkey, fieldErrors.workerFiberPubkey) ? (
-                <p className={fieldErrorClass}>{fieldErrors.workerFiberPubkey}</p>
-              ) : (
-                <p className={helperClass}>Needed only for Fiber payouts. Leave blank for standard CKB settlement.</p>
-              )}
-                  </div>
-
                   <div className="mt-6 rounded-[26px] border border-agent-border bg-agent-bg/40 p-6">
               <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
                 <div>
@@ -1318,11 +1279,8 @@ export default function ImportBountyPage() {
                 <p className={helperClass}>Pick the proof format reviewers should expect from the builder.</p>
               </div>
               <div>
-                <SelectField value={form.payoutNetwork} onChange={(value) => updateField('payoutNetwork', value)}>
-                  <option value="CKB">CKB</option>
-                  <option value="FIBER">Fiber</option>
-                </SelectField>
-                <p className={helperClass}>Choose `Fiber` only if the worker can provide a valid Fiber public key.</p>
+                <div className={inputClass}>CKB</div>
+                <p className={helperClass}>Payouts settle on CKB.</p>
               </div>
             </div>
 

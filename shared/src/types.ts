@@ -113,7 +113,6 @@ export interface CreateAgreementDTO {
   description: string;
   clientAddress: string;
   workerAddress: string;
-  workerFiberPubkey?: string;
   deadlineAt: string;
   disputeWindowSecs: number;
   proofType: ProofType;
@@ -378,7 +377,6 @@ export interface ApiResponse<T> {
 export interface AppConfig {
   ckbNodeUrl: string;
   ckbNetwork: 'testnet' | 'mainnet';
-  fiberEnabled: boolean;
   aiEnabled: boolean;
   agentIntervalMs: number;
   treasuryAddress: string | null;

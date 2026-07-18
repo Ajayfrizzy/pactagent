@@ -123,8 +123,6 @@ export default function PublicProfilePage() {
                   </div>
                 </div>
                 <div className="rounded-xl border border-agent-border bg-agent-bg/50 p-4">
-                  <div className="text-xs uppercase tracking-wide text-gray-500">Fiber Public Key</div>
-                  <div className="mt-2 break-all text-sm text-gray-300">{profile.fiberPubkey || 'Not published'}</div>
                 </div>
                 <div className="rounded-xl border border-agent-border bg-agent-bg/50 p-4">
                   <div className="text-xs uppercase tracking-wide text-gray-500">Published Links</div>

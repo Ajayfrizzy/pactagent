@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from 'crypto';
-import { v4 as uuid } from 'uuid';
 import { prisma } from '../db';
 import { broadcast } from '../ws';
 import {
@@ -16,7 +15,6 @@ import {
 } from './commitmentService';
 import { createAuditLog } from './auditLogService';
 import { createLog } from './logService';
-import { attemptFiberPayout } from './fiberService';
 import {
   buildOnchainEscrowDescriptor,
   getOnchainEscrowOccupiedCapacity,
@@ -33,6 +31,9 @@ import {
 } from './richPayloadService';
 import { refreshReputationForAgreement } from './reputationService';
 import { convertUsdToCkb, fetchCkbPriceQuote, parseUsdAmount } from './marketPriceService';
+import { ensureLegacyApp } from './legacyTenantService';
+
+const uuid = randomUUID;
 
 const AGREEMENT_VALID_TRANSITIONS: Record<string, string[]> = {
   DRAFT: ['FUNDED', 'EXPIRED', 'CANCELLED'],
@@ -1142,7 +1143,7 @@ async function getFreshRequiredPayoutFromUsdTarget(targetUsd: number) {
 function getNextUsdEquivalentPayoutMilestone(agreement: {
   milestones?: Array<{
     status: string;
-    targetUsd?: number | null;
+    targetUsd?: unknown;
     sortOrder?: number | null;
   }>;
 }) {
@@ -1151,7 +1152,7 @@ function getNextUsdEquivalentPayoutMilestone(agreement: {
     .sort((left, right) => (left.sortOrder || 0) - (right.sortOrder || 0))
     .find((milestone) =>
       payableStatuses.includes(milestone.status)
-      && Number.isFinite(milestone.targetUsd ?? NaN)
+      && Number.isFinite(Number(milestone.targetUsd ?? NaN))
       && Boolean(milestone.targetUsd)
       && Number(milestone.targetUsd) > 0
     ) || null;
@@ -1168,7 +1169,7 @@ async function clearImportedGrantReserveAttentionIfRecovered(agreement: {
   } | null;
   milestones?: Array<{
     status: string;
-    targetUsd?: number | null;
+    targetUsd?: unknown;
     sortOrder?: number | null;
   }>;
 }) {
@@ -1183,7 +1184,7 @@ async function clearImportedGrantReserveAttentionIfRecovered(agreement: {
 
   let amountShannons: bigint;
   try {
-    amountShannons = (await getFreshRequiredPayoutFromUsdTarget(nextMilestone.targetUsd)).amountShannons;
+    amountShannons = (await getFreshRequiredPayoutFromUsdTarget(Number(nextMilestone.targetUsd))).amountShannons;
   } catch {
     return agreement;
   }
@@ -1217,14 +1218,15 @@ async function ensureImportedGrantReserveSufficient(
   milestone: {
     id: string;
     title: string;
-    targetUsd?: number | null;
+    targetUsd?: unknown;
   },
 ) {
-  if (!Number.isFinite(milestone.targetUsd ?? NaN) || !milestone.targetUsd || milestone.targetUsd <= 0) {
+  const targetUsd = Number(milestone.targetUsd ?? NaN);
+  if (!Number.isFinite(targetUsd) || targetUsd <= 0) {
     throw new Error('This imported grant milestone is missing its canonical USD target.');
   }
 
-  const { quote, amountShannons } = await getFreshRequiredPayoutFromUsdTarget(milestone.targetUsd);
+  const { quote, amountShannons } = await getFreshRequiredPayoutFromUsdTarget(targetUsd);
   const reserveRemaining = BigInt(agreement.reserveCkbRemaining || '0');
 
   if (reserveRemaining < amountShannons) {
@@ -1354,72 +1356,7 @@ export async function sendApprovedMilestonePayout(params: {
     const reserveCheck = await ensureImportedGrantReserveSufficient(agreement, milestone);
     payoutAmount = reserveCheck.amountShannons.toString();
     payoutQuoteUsdPerCkb = reserveCheck.quote.priceUsd;
-    realizedUsdValue = milestone.targetUsd ?? null;
-  }
-
-  if (agreement.payoutNetwork === 'FIBER' || agreement.releaseMode === 'PARTIAL') {
-    const fiberResult = await attemptFiberPayout(
-      params.agreementId,
-      agreement.workerFiberPubkey || agreement.workerAddress,
-      payoutAmount
-    );
-
-      await createLog({
-        agreementId: params.agreementId,
-        level: fiberResult.route === 'FIBER' ? 'SUCCESS' : 'INFO',
-      eventType: 'RELEASE_SENT',
-      message:
-        fiberResult.route === 'FIBER'
-          ? `Milestone payment released via Fiber: ${milestone.title}`
-          : `Milestone payment released on CKB fallback: ${milestone.title}`,
-        metadata: {
-          milestoneId: milestone.id,
-          milestoneTitle: milestone.title,
-          releaseQuoteUsdPerCkb: payoutQuoteUsdPerCkb,
-          realizedUsdValue,
-          trigger: params.trigger,
-          ...fiberResult,
-        },
-      });
-
-      if (fiberResult.route === 'FIBER' && fiberResult.paymentReference) {
-        await recordMilestoneSettlementAttempt({
-          agreementId: params.agreementId,
-          milestoneId: milestone.id,
-          direction: 'PAYOUT',
-          network: 'FIBER',
-          amount: payoutAmount,
-          paymentReference: fiberResult.paymentReference,
-          status: 'CONFIRMED',
-          confirmedAt: new Date(),
-        });
-
-        if (isUsdEquivalentImportedGrant(agreement) && payoutQuoteUsdPerCkb && realizedUsdValue != null) {
-          await applyImportedGrantReserveDebit({
-            agreementId: params.agreementId,
-            milestoneId: milestone.id,
-            amountShannons: BigInt(payoutAmount),
-            quoteUsdPerCkb: payoutQuoteUsdPerCkb,
-            realizedUsdValue,
-          });
-        }
-
-        const updatedAgreement = await completeApprovedMilestone(params.agreementId);
-      await createLog({
-        agreementId: params.agreementId,
-        level: 'SUCCESS',
-        eventType: 'SETTLEMENT_CONFIRMED',
-        message: `Milestone settled on Fiber: ${milestone.title}`,
-        metadata: {
-          milestoneId: milestone.id,
-          milestoneTitle: milestone.title,
-          finalAgreementStatus: updatedAgreement?.status,
-          trigger: params.trigger,
-        },
-      });
-
-      return updatedAgreement;
-    }
+    realizedUsdValue = milestone.targetUsd == null ? null : Number(milestone.targetUsd);
   }
 
   const payoutTxHash = await sendTreasuryTransfer(
@@ -1504,52 +1441,6 @@ async function sendImportedCommencementPayout(params: {
       payoutNetwork: agreement.payoutNetwork,
     },
   });
-
-  if (agreement.payoutNetwork === 'FIBER' || agreement.releaseMode === 'PARTIAL') {
-    const fiberResult = await attemptFiberPayout(
-      params.agreementId,
-      agreement.workerFiberPubkey || agreement.workerAddress,
-      payoutAmount,
-    );
-
-    await createLog({
-      agreementId: params.agreementId,
-      level: fiberResult.route === 'FIBER' ? 'SUCCESS' : 'INFO',
-      eventType: 'RELEASE_SENT',
-      message:
-        fiberResult.route === 'FIBER'
-          ? 'Commencement payout released via Fiber'
-          : 'Commencement payout released on CKB fallback',
-      metadata: {
-        amount: payoutAmount,
-        amountUsd: params.amountUsd,
-        releaseQuoteUsdPerCkb: quote.priceUsd,
-        trigger: 'COMMENCEMENT_AUTO_RELEASE',
-        ...fiberResult,
-      },
-    });
-
-    if (fiberResult.route === 'FIBER' && fiberResult.paymentReference) {
-      await createSettlementRecord({
-        agreementId: params.agreementId,
-        milestoneId: null,
-        direction: 'PAYOUT',
-        network: 'FIBER',
-        amount: payoutAmount,
-        paymentReference: fiberResult.paymentReference,
-        status: 'CONFIRMED',
-        confirmedAt: new Date(),
-      });
-      await applyImportedGrantReserveDebit({
-        agreementId: params.agreementId,
-        milestoneId: null,
-        amountShannons,
-        quoteUsdPerCkb: quote.priceUsd,
-        realizedUsdValue: params.amountUsd,
-      });
-      return getAgreementById(params.agreementId);
-    }
-  }
 
   const payoutTxHash = await sendTreasuryTransfer(agreement.workerAddress, payoutAmount);
   await createSettlementRecord({
@@ -1924,6 +1815,7 @@ async function fetchAgreementOrThrow(agreementId: string): Promise<any> {
 async function ensureAgreementMilestones<
   T extends {
     id: string;
+    appId: string;
     title: string;
     description: string;
     amount: string;
@@ -1938,6 +1830,7 @@ async function ensureAgreementMilestones<
   await prisma.milestone.create({
     data: {
       id: uuid(),
+      appId: agreement.appId,
       agreementId: agreement.id,
       title: 'Milestone 1',
       description: agreement.description || agreement.title,
@@ -2037,7 +1930,6 @@ export async function updateDraftAgreement(agreementId: string, data: {
   title: string;
   description: string;
   workerAddress: string;
-  workerFiberPubkey?: string;
   deadlineAt: string;
   disputeWindowSecs: number;
   proofType: string;
@@ -2074,13 +1966,12 @@ export async function updateDraftAgreement(agreementId: string, data: {
     description: data.description,
     clientAddress: agreement.clientAddress,
     workerAddress: normalizeAddress(data.workerAddress),
-    workerFiberPubkey: data.workerFiberPubkey || null,
     deadlineAt: data.deadlineAt,
     disputeWindowSecs: data.disputeWindowSecs,
     proofType: data.proofType,
     reviewerMode: data.reviewerMode,
     releaseMode: data.releaseMode,
-    payoutNetwork: data.payoutNetwork,
+    payoutNetwork: 'CKB',
     milestoneDigest,
   });
 
@@ -2094,13 +1985,13 @@ export async function updateDraftAgreement(agreementId: string, data: {
         title: data.title,
         description: data.description,
         workerAddress: normalizeAddress(data.workerAddress),
-        workerFiberPubkey: data.workerFiberPubkey || null,
+        workerFiberPubkey: null,
         deadlineAt: new Date(data.deadlineAt),
         disputeWindowSecs: data.disputeWindowSecs,
         proofType: data.proofType,
         reviewerMode: data.reviewerMode,
         releaseMode: data.releaseMode,
-        payoutNetwork: data.payoutNetwork,
+        payoutNetwork: 'CKB',
         amount: totalAmount,
         agreementDigest,
         milestoneDigest,
@@ -2129,6 +2020,7 @@ export async function updateDraftAgreement(agreementId: string, data: {
         await tx.milestone.create({
           data: {
             id: randomUUID(),
+            appId: agreement.appId,
             agreementId,
             title: milestone.title,
             description: milestone.description,
@@ -2228,7 +2120,6 @@ export async function proposeAgreementAmendment(
     disputeWindowSecs?: number;
     releaseMode?: string;
     payoutNetwork?: string;
-    workerFiberPubkey?: string;
     milestones?: Array<{
       id: string;
       title?: string;
@@ -2253,8 +2144,7 @@ export async function proposeAgreementAmendment(
       deadlineAt: input.deadlineAt ? new Date(input.deadlineAt) : null,
       disputeWindowSecs: input.disputeWindowSecs ?? null,
       releaseMode: input.releaseMode || null,
-      payoutNetwork: input.payoutNetwork || null,
-      workerFiberPubkey: input.workerFiberPubkey?.trim() || null,
+      payoutNetwork: input.payoutNetwork ? 'CKB' : null,
       milestonesJson: input.milestones ? JSON.stringify(input.milestones) : null,
     },
   });
@@ -2309,7 +2199,6 @@ export async function respondToAgreementAmendment(
       if (amendment.disputeWindowSecs != null) agreementUpdate.disputeWindowSecs = amendment.disputeWindowSecs;
       if (amendment.releaseMode) agreementUpdate.releaseMode = amendment.releaseMode;
       if (amendment.payoutNetwork) agreementUpdate.payoutNetwork = amendment.payoutNetwork;
-      if (amendment.workerFiberPubkey !== null) agreementUpdate.workerFiberPubkey = amendment.workerFiberPubkey;
 
       if (Object.keys(agreementUpdate).length > 0) {
         await tx.agreement.update({
@@ -2363,7 +2252,6 @@ export async function createAgreement(data: {
   description: string;
   clientAddress: string;
   workerAddress: string;
-  workerFiberPubkey?: string;
   deadlineAt: string;
   disputeWindowSecs: number;
   proofType: string;
@@ -2461,13 +2349,12 @@ export async function createAgreement(data: {
     description: data.description,
     clientAddress,
     workerAddress,
-    workerFiberPubkey: data.workerFiberPubkey || null,
     deadlineAt: data.deadlineAt,
     disputeWindowSecs: data.disputeWindowSecs,
     proofType: data.proofType,
     reviewerMode: data.reviewerMode,
     releaseMode: data.releaseMode,
-    payoutNetwork: data.payoutNetwork,
+    payoutNetwork: 'CKB',
     milestoneDigest,
   });
   const escrowModel = isImportedGrant ? 'TREASURY_BRIDGE' : (data.escrowModel || 'TREASURY_BRIDGE');
@@ -2515,22 +2402,25 @@ export async function createAgreement(data: {
       ? onchainDescriptor?.escrowAddress || null
       : await getTreasuryAddress().catch(() => null);
 
+  const legacyApp = await ensureLegacyApp();
+
   const agreement = await prisma.agreement.create({
     data: {
       id: agreementId,
+      appId: legacyApp.id,
       title: data.title,
       description: data.description,
       clientAddress,
       workerAddress,
       arbitratorAddress: null,
-      workerFiberPubkey: data.workerFiberPubkey || null,
+      workerFiberPubkey: null,
       amount: isImportedGrant ? reserveCkbLocked : totalAmount,
       deadlineAt: new Date(data.deadlineAt),
       disputeWindowSecs: data.disputeWindowSecs,
       proofType: data.proofType,
       reviewerMode: data.reviewerMode,
       releaseMode: data.releaseMode,
-      payoutNetwork: data.payoutNetwork,
+      payoutNetwork: 'CKB',
       escrowModel,
       escrowAddress,
       escrowLockCodeHash: onchainDescriptor?.lockCodeHash || null,
@@ -2548,6 +2438,7 @@ export async function createAgreement(data: {
       milestones: {
         create: normalizedMilestones.map((milestone) => ({
           id: uuid(),
+          appId: legacyApp.id,
           title: milestone.title,
           description: milestone.description,
           amount: milestone.amount,
@@ -2597,7 +2488,6 @@ export async function createAgreement(data: {
       title: agreement.title,
       amount: agreement.amount,
       workerAddress: agreement.workerAddress,
-      workerFiberPubkey: agreement.workerFiberPubkey,
       milestoneCount: normalizedMilestones.length,
       disputeResolution: 'MUTUAL_SETTLEMENT',
       escrowModel: agreement.escrowModel,
@@ -3127,6 +3017,7 @@ export async function submitProof(
   const proof = await prisma.proof.create({
     data: {
       id: uuid(),
+      appId: agreement.appId,
       agreementId,
       milestoneId,
       proofType,
@@ -3278,6 +3169,7 @@ export async function openDispute(
   const dispute = await prisma.dispute.create({
     data: {
       id: uuid(),
+      appId: agreement.appId,
       agreementId,
       milestoneId,
       openedBy,

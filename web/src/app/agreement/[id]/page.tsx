@@ -1065,7 +1065,6 @@ export default function AgreementDetailPage() {
     title: string;
     description: string;
     workerAddress: string;
-    workerFiberPubkey: string;
     deadlineAt: string;
     disputeWindowHours: string;
     proofType: string;
@@ -1235,13 +1234,12 @@ export default function AgreementDetailPage() {
       title: agreement.title || '',
       description: agreement.description || '',
       workerAddress: agreement.workerAddress || '',
-      workerFiberPubkey: agreement.workerFiberPubkey || '',
       deadlineAt: agreement.deadlineAt ? new Date(agreement.deadlineAt).toISOString().slice(0, 16) : '',
       disputeWindowHours: agreement.disputeWindowSecs ? String(Math.max(1, Math.round(agreement.disputeWindowSecs / 3600))) : '24',
       proofType: agreement.proofType || 'URL',
       reviewerMode: agreement.reviewerMode || 'AUTO',
       releaseMode: agreement.releaseMode || 'PARTIAL',
-      payoutNetwork: agreement.payoutNetwork || 'CKB',
+      payoutNetwork: 'CKB',
     });
     setDraftMilestones((agreement.milestones || []).map((milestone: any) => ({
       id: milestone.id,
@@ -2184,13 +2182,12 @@ export default function AgreementDetailPage() {
         title: draftForm.title,
         description: draftForm.description,
         workerAddress: draftForm.workerAddress,
-        workerFiberPubkey: draftForm.workerFiberPubkey.trim() || undefined,
         deadlineAt: new Date(draftForm.deadlineAt).toISOString(),
         disputeWindowSecs: parseInt(draftForm.disputeWindowHours || '24', 10) * 3600,
         proofType: draftForm.proofType,
         reviewerMode: draftForm.reviewerMode,
         releaseMode: draftForm.releaseMode,
-        payoutNetwork: draftForm.payoutNetwork,
+        payoutNetwork: 'CKB',
         milestones: draftMilestones.map((milestone) => ({
           id: milestone.id,
           title: milestone.title,
@@ -2248,9 +2245,8 @@ export default function AgreementDetailPage() {
           proofType: draftForm?.proofType || agreement.proofType,
           reviewerMode: draftForm?.reviewerMode || agreement.reviewerMode,
           releaseMode: draftForm?.releaseMode || agreement.releaseMode,
-          payoutNetwork: draftForm?.payoutNetwork || agreement.payoutNetwork,
+          payoutNetwork: 'CKB',
           escrowModel: agreement.escrowModel,
-          workerFiberPubkey: draftForm?.workerFiberPubkey?.trim() || agreement.workerFiberPubkey || undefined,
           milestones: (draftMilestones.length ? draftMilestones : agreement.milestones || []).map((milestone: any) => ({
             title: milestone.title,
             description: milestone.description,
@@ -3089,7 +3085,7 @@ export default function AgreementDetailPage() {
       {
         key: 'settle',
         label: 'Settle',
-        detail: agreement.payoutNetwork === 'FIBER' ? 'Route the payout over Fiber when approved' : 'Confirm on-chain payout or refund',
+        detail: 'Confirm on-chain payout or refund',
         state:
           agreement.status === 'DISPUTED'
             ? 'blocked'
@@ -3483,8 +3479,7 @@ export default function AgreementDetailPage() {
                   </div>
                 ) : null}
 
-                <div className={`mt-4 grid gap-4 border-t border-agent-border pt-4 ${agreement.payoutNetwork === 'FIBER' && agreement.workerFiberPubkey ? 'grid-cols-1 md:grid-cols-4' : 'grid-cols-3'
-                  }`}>
+                <div className="mt-4 grid grid-cols-3 gap-4 border-t border-agent-border pt-4">
                   <CopyableValue label="Client" value={agreement.clientAddress} compact />
                   <CopyableValue label="Worker" value={agreement.workerAddress} compact />
                   <div>
@@ -3493,9 +3488,6 @@ export default function AgreementDetailPage() {
                       Client and worker must both approve a refund during a dispute.
                     </span>
                   </div>
-                  {agreement.payoutNetwork === 'FIBER' && agreement.workerFiberPubkey && (
-                    <CopyableValue label="Worker Fiber Key" value={agreement.workerFiberPubkey} compact />
-                  )}
                 </div>
 
                 <div className="mt-4 grid grid-cols-1 gap-4 border-t border-agent-border pt-4 md:grid-cols-2">
@@ -3530,8 +3522,8 @@ export default function AgreementDetailPage() {
                   )}
                 </div>
 
-                {(agreement.ckbTxHashFund || agreement.ckbTxHashRelease || agreement.fiberPaymentReference || agreement.lastSettlementError) && (
-                  <div className="mt-4 grid grid-cols-1 gap-4 border-t border-agent-border pt-4 md:grid-cols-3">
+                {(agreement.ckbTxHashFund || agreement.ckbTxHashRelease || agreement.lastSettlementError) && (
+                  <div className="mt-4 grid grid-cols-1 gap-4 border-t border-agent-border pt-4 md:grid-cols-2">
                     <div>
                       <span className="mb-1 block text-[10px] uppercase text-gray-500">Funding Tx</span>
                       <span className="break-all text-xs font-mono text-gray-300">
@@ -3542,12 +3534,6 @@ export default function AgreementDetailPage() {
                       <span className="mb-1 block text-[10px] uppercase text-gray-500">Settlement Tx</span>
                       <span className="break-all text-xs font-mono text-gray-300">
                         {agreement.ckbTxHashRelease || 'Not settled yet'}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="mb-1 block text-[10px] uppercase text-gray-500">Fiber Reference</span>
-                      <span className="break-all text-xs font-mono text-gray-300">
-                        {agreement.fiberPaymentReference || 'Not used'}
                       </span>
                     </div>
                     {agreement.lastSettlementError ? (

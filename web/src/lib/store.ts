@@ -17,6 +17,8 @@ interface AppState {
   walletAddress: string | null;
   authToken: string | null;
   authExpiresAt: string | null;
+  infrastructureApiKey: string | null;
+  selectedInfrastructureAppId: string | null;
   isAdmin: boolean;
   hasHydrated: boolean;
   authStatus: 'idle' | 'authenticating' | 'authenticated' | 'error';
@@ -29,6 +31,8 @@ interface AppState {
   }) => void;
   setAuthStatus: (status: AppState['authStatus'], error?: string | null) => void;
   clearWalletSession: () => void;
+  setInfrastructureApiKey: (apiKey: string | null) => void;
+  setSelectedInfrastructureAppId: (appId: string | null) => void;
   setHasHydrated: (hydrated: boolean) => void;
 
   logs: AgentLog[];
@@ -48,6 +52,8 @@ export const useStore = create<AppState>()(
       walletAddress: null,
       authToken: null,
       authExpiresAt: null,
+      infrastructureApiKey: null,
+      selectedInfrastructureAppId: null,
       isAdmin: false,
       hasHydrated: false,
       authStatus: 'idle',
@@ -62,12 +68,16 @@ export const useStore = create<AppState>()(
           authError: null,
         }),
       setAuthStatus: (authStatus, authError = null) => set({ authStatus, authError }),
+      setInfrastructureApiKey: (infrastructureApiKey) => set({ infrastructureApiKey }),
+      setSelectedInfrastructureAppId: (selectedInfrastructureAppId) => set({ selectedInfrastructureAppId }),
       setHasHydrated: (hasHydrated) => set({ hasHydrated }),
       clearWalletSession: () =>
         set({
           walletAddress: null,
           authToken: null,
           authExpiresAt: null,
+          infrastructureApiKey: null,
+          selectedInfrastructureAppId: null,
           isAdmin: false,
           hasHydrated: true,
           authStatus: 'idle',
@@ -103,6 +113,8 @@ export const useStore = create<AppState>()(
         walletAddress: state.walletAddress,
         authToken: state.authToken,
         authExpiresAt: state.authExpiresAt,
+        infrastructureApiKey: state.infrastructureApiKey,
+        selectedInfrastructureAppId: state.selectedInfrastructureAppId,
         isAdmin: state.isAdmin,
       }),
       onRehydrateStorage: () => (state) => {

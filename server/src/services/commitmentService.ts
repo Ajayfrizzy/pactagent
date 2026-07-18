@@ -61,7 +61,6 @@ export function buildAgreementDigest(input: {
   description: string;
   clientAddress: string;
   workerAddress: string;
-  workerFiberPubkey: string | null;
   deadlineAt: string;
   disputeWindowSecs: number;
   proofType: string;
@@ -75,7 +74,6 @@ export function buildAgreementDigest(input: {
     description: input.description.trim(),
     clientAddress: input.clientAddress.trim(),
     workerAddress: input.workerAddress.trim(),
-    workerFiberPubkey: input.workerFiberPubkey?.trim() || null,
     deadlineAt: new Date(input.deadlineAt).toISOString(),
     disputeWindowSecs: input.disputeWindowSecs,
     proofType: input.proofType,

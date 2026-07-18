@@ -1,0 +1,3 @@
+ALTER TABLE "WorkerHeartbeat"
+  ADD COLUMN "cyclesSucceeded" INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN "cyclesFailed" INTEGER NOT NULL DEFAULT 0;

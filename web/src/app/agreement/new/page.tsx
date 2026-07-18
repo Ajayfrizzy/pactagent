@@ -74,11 +74,6 @@ function canSignerFundAgreement(signer: ccc.Signer | undefined) {
   return signer?.type === ccc.SignerType.CKB || signer?.type === ccc.SignerType.EVM;
 }
 
-function isValidFiberPublicKey(value: string) {
-  const trimmed = value.trim();
-  return /^(?:0x)?(?:02|03)[0-9a-f]{64}$/i.test(trimmed) || /^(?:0x)?04[0-9a-f]{128}$/i.test(trimmed);
-}
-
 function isLikelyCkbAddress(value: string) {
   const trimmed = value.trim().toLowerCase();
   return /^(ckt|ckb)1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]{20,}$/i.test(trimmed);
@@ -118,7 +113,6 @@ export default function NewAgreementPage() {
     title: '',
     description: '',
     workerAddress: '',
-    workerFiberPubkey: '',
     deadlineDays: '7',
     disputeWindowHours: '24',
     proofType: 'URL',
@@ -218,12 +212,6 @@ export default function NewAgreementPage() {
         : !isLikelyCkbAddress(form.workerAddress)
           ? 'Use a valid CKB address starting with ckt1 or ckb1.'
           : null,
-    workerFiberPubkey:
-      form.payoutNetwork === 'FIBER' && !form.workerFiberPubkey.trim()
-        ? 'Fiber payouts require the worker public key.'
-        : form.workerFiberPubkey.trim() && !isValidFiberPublicKey(form.workerFiberPubkey)
-          ? 'Use a compressed 33-byte or uncompressed 65-byte Fiber public key.'
-          : null,
     deadlineDays:
       !Number.isInteger(Number(form.deadlineDays)) || Number(form.deadlineDays) < 1
         ? 'Use a whole number of days, for example 7 or 14.'
@@ -246,7 +234,7 @@ export default function NewAgreementPage() {
 
   function stepHasErrors(stepIndex: number) {
     if (stepIndex === 0) {
-      return Boolean(fieldErrors.title || fieldErrors.description || fieldErrors.workerAddress || fieldErrors.workerFiberPubkey);
+      return Boolean(fieldErrors.title || fieldErrors.description || fieldErrors.workerAddress);
     }
 
     if (stepIndex === 1) {
@@ -262,7 +250,7 @@ export default function NewAgreementPage() {
 
   function isStepComplete(stepIndex: number) {
     if (stepIndex === 0) {
-      return !fieldErrors.title && !fieldErrors.description && !fieldErrors.workerAddress && !fieldErrors.workerFiberPubkey
+      return !fieldErrors.title && !fieldErrors.description && !fieldErrors.workerAddress
         && Boolean(form.title.trim() && form.description.trim() && form.workerAddress.trim());
     }
 
@@ -391,16 +379,6 @@ export default function NewAgreementPage() {
       return;
     }
 
-    if (form.payoutNetwork === 'FIBER' && !form.workerFiberPubkey.trim()) {
-      setError('Fiber payouts require the worker Fiber public key.');
-      return;
-    }
-
-    if (form.workerFiberPubkey.trim() && !isValidFiberPublicKey(form.workerFiberPubkey)) {
-      setError('The worker Fiber public key format is invalid.');
-      return;
-    }
-
     setError(null);
     setSubmitting(true);
 
@@ -414,7 +392,6 @@ export default function NewAgreementPage() {
         description: form.description,
         clientAddress: walletAddress,
         workerAddress: form.workerAddress,
-        workerFiberPubkey: form.workerFiberPubkey.trim() || undefined,
         deadlineAt,
         disputeWindowSecs: parseInt(form.disputeWindowHours, 10) * 3600,
         proofType: form.proofType,
@@ -658,28 +635,6 @@ export default function NewAgreementPage() {
                     </div>
                   </div>
 
-                  {form.payoutNetwork === 'FIBER' ? (
-                    <div>
-                      <label className={labelClass}>Worker Fiber Public Key</label>
-                      <input
-                        type="text"
-                        className={`${inputClass} ${shouldShowFieldError(form.workerFiberPubkey, fieldErrors.workerFiberPubkey) ? errorInputClass : ''}`}
-                        placeholder="02ab... or 03ab..."
-                        value={form.workerFiberPubkey}
-                        onChange={(e) => updateField('workerFiberPubkey', e.target.value)}
-                        required
-                        autoCapitalize="none"
-                        spellCheck={false}
-                      />
-                      {shouldShowFieldError(form.workerFiberPubkey, fieldErrors.workerFiberPubkey) ? (
-                        <p className={fieldErrorClass}>{fieldErrors.workerFiberPubkey}</p>
-                      ) : (
-                        <p className={helperClass}>
-                          Ask the worker for the public key from their Fiber node. They can usually get it from their node info output or a `node_info` RPC call.
-                        </p>
-                      )}
-                    </div>
-                  ) : null}
                 </div>
               </section>
             ) : null}
@@ -887,11 +842,8 @@ export default function NewAgreementPage() {
                   </div>
                   <div className="ui-panel-soft p-4">
                     <label className={labelClass}>Payout Network</label>
-                    <select className={selectClass} value={form.payoutNetwork} onChange={(e) => updateField('payoutNetwork', e.target.value)}>
-                      <option value="CKB">CKB (L1)</option>
-                      <option value="FIBER">Fiber (L2)</option>
-                    </select>
-                    <p className={helperClass}>Choose Fiber only if the worker can provide a valid Fiber public key.</p>
+                    <div className={inputClass}>CKB (L1)</div>
+                    <p className={helperClass}>Payouts settle on CKB.</p>
                   </div>
                   <div className="ui-panel-soft p-4">
                     <label className={labelClass}>Release Mode</label>
@@ -934,11 +886,6 @@ export default function NewAgreementPage() {
                       <div className="mt-2 break-all font-mono text-sm text-white">
                         {form.workerAddress || 'No worker address yet'}
                       </div>
-                      {form.payoutNetwork === 'FIBER' ? (
-                        <p className="mt-2 break-all text-xs text-gray-400">
-                          Fiber key: {form.workerFiberPubkey || 'Missing Fiber key'}
-                        </p>
-                      ) : null}
                     </div>
                     <div className="ui-panel-soft p-4">
                       <div className="text-[11px] uppercase tracking-[0.16em] text-gray-500">Milestones</div>

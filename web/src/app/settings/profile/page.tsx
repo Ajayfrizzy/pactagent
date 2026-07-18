@@ -36,7 +36,6 @@ export default function ProfileSettingsPage() {
     displayName: '',
     bio: '',
     avatarUrl: '',
-    fiberPubkey: '',
     visibility: 'PUBLIC',
     skills: '',
     links: '',
@@ -57,7 +56,6 @@ export default function ProfileSettingsPage() {
           displayName: data.displayName || '',
           bio: data.bio || '',
           avatarUrl: data.avatarUrl || '',
-          fiberPubkey: data.fiberPubkey || '',
           visibility: data.visibility || 'PUBLIC',
           skills: (data.skills || []).join(', '),
           links: (data.links || []).map((link: any) => `${link.label}|${link.url}`).join('\n'),
@@ -124,7 +122,6 @@ export default function ProfileSettingsPage() {
         displayName: form.displayName,
         bio: form.bio,
         avatarUrl: form.avatarUrl,
-        fiberPubkey: form.fiberPubkey,
         visibility: form.visibility as 'PUBLIC' | 'PRIVATE',
         skills: form.skills.split(',').map((item) => item.trim()).filter(Boolean),
         links: parseLinksInput(form.links),
@@ -167,7 +164,7 @@ export default function ProfileSettingsPage() {
               </div>
               <h1 className="text-3xl font-bold leading-tight text-white sm:text-2xl">Profile Settings</h1>
               <p className="max-w-xl text-sm leading-6 text-gray-400">
-                Set the public face of your Nervos marketplace profile and keep your Fiber details current.
+                Set the public face of your Nervos marketplace profile.
               </p>
             </div>
             {profile?.handle ? (
@@ -247,10 +244,6 @@ export default function ProfileSettingsPage() {
                   </div>
 
                   <div className="grid gap-5 md:grid-cols-2">
-                    <label className="block">
-                      <span className="ui-label">Fiber Public Key</span>
-                      <input className={inputClass} value={form.fiberPubkey} onChange={(e) => setForm((prev) => ({ ...prev, fiberPubkey: e.target.value }))} />
-                    </label>
                     <label className="block">
                       <span className="ui-label">Skills</span>
                       <input className={inputClass} value={form.skills} onChange={(e) => setForm((prev) => ({ ...prev, skills: e.target.value }))} placeholder="Escrow design, DAO ops, smart contracts" />

@@ -1,5 +1,4 @@
-import { createHash } from 'crypto';
-import { v4 as uuid } from 'uuid';
+import { createHash, randomUUID as uuid } from 'crypto';
 
 export type ArtifactKind = 'TEXT' | 'URL' | 'FILE' | 'IMAGE';
 export type DisputeResolutionChoice = 'PAYOUT' | 'REFUND' | 'SPLIT';

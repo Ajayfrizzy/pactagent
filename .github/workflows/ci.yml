@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  server:
+    name: Server and migrations
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16.4-bookworm@sha256:e62fbf9d3e2b49816a32c400ed2dba83e3b361e6833e624024309c35d334b412
+        env:
+          POSTGRES_DB: pactagent_test
+          POSTGRES_USER: pactagent
+          POSTGRES_PASSWORD: pactagent
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pactagent -d pactagent_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://pactagent:pactagent@127.0.0.1:5432/pactagent_test
+      DIRECT_URL: postgresql://pactagent:pactagent@127.0.0.1:5432/pactagent_test
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20.19.5
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+      - run: npx prisma format --check
+      - run: npx prisma validate
+      - run: npm run db:migrate:deploy
+      - run: npm run db:migrate:status
+      - run: npm test
+      - run: npm run test:integration
+      - run: npm run build
+      - run: npm run openapi:check
+      - name: Check OpenAPI backward compatibility
+        if: github.event_name == 'pull_request'
+        run: |
+          git show origin/${{ github.base_ref }}:server/docs/openapi/pactagent.v1.openapi.json > /tmp/pactagent-openapi-baseline.json
+          npm run openapi:compat -- /tmp/pactagent-openapi-baseline.json
+      - run: npm run sbom
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: server-sbom
+          path: server/sbom.cdx.json
+      - run: npm audit --omit=dev --audit-level=high
+
+  web:
+    name: Web
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20.19.5
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npm audit --omit=dev --audit-level=high
+
+  contract:
+    name: CKB contract
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: contracts
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      # contracts/.cargo/config.toml defaults builds to RISC-V; unit tests run on the CI host.
+      - run: cargo test --manifest-path Cargo.toml -p pact-escrow-lock --lib --target x86_64-unknown-linux-gnu
+
+  containers:
+    name: Container images
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include:
+          - dockerfile: server/Dockerfile
+            target: runtime
+            tag: pactagent-server:ci
+          - dockerfile: server/Dockerfile
+            target: migrate
+            tag: pactagent-migrate:ci
+          - dockerfile: web/Dockerfile
+            target: runtime
+            tag: pactagent-web:ci
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          push: false
+          load: true
+          tags: ${{ matrix.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: anchore/scan-action@1638637db639e0ade3258b51db49a9a137574c3e # v6
+        with:
+          image: ${{ matrix.tag }}
+          fail-build: true
+          severity-cutoff: high

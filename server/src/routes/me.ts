@@ -10,7 +10,6 @@ const profilePatchSchema = z.object({
   displayName: z.string().max(80).optional(),
   bio: z.string().max(500).optional(),
   avatarUrl: z.string().url().optional().or(z.literal('')),
-  fiberPubkey: z.string().max(200).optional(),
   visibility: z.enum(['PUBLIC', 'PRIVATE']).optional(),
   skills: z.array(z.string().min(1).max(40)).max(20).optional(),
   links: z.array(z.object({
