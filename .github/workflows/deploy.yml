@@ -19,6 +19,8 @@ jobs:
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
           port: 22
           debug: true
+          timeout: 120s
+          command_timeout: 20m
 
           script: |
             set -e
