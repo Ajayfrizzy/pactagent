@@ -11,6 +11,8 @@ FROM node:24-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
 RUN groupadd --system --gid 1001 pactagent && useradd --system --uid 1001 --gid pactagent pactagent
+# The standalone runtime only needs Node; remove npm and its bundled dependencies.
+RUN corepack disable && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=build --chown=pactagent:pactagent /app/web/public ./public
 COPY --from=build --chown=pactagent:pactagent /app/web/.next/standalone ./
 COPY --from=build --chown=pactagent:pactagent /app/web/.next/static ./.next/static
