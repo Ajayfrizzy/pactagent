@@ -22,6 +22,7 @@ FROM node:24-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9
 WORKDIR /app/server
 ENV NODE_ENV=production PORT=4000
 RUN groupadd --system --gid 1001 pactagent && useradd --system --uid 1001 --gid pactagent pactagent
+RUN corepack disable && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=production-deps --chown=pactagent:pactagent /app/server/node_modules ./node_modules
 COPY --from=build --chown=pactagent:pactagent /app/server/node_modules/.prisma ./node_modules/.prisma
 COPY --from=production-deps --chown=pactagent:pactagent /app/server/package.json ./package.json
