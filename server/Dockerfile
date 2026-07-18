@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM node:20.19.5-bookworm-slim@sha256:9e70124bd00f47dd023e349cd587132ae61892acc0e47ed641416c3e18f401c3 AS build
+FROM node:24-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS build
 WORKDIR /app/server
 ENV CI=true
 COPY server/package.json server/package-lock.json ./
@@ -8,9 +8,9 @@ COPY server/prisma ./prisma
 COPY server/prisma.config.ts server/tsconfig.json ./
 COPY server/src ./src
 COPY shared ../shared
-RUN npx prisma generate && npm run build
+RUN DATABASE_URL=postgresql://build:build@localhost:5432/build npx prisma generate && npm run build
 
-FROM node:20.19.5-bookworm-slim@sha256:9e70124bd00f47dd023e349cd587132ae61892acc0e47ed641416c3e18f401c3 AS production-deps
+FROM node:24-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS production-deps
 WORKDIR /app/server
 ENV NODE_ENV=production
 COPY server/package.json server/package-lock.json ./
@@ -18,7 +18,7 @@ COPY server/prisma ./prisma
 COPY server/prisma.config.ts ./
 RUN npm ci --omit=dev && npm cache clean --force
 
-FROM node:20.19.5-bookworm-slim@sha256:9e70124bd00f47dd023e349cd587132ae61892acc0e47ed641416c3e18f401c3 AS runtime
+FROM node:24-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS runtime
 WORKDIR /app/server
 ENV NODE_ENV=production PORT=4000
 RUN groupadd --system --gid 1001 pactagent && useradd --system --uid 1001 --gid pactagent pactagent

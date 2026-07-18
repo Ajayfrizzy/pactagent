@@ -11,14 +11,15 @@ jobs:
 
     steps:
       - name: Deploy over SSH
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
-          port: 22
-          debug: true
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          timeout: 30s
+          command_timeout: 20m
 
           script: |
             set -e
@@ -31,13 +32,14 @@ jobs:
             git reset --hard origin/main
 
             cd server
-            npm install
+            npm ci
             npx prisma generate
+            npx prisma migrate deploy
             npm run build
             pm2 restart pactagent-server || pm2 start dist/index.js --name pactagent-server
 
             cd ../web
-            npm install
+            npm ci
             npm run build
             pm2 restart pactagent-web || pm2 start npm --name pactagent-web -- start
 
