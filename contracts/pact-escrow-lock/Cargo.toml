@@ -11,5 +11,5 @@ name = "pact_escrow_lock"
 path = "src/main.rs"
 
 [dependencies]
-ckb-std = "0.16.4"
+ckb-std = "1.1.0"
 molecule = { version = "0.8.0", default-features = false, features = ["bytes_vec"] }
