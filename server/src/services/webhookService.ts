@@ -305,7 +305,7 @@ export async function createWebhookEndpoint(params: {
   throw new Error('Legacy webhooks are disabled. Use /v1/webhook-endpoints.');
 }
 
-export async function listWebhookEndpoints(ownerAddress: string) {
+export async function listWebhookEndpoints(ownerAddress: string, limit = 50, cursor?: string) {
   const normalizedAddress = normalizeWalletAddress(ownerAddress);
   const endpoints = await prisma.webhookEndpoint.findMany({
     where: { ownerAddress: normalizedAddress },
@@ -316,6 +316,8 @@ export async function listWebhookEndpoints(ownerAddress: string) {
       },
     },
     orderBy: { createdAt: 'desc' },
+    take: Math.min(Math.max(limit, 1), 100),
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
   });
 
   return endpoints.map(serializeEndpoint);
@@ -337,7 +339,7 @@ export async function getWebhookEndpointDeliveries(ownerAddress: string, endpoin
   const deliveries = await prisma.webhookDelivery.findMany({
     where: { endpointId },
     orderBy: { createdAt: 'desc' },
-    take: limit,
+    take: Math.min(Math.max(limit, 1), 100),
   });
 
   return deliveries.map(serializeDelivery);

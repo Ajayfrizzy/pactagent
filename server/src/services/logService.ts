@@ -45,6 +45,7 @@ export async function createLog(params: {
 }
 
 export async function getLogs(agreementId?: string, limit = 100) {
+  limit = Math.min(Math.max(limit, 1), 100);
   return prisma.agentLog.findMany({
     where: agreementId ? { agreementId } : undefined,
     orderBy: { createdAt: 'desc' },
@@ -53,6 +54,7 @@ export async function getLogs(agreementId?: string, limit = 100) {
 }
 
 export async function getLogsForParticipant(address: string, agreementId?: string, limit = 100) {
+  limit = Math.min(Math.max(limit, 1), 100);
   const normalizedAddress = normalizeWalletAddress(address);
   return prisma.agentLog.findMany({
     where: {
@@ -70,6 +72,7 @@ export async function getLogsForParticipant(address: string, agreementId?: strin
 }
 
 export async function getPublicLogs(limit = 25) {
+  limit = Math.min(Math.max(limit, 1), 100);
   const logs = await prisma.agentLog.findMany({
     where: {
       agreementId: { not: null },
@@ -86,6 +89,7 @@ export async function getPublicLogs(limit = 25) {
 }
 
 export async function getPublicLogsForParticipantAddress(address: string, limit = 25) {
+  limit = Math.min(Math.max(limit, 1), 100);
   const normalizedAddress = normalizeWalletAddress(address);
   const logs = await prisma.agentLog.findMany({
     where: {

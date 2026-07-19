@@ -41,6 +41,19 @@ npm run dev
 npm run worker
 ```
 
+For a complete local environment (PostgreSQL, optional Redis, migrations, and deterministic fixtures), use the root commands:
+
+```bash
+npm run setup
+npm run dev
+# In separate terminals:
+npm run dev:web
+npm run dev:worker
+npm run teardown
+```
+
+Node 24 is declared in `.nvmrc`. Root-level `build`, `test`, `test:integration`, and `lint` commands cover the JavaScript workspaces.
+
 Database changes are deployed from committed Prisma migrations:
 
 ```bash
@@ -69,6 +82,8 @@ Integrator documentation is served by the API server:
 - `GET /docs` for generated endpoint docs
 - `GET /openapi.json` for the OpenAPI spec
 - `server/docs/examples/integrator-quickstart.md` for curl examples
+
+Architecture and operations references live under `docs/`: configuration, ADRs, trust and tenant boundaries, settlement failure modes, environment policy, ownership and incident severity, and release checklists.
 
 
 ### Response Format

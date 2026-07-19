@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { gzipSync } from 'zlib';
 
 const router = Router();
 const openApiSpec = JSON.parse(
@@ -8,6 +9,8 @@ const openApiSpec = JSON.parse(
 ) as {
   paths: Record<string, Record<string, { summary?: string }>>;
 };
+const openApiJson = JSON.stringify(openApiSpec);
+const openApiGzip = gzipSync(openApiJson);
 
 function renderDocsHtml() {
   const paths = Object.entries(openApiSpec.paths)
@@ -58,11 +61,19 @@ function renderDocsHtml() {
 </html>`;
 }
 
-router.get('/openapi.json', (_req, res) => {
-  res.json(openApiSpec);
+router.get('/openapi.json', (req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=300');
+  res.setHeader('Vary', 'Accept-Encoding');
+  res.type('application/json');
+  if (req.acceptsEncodings('gzip')) {
+    res.setHeader('Content-Encoding', 'gzip');
+    return res.send(openApiGzip);
+  }
+  return res.send(openApiJson);
 });
 
 router.get('/docs', (_req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=300');
   res.type('html').send(renderDocsHtml());
 });
 

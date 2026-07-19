@@ -21,3 +21,13 @@ export async function ready(_req: Request, res: Response) {
   const readiness = await healthService.getReadinessStatus();
   return sendSuccess(res, readiness, readiness.status === 'ready' ? 200 : 503);
 }
+
+export async function worker(_req: Request, res: Response) {
+  const status = await healthService.getWorkerAndQueueStatus();
+  return sendSuccess(res, {
+    ...status,
+    version: config.buildVersion,
+    commit: config.buildCommit,
+    timestamp: new Date().toISOString(),
+  }, status.status === 'ok' ? 200 : 503);
+}

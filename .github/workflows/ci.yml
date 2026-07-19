@@ -53,7 +53,17 @@ jobs:
       - run: npx prisma validate
       - run: npm run db:migrate:deploy
       - run: npm run db:migrate:status
+      - name: Test upgrade from the baseline migration
+        run: |
+          createdb -h 127.0.0.1 -U pactagent pactagent_upgrade
+          psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U pactagent -d pactagent_upgrade -f prisma/migrations/20260715000100_baseline/migration.sql
+          psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U pactagent -d pactagent_upgrade -c "INSERT INTO \"App\" (id, name, slug, \"ownerUserId\", environment, status, \"defaultCurrency\", \"defaultNetwork\", \"createdAt\", \"updatedAt\") VALUES ('00000000-0000-4000-8000-000000000099', 'Upgrade Fixture', 'upgrade-fixture', 'upgrade-owner', 'sandbox', 'active', 'CKB', 'sandbox', now(), now())"
+          DATABASE_URL=postgresql://pactagent:pactagent@127.0.0.1:5432/pactagent_upgrade npx prisma migrate resolve --applied 20260715000100_baseline
+          DATABASE_URL=postgresql://pactagent:pactagent@127.0.0.1:5432/pactagent_upgrade npm run db:migrate:deploy
+          DATABASE_URL=postgresql://pactagent:pactagent@127.0.0.1:5432/pactagent_upgrade npm run db:migrate:status
+          test "$(psql -At -h 127.0.0.1 -U pactagent -d pactagent_upgrade -c "SELECT name FROM \"App\" WHERE id = '00000000-0000-4000-8000-000000000099'")" = "Upgrade Fixture"
       - run: npm test
+      - run: npm run env:check --prefix ..
       - run: npm run test:integration
       - run: npm run build
       - run: npm run openapi:check

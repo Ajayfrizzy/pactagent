@@ -31,6 +31,7 @@ import docsRoutes from './modules/docs/docs.routes';
 import { isOnchainEscrowReady } from './services/onchainEscrowService';
 import { metricsMiddleware } from './common/observability/metrics';
 import { requestLogger } from './common/observability/request-logger';
+import { payloadLimit } from './common/middleware/payload-limit';
 
 function isAllowedCorsOrigin(origin: string) {
   if (config.corsOrigins.includes(origin)) {
@@ -74,7 +75,19 @@ export function createApp() {
     })
   );
   app.use(express.json({ limit: '5mb' }));
+  app.use((_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
   app.use('/v1', v1IpRateLimit);
+
+  app.use('/v1/apps', payloadLimit(64 * 1024));
+  app.use('/v1/api-keys', payloadLimit(64 * 1024));
+  app.use('/v1/agreements', payloadLimit(256 * 1024));
+  app.use('/v1/milestones', payloadLimit(128 * 1024));
+  app.use('/v1/proofs', payloadLimit(1024 * 1024));
+  app.use('/v1/webhook-endpoints', payloadLimit(64 * 1024));
+  app.use('/v1/disputes', payloadLimit(256 * 1024));
 
   app.use('/v1/apps', appRoutes);
   app.use('/v1/api-keys', apiKeyRoutes);
@@ -93,14 +106,11 @@ export function createApp() {
   app.use(healthRoutes);
   app.use(docsRoutes);
 
-  app.get('/api/health', (_req, res) => {
-    res.json({ success: true, data: { status: 'ok', timestamp: new Date().toISOString() } });
-  });
-
   app.get('/api/config', async (_req, res, next) => {
     try {
       const onchainEscrowReady = isOnchainEscrowReady();
 
+      res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
       res.json({
         success: true,
         data: {

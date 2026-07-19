@@ -36,6 +36,10 @@ import { deliverWebhookDelivery as deliverInfrastructureWebhookDelivery } from '
 import { cleanupExpiredIdempotencyKeys } from '../common/idempotency/idempotency.repository';
 
 let lastIdempotencyCleanupAt = 0;
+let schedulerCursor: string | undefined;
+let schedulerInitialized = false;
+let schedulerLastCompletedAt = new Date(0);
+let schedulerSweepStartedAt = new Date();
 
 let cycleInProgress = false;
 const workerId = `embedded-worker:${process.pid}`;
@@ -184,21 +188,29 @@ export async function runAgentCycle(): Promise<boolean> {
 }
 
 async function scheduleSystemJobs() {
+  const now = new Date();
+  const activeFilter = {
+    OR: [
+      { status: { in: ['PROOF_SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'FUNDED', 'DRAFT', 'DISPUTED'] } },
+      { settlementStatus: { in: ['FUNDING_PENDING', 'PAYOUT_PENDING', 'REFUND_PENDING', 'SPLIT_PENDING', 'FAILED'] } },
+    ],
+  };
   const agreements = await prisma.agreement.findMany({
     where: {
-      OR: [
-        {
-          status: {
-            in: ['PROOF_SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'FUNDED', 'DRAFT', 'DISPUTED'],
-          },
-        },
-        {
-          settlementStatus: {
-            in: ['FUNDING_PENDING', 'PAYOUT_PENDING', 'REFUND_PENDING', 'SPLIT_PENDING', 'FAILED'],
-          },
-        },
+      AND: [
+        activeFilter,
+        ...(schedulerInitialized ? [{
+          OR: [
+            { updatedAt: { gt: schedulerLastCompletedAt } },
+            { deadlineAt: { lte: new Date(now.getTime() + 24 * 60 * 60 * 1000) } },
+            { settlementStatus: { in: ['FUNDING_PENDING', 'PAYOUT_PENDING', 'REFUND_PENDING', 'SPLIT_PENDING', 'FAILED'] } },
+          ],
+        }] : []),
       ],
     },
+    orderBy: { id: 'asc' },
+    take: 200,
+    ...(schedulerCursor ? { cursor: { id: schedulerCursor }, skip: 1 } : {}),
     include: {
       milestones: {
         orderBy: { sortOrder: 'asc' },
@@ -222,8 +234,6 @@ async function scheduleSystemJobs() {
       },
     },
   });
-
-  const now = new Date();
 
   for (const agreement of agreements) {
     await enqueueAgreementJob({
@@ -250,12 +260,12 @@ async function scheduleSystemJobs() {
     }
 
     const deadline = new Date(agreement.deadlineAt);
-    const hoursUntilDeadline = (deadline.getTime() - now.getTime()) / (60 * 60 * 1000);
-    if (hoursUntilDeadline <= 24 && hoursUntilDeadline > 0) {
+    if (deadline > now) {
       await enqueueAgreementJob({
         agreementId: agreement.id,
         kind: 'REMINDER_DEADLINE',
-        dedupeSuffix: `${deadline.toISOString().slice(0, 13)}`,
+        dedupeSuffix: deadline.toISOString(),
+        availableAt: new Date(Math.max(now.getTime(), deadline.getTime() - 24 * 60 * 60 * 1000)),
       });
     }
 
@@ -284,6 +294,15 @@ async function scheduleSystemJobs() {
         }
       }
     }
+  }
+
+  if (agreements.length === 200) {
+    schedulerCursor = agreements[agreements.length - 1].id;
+  } else {
+    schedulerCursor = undefined;
+    schedulerInitialized = true;
+    schedulerLastCompletedAt = schedulerSweepStartedAt;
+    schedulerSweepStartedAt = now;
   }
 
   const sourceSyncCandidates = await listSourceSyncCandidates(20);

@@ -1,0 +1,31 @@
+{
+  "name": "pactagent",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "server",
+    "shared",
+    "web"
+  ],
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "build": "server/node_modules/.bin/tsc -p shared/tsconfig.json && npm run build --workspace @pact-agent/server && npm run build --workspace @pact-agent/web",
+    "test": "npm run test --workspace @pact-agent/server",
+    "test:integration": "npm run test:integration --workspace @pact-agent/server",
+    "lint": "server/node_modules/.bin/tsc -p shared/tsconfig.json --noEmit && npm run lint --workspace @pact-agent/server && npm run lint --workspace @pact-agent/web",
+    "dev": "docker compose -f compose.dev.yaml up -d && npm run dev --workspace @pact-agent/server",
+    "dev:web": "npm run dev --workspace @pact-agent/web",
+    "dev:worker": "npm run worker --workspace @pact-agent/server",
+    "setup": "node scripts/local-environment.mjs setup",
+    "teardown": "node scripts/local-environment.mjs teardown",
+    "fixtures:reset": "node scripts/local-environment.mjs fixtures",
+    "env:check": "node scripts/generate-env-example.mjs --check",
+    "env:generate": "node scripts/generate-env-example.mjs --write",
+    "test:testnet": "node scripts/ckb-testnet-smoke.mjs",
+    "load:api": "k6 run test/load/api.js",
+    "load:queue": "k6 run test/load/queue.js",
+    "load:webhooks": "k6 run test/load/webhooks.js"
+  }
+}

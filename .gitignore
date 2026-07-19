@@ -3,17 +3,16 @@ node_modules/
 dist/
 out/
 coverage/
+*.tsbuildinfo
 
-env
 .env
-.env.local
+env
+*.env.local
 .env.*.local
+!.env.example
+!**/.env.example
 .secrets/
 server/sbom.cdx.json
-
-# environment files
-.env
-env
 server/env
 web/env
 
@@ -23,6 +22,8 @@ server/prisma/dev.db
 contracts/target
 contracts/build
 contracts/deployed
+contracts/deployed.backup-*
+artifacts/
 
 *.log
 .DS_Store

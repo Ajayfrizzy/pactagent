@@ -9,6 +9,12 @@ import { createAgreementForApp, getAgreementForApp } from './agreements/agreemen
 import { releaseEscrow, refundEscrow } from './escrows/escrow.service';
 import { assertWebhookUrlAllowed, fetchWebhookUrl, resetWebhookSecurityTestHooks, setWebhookSecurityTestHooks } from './webhooks/webhook.security';
 import { createInfrastructureAuditLog } from './audit-logs/audit-log.repository';
+import { claimAvailableJobs, enqueueAgreementJob, releaseStaleLocks } from '../services/jobQueueService';
+import { getAppEvent, listAppEvents } from './events/event.service';
+import { listAppTransactions } from './transactions/transaction.service';
+import http from 'node:http';
+import { createApp } from '../app';
+import { getApiKeyPrefix, hashApiKey } from '../common/crypto/api-keys';
 
 const shouldRun = process.env.RUN_DB_INTEGRATION_TESTS === 'true';
 const ownerUserId = `integration-${randomUUID()}`;
@@ -125,6 +131,7 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
       await prisma.escrow.deleteMany({ where: { appId: { in: createdAppIds } } });
       await prisma.milestone.deleteMany({ where: { appId: { in: createdAppIds } } });
       await prisma.idempotencyKey.deleteMany({ where: { appId: { in: createdAppIds } } });
+      await prisma.agentJob.deleteMany({ where: { agreement: { appId: { in: createdAppIds } } } });
       await prisma.agreement.deleteMany({ where: { appId: { in: createdAppIds } } });
       await prisma.apiKey.deleteMany({ where: { appId: { in: createdAppIds } } });
       await prisma.app.deleteMany({
@@ -172,6 +179,59 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
     }));
   });
 
+  test('tenant-scoped event and transaction reads cannot escape to another app', async () => {
+    const appA = await createIntegrationApp('Read Isolation A');
+    const appB = await createIntegrationApp('Read Isolation B');
+    const agreement = await seedAgreement(appB.id);
+    const event = await prisma.event.create({
+      data: {
+        id: randomUUID(), appId: appB.id, agreementId: agreement.id,
+        type: 'agreement.created', payloadJson: '{}',
+      },
+    });
+    await prisma.transaction.create({
+      data: {
+        id: randomUUID(), appId: appB.id, agreementId: agreement.id, type: 'lock',
+        rail: 'mock', network: 'sandbox', status: 'confirmed', amount: '1000', currency: 'CKB',
+      },
+    });
+
+    await assert.rejects(
+      () => getAppEvent(appA.id, event.id),
+      (error) => error instanceof AppError && error.code === 'event_not_found',
+    );
+    assert.equal((await listAppEvents(appA.id, { limit: 20 })).data.length, 0);
+    assert.equal((await listAppTransactions(appA.id, { limit: 20 })).data.length, 0);
+  });
+
+  test('authenticated API requests return not found for another tenant event', async (t) => {
+    const appA = await createIntegrationApp('HTTP Isolation A');
+    const appB = await createIntegrationApp('HTTP Isolation B');
+    const rawKey = `pa_test_${randomUUID().replace(/-/g, '')}`;
+    await prisma.apiKey.create({
+      data: {
+        id: randomUUID(), appId: appA.id, name: 'HTTP test key',
+        keyPrefix: getApiKeyPrefix(rawKey), keyHash: hashApiKey(rawKey),
+        environment: 'sandbox', status: 'active', scopes: ['events:read'],
+      },
+    });
+    const event = await prisma.event.create({
+      data: { id: randomUUID(), appId: appB.id, type: 'private.event', payloadJson: '{}' },
+    });
+    const server = http.createServer(createApp());
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+    const address = server.address();
+    assert.ok(address && typeof address !== 'string');
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/v1/events/${event.id}`, {
+      headers: { 'x-api-key': rawKey },
+    });
+    const body = await response.json() as { error?: { code?: string } };
+    assert.equal(response.status, 404);
+    assert.equal(body.error?.code, 'event_not_found');
+  });
+
   test('worker heartbeat lifecycle is persisted for readiness checks', async () => {
     const workerId = `integration-worker-${randomUUID()}`;
     createdWorkerIds.push(workerId);
@@ -191,6 +251,29 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
     assert.equal(updated.status, 'running');
     assert.equal(updated.cyclesSucceeded, 1);
     assert.equal(updated.lastCycleDurationMs, 25);
+  });
+
+  test('a stale job lock from a crashed worker is released and reclaimed once', async () => {
+    const app = await createIntegrationApp('Worker Recovery App');
+    const agreement = await seedAgreement(app.id);
+    const job = await enqueueAgreementJob({ agreementId: agreement.id, kind: 'AGREEMENT_CONTINUE' });
+    await prisma.agentJob.update({
+      where: { id: job.id },
+      data: {
+        status: 'RUNNING', lockedBy: 'crashed-worker',
+        lockedAt: new Date(Date.now() - 10 * 60_000), attempts: 1,
+      },
+    });
+
+    assert.equal((await releaseStaleLocks(5 * 60_000)).count, 1);
+    const [first, second] = await Promise.all([
+      claimAvailableJobs('replacement-a', 10),
+      claimAvailableJobs('replacement-b', 10),
+    ]);
+    assert.equal(first.length + second.length, 1);
+    const recovered = [...first, ...second][0];
+    assert.equal(recovered.id, job.id);
+    assert.match(recovered.lastError ?? '', /Recovered stale worker lock/);
   });
 
   test('audit ledger hashes new rows and rejects mutation', async () => {

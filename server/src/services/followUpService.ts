@@ -353,6 +353,7 @@ export async function getInfoRequestRecordsForAgreement(agreementId: string) {
   const records = await prisma.infoRequest.findMany({
     where: { agreementId },
     orderBy: { createdAt: 'desc' },
+    take: 100,
   });
 
   if (records.length) {
@@ -366,6 +367,7 @@ export async function getInfoRequestRecordsForAgreement(agreementId: string) {
         in: ['INFO_REQUESTED', 'INFO_RECEIVED'],
       },
     },
+    take: 100,
     orderBy: { createdAt: 'asc' },
   });
 

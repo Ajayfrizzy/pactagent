@@ -222,7 +222,7 @@ export async function listAgreementJobs(agreementId: string, limit = 100) {
   return prisma.agentJob.findMany({
     where: { agreementId },
     orderBy: { createdAt: 'desc' },
-    take: limit,
+    take: Math.min(Math.max(limit, 1), 100),
   });
 }
 

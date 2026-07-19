@@ -491,8 +491,9 @@ router.get('/', async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, error: 'You can only view agreements for your own wallet' });
     }
 
-    const agreements = await agreementService.getAgreements(authAddress);
-    res.json({ success: true, data: agreements });
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
+    const result = await agreementService.getAgreements(authAddress, limit, req.query.cursor as string | undefined);
+    res.json({ success: true, data: result.data, pagination: result.pagination });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     res.status(500).json({ success: false, error: msg });
@@ -1734,6 +1735,7 @@ router.get('/:id/dispute', async (req: Request, res: Response) => {
     const disputes = await prisma.dispute.findMany({
       where: { agreementId: req.params.id },
       orderBy: { createdAt: 'desc' },
+      take: 100,
     });
     res.json({ success: true, data: disputes });
   } catch (err) {

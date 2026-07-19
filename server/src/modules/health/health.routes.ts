@@ -6,6 +6,7 @@ const router = Router();
 
 router.get('/health', healthController.health);
 router.get('/ready', asyncHandler(healthController.ready));
+router.get('/health/worker', asyncHandler(healthController.worker));
 router.get('/metrics', asyncHandler(healthController.metrics));
 
 export default router;

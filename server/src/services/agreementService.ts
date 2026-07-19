@@ -4122,7 +4122,7 @@ export async function completeApprovedMilestone(
   return getAgreementById(agreementId);
 }
 
-export async function getAgreements(address?: string) {
+export async function getAgreements(address?: string, limit = 50, cursor?: string) {
   const agreements = await prisma.agreement.findMany({
     where: address
       ? {
@@ -4140,11 +4140,17 @@ export async function getAgreements(address?: string) {
         }
       : undefined,
     orderBy: { createdAt: 'desc' },
+    take: Math.min(Math.max(limit, 1), 100) + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     include: agreementListInclude,
   });
 
-  const hydrated = await Promise.all(agreements.map((agreement) => ensureAgreementMilestones(agreement)));
-  return hydrated.map((agreement) => toJsonSafe(agreement));
+  const page = agreements.slice(0, Math.min(Math.max(limit, 1), 100));
+  const hydrated = await Promise.all(page.map((agreement) => ensureAgreementMilestones(agreement)));
+  return {
+    data: hydrated.map((agreement) => toJsonSafe(agreement)),
+    pagination: { limit, cursor: agreements.length > page.length ? page[page.length - 1]?.id ?? null : null },
+  };
 }
 
 export async function getAgreementById(id: string) {

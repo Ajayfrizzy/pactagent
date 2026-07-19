@@ -35,6 +35,6 @@ export async function getAuditLogsForAgreement(agreementId: string, limit = 100)
   return prisma.auditLog.findMany({
     where: { agreementId },
     orderBy: { createdAt: 'desc' },
-    take: limit,
+    take: Math.min(Math.max(limit, 1), 100),
   });
 }

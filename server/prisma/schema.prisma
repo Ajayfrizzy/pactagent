@@ -142,6 +142,9 @@ model Agreement {
   @@index([status, createdAt])
   @@index([settlementStatus, createdAt])
   @@index([deadlineAt])
+  @@index([status, updatedAt, id])
+  @@index([settlementStatus, updatedAt, id])
+  @@index([status, deadlineAt, id])
 }
 
 model PublicProfile {

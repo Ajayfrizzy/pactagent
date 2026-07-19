@@ -1,10 +1,56 @@
 import dotenv from 'dotenv';
 import { readFileSync } from 'fs';
+import { z } from 'zod';
 
-dotenv.config({ override: true });
+dotenv.config();
+
+const optionalUrl = z.preprocess(
+  (value) => value === '' ? undefined : value,
+  z.string().url().optional(),
+);
+
+const environmentSchema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'staging', 'production']).default('development'),
+  SERVICE_ROLE: z.enum(['api', 'worker']).default('api'),
+  PORT: z.coerce.number().int().min(1).max(65535).default(4000),
+  WORKER_HEALTH_PORT: z.coerce.number().int().min(1).max(65535).default(4001),
+  DATABASE_URL: optionalUrl,
+  DIRECT_URL: optionalUrl,
+  REDIS_URL: optionalUrl,
+  OTEL_EXPORTER_OTLP_ENDPOINT: optionalUrl,
+  CKB_NODE_URL: z.string().url().default('https://testnet.ckb.dev/'),
+  CKB_NETWORK: z.enum(['testnet', 'mainnet']).default('testnet'),
+  DEFAULT_CKB_FEE_RATE: z.string().regex(/^[1-9][0-9]*$/).default('1200'),
+  TREASURY_SIGNER_PROVIDER: z.enum(['local', 'managed']).default('local'),
+  TREASURY_SIGNER_URL: optionalUrl,
+  FIBER_RPC_URL: optionalUrl,
+  AI_PROVIDER: z.enum(['mock', 'openai']).default('mock'),
+  FORUM_PUBLISH_PROVIDER: z.enum(['DISCOURSE', 'WEBHOOK']).default('DISCOURSE'),
+  ONCHAIN_LOCK_HASH_TYPE: z.enum(['type', 'data', 'data1']).default('type'),
+  ONCHAIN_LOCK_DEP_TYPE: z.enum(['code', 'depGroup']).default('code'),
+  ONCHAIN_LOCK_CODE_HASH: z.preprocess((value) => value === '' ? undefined : value, z.string().regex(/^0x[a-fA-F0-9]{64}$/).optional()),
+  ONCHAIN_LOCK_TX_HASH: z.preprocess((value) => value === '' ? undefined : value, z.string().regex(/^0x[a-fA-F0-9]{64}$/).optional()),
+  ONCHAIN_LOCK_INDEX: z.preprocess((value) => value === '' ? undefined : value, z.string().regex(/^0x[a-fA-F0-9]+$/).optional()),
+  REQUIRE_SETTLEMENT_READY: z.enum(['true', 'false']).optional(),
+  COINGECKO_API_BASE_URL: z.string().url().default('https://api.coingecko.com/api/v3'),
+  FORUM_PUBLISH_WEBHOOK_URL: optionalUrl,
+}).passthrough();
+
+const parsedEnvironment = environmentSchema.safeParse(process.env);
+if (!parsedEnvironment.success) {
+  const details = parsedEnvironment.error.issues
+    .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
+    .join('; ');
+  throw new Error(`Invalid environment configuration: ${details}`);
+}
+const environment = parsedEnvironment.data;
 
 function isProduction() {
   return process.env.NODE_ENV === 'production';
+}
+
+function isDeployedEnvironment() {
+  return process.env.NODE_ENV === 'staging' || process.env.NODE_ENV === 'production';
 }
 
 function parseNumber(value: string | undefined, fallback: number) {
@@ -26,12 +72,14 @@ function parseBoundedNumber(value: string | undefined, fallback: number, name: s
   return parsed;
 }
 
-function parseBoolean(value: string | undefined, fallback = false) {
+export function parseBoolean(value: string | undefined, fallback = false, name = 'boolean setting') {
   if (value === undefined || value === '') {
     return fallback;
   }
 
-  return value === 'true';
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  throw new Error(`${name} must be exactly "true" or "false".`);
 }
 
 function parseCorsOrigins(value?: string) {
@@ -39,10 +87,17 @@ function parseCorsOrigins(value?: string) {
     return ['http://localhost:3000'];
   }
 
-  return value
+  const origins = value
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
+  for (const origin of origins) {
+    const parsed = new URL(origin);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      throw new Error('CORS_ORIGIN entries must use http or https.');
+    }
+  }
+  return origins;
 }
 
 function parseCsv(value?: string) {
@@ -102,33 +157,35 @@ function requireStrongSecret(value: string, name: string) {
 }
 
 export const config = {
-  nodeEnv: process.env.NODE_ENV || 'development',
-  serviceRole: process.env.SERVICE_ROLE || 'api',
-  port: parseNumber(process.env.PORT, 4000),
+  nodeEnv: environment.NODE_ENV,
+  serviceRole: environment.SERVICE_ROLE,
+  port: environment.PORT,
+  workerHealthPort: environment.WORKER_HEALTH_PORT,
   corsOrigins: parseCorsOrigins(process.env.CORS_ORIGIN),
   allowLocalhostCors: !isProduction(),
-  enableLegacyProductApi: parseBoolean(process.env.ENABLE_LEGACY_PRODUCT_API, !isProduction()),
+  enableLegacyProductApi: parseBoolean(process.env.ENABLE_LEGACY_PRODUCT_API, environment.NODE_ENV === 'development', 'ENABLE_LEGACY_PRODUCT_API'),
 
-  ckbNodeUrl: process.env.CKB_NODE_URL || 'https://testnet.ckb.dev/',
-  ckbNetwork: (process.env.CKB_NETWORK || 'testnet') as 'testnet' | 'mainnet',
-  treasurySignerProvider: process.env.TREASURY_SIGNER_PROVIDER || 'local',
+  ckbNodeUrl: environment.CKB_NODE_URL,
+  ckbNetwork: environment.CKB_NETWORK,
+  treasurySignerProvider: environment.TREASURY_SIGNER_PROVIDER,
   treasuryPrivateKey: secretValue('TREASURY_CKB_PRIVATE_KEY'),
   treasuryAddress: process.env.TREASURY_CKB_ADDRESS || '',
-  treasurySignerUrl: process.env.TREASURY_SIGNER_URL || '',
+  treasurySignerUrl: environment.TREASURY_SIGNER_URL || '',
   treasurySignerToken: secretValue('TREASURY_SIGNER_TOKEN'),
-  defaultCkbFeeRate: process.env.DEFAULT_CKB_FEE_RATE || '1200',
+  defaultCkbFeeRate: environment.DEFAULT_CKB_FEE_RATE,
 
   agentIntervalMs: parseNumber(process.env.AGENT_INTERVAL_MS, 2000),
   shutdownTimeoutMs: parseBoundedNumber(process.env.SHUTDOWN_TIMEOUT_MS, 30_000, 'SHUTDOWN_TIMEOUT_MS', 5_000, 120_000),
   workerHeartbeatStaleMs: parseBoundedNumber(process.env.WORKER_HEARTBEAT_STALE_MS, 30_000, 'WORKER_HEARTBEAT_STALE_MS', 5_000, 10 * 60_000),
   workerId: process.env.WORKER_ID || '',
-  requireWorkerReady: parseBoolean(process.env.REQUIRE_WORKER_READY, isProduction()),
+  requireWorkerReady: parseBoolean(process.env.REQUIRE_WORKER_READY, isDeployedEnvironment(), 'REQUIRE_WORKER_READY'),
+  requireSettlementReady: parseBoolean(process.env.REQUIRE_SETTLEMENT_READY, isProduction(), 'REQUIRE_SETTLEMENT_READY'),
   metricsBearerToken: secretValue('METRICS_BEARER_TOKEN'),
   buildVersion: process.env.BUILD_VERSION || 'development',
   buildCommit: process.env.BUILD_COMMIT || 'unknown',
 
-  aiEnabled: parseBoolean(process.env.AI_ENABLED),
-  aiProvider: process.env.AI_PROVIDER || 'mock',
+  aiEnabled: parseBoolean(process.env.AI_ENABLED, false, 'AI_ENABLED'),
+  aiProvider: environment.AI_PROVIDER,
   openaiApiKey: process.env.OPENAI_API_KEY || '',
   openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
   aiTimeoutMs: parseNumber(process.env.AI_TIMEOUT_MS, 30000),
@@ -160,7 +217,7 @@ export const config = {
   dbQueryTimeoutMs: parseBoundedNumber(process.env.DB_QUERY_TIMEOUT_MS, 35_000, 'DB_QUERY_TIMEOUT_MS', 1_000, 180_000),
   trustProxyHops: parseNonNegativeNumber(process.env.TRUST_PROXY_HOPS, 0),
   redisUrl: secretValue('REDIS_URL'),
-  rateLimitFailClosed: parseBoolean(process.env.RATE_LIMIT_FAIL_CLOSED, isProduction()),
+  rateLimitFailClosed: parseBoolean(process.env.RATE_LIMIT_FAIL_CLOSED, isDeployedEnvironment(), 'RATE_LIMIT_FAIL_CLOSED'),
   webhookTimeoutMs: parseBoundedNumber(process.env.WEBHOOK_TIMEOUT_MS, 10_000, 'WEBHOOK_TIMEOUT_MS', 1_000, 30_000),
   webhookMaxAttempts: parseBoundedNumber(process.env.WEBHOOK_MAX_ATTEMPTS, 5, 'WEBHOOK_MAX_ATTEMPTS', 1, 10),
   webhookMaxRedirects: parseBoundedNumber(process.env.WEBHOOK_MAX_REDIRECTS, 3, 'WEBHOOK_MAX_REDIRECTS', 0, 5),
@@ -177,25 +234,27 @@ export const config = {
   wsMaxPayloadBytes: parseBoundedNumber(process.env.WS_MAX_PAYLOAD_BYTES, 64 * 1024, 'WS_MAX_PAYLOAD_BYTES', 1024, 1024 * 1024),
   wsHeartbeatIntervalMs: parseBoundedNumber(process.env.WS_HEARTBEAT_INTERVAL_MS, 30_000, 'WS_HEARTBEAT_INTERVAL_MS', 5_000, 5 * 60_000),
   wsMaxBufferedBytes: parseBoundedNumber(process.env.WS_MAX_BUFFERED_BYTES, 1024 * 1024, 'WS_MAX_BUFFERED_BYTES', 64 * 1024, 16 * 1024 * 1024),
-  forumPublishEnabled: parseBoolean(process.env.FORUM_PUBLISH_ENABLED),
-  forumPublishProvider: (process.env.FORUM_PUBLISH_PROVIDER || 'DISCOURSE') as 'DISCOURSE' | 'WEBHOOK',
+  forumPublishEnabled: parseBoolean(process.env.FORUM_PUBLISH_ENABLED, false, 'FORUM_PUBLISH_ENABLED'),
+  forumPublishProvider: environment.FORUM_PUBLISH_PROVIDER,
   forumPublishApiKey: process.env.FORUM_PUBLISH_API_KEY || '',
   forumPublishApiUsername: process.env.FORUM_PUBLISH_API_USERNAME || '',
-  forumPublishWebhookUrl: process.env.FORUM_PUBLISH_WEBHOOK_URL || '',
+  forumPublishWebhookUrl: environment.FORUM_PUBLISH_WEBHOOK_URL || '',
   forumPublishTimeoutMs: parseNumber(process.env.FORUM_PUBLISH_TIMEOUT_MS, 10_000),
-  coinGeckoApiBaseUrl:
-    process.env.COINGECKO_API_BASE_URL
-    || 'https://api.coingecko.com/api/v3',
+  coinGeckoApiBaseUrl: environment.COINGECKO_API_BASE_URL,
   coinGeckoApiKey: process.env.COINGECKO_API_KEY || '',
   marketPriceCacheTtlMs: parseNumber(process.env.MARKET_PRICE_CACHE_TTL_MS, 60_000),
 
-  onchainEscrowEnabled: parseBoolean(process.env.ONCHAIN_ESCROW_ENABLED),
-  onchainLockCodeHash: process.env.ONCHAIN_LOCK_CODE_HASH || '',
-  onchainLockHashType: (process.env.ONCHAIN_LOCK_HASH_TYPE || 'type') as 'type' | 'data' | 'data1',
-  onchainLockTxHash: process.env.ONCHAIN_LOCK_TX_HASH || '',
-  onchainLockIndex: process.env.ONCHAIN_LOCK_INDEX || '',
-  onchainLockDepType: (process.env.ONCHAIN_LOCK_DEP_TYPE || 'code') as 'code' | 'depGroup',
+  onchainEscrowEnabled: parseBoolean(process.env.ONCHAIN_ESCROW_ENABLED, false, 'ONCHAIN_ESCROW_ENABLED'),
+  onchainLockCodeHash: environment.ONCHAIN_LOCK_CODE_HASH || '',
+  onchainLockHashType: environment.ONCHAIN_LOCK_HASH_TYPE,
+  onchainLockTxHash: environment.ONCHAIN_LOCK_TX_HASH || '',
+  onchainLockIndex: environment.ONCHAIN_LOCK_INDEX || '',
+  onchainLockDepType: environment.ONCHAIN_LOCK_DEP_TYPE,
   onchainEscrowArgsSalt: process.env.ONCHAIN_ESCROW_ARGS_SALT || '',
+
+  fiberEnabled: parseBoolean(process.env.FIBER_ENABLED, false, 'FIBER_ENABLED'),
+  fiberRpcUrl: environment.FIBER_RPC_URL || '',
+  fiberRpcApiKey: secretValue('FIBER_RPC_API_KEY'),
 };
 
 export function requireConfig(value: string, name: string) {
@@ -207,13 +266,55 @@ export function requireConfig(value: string, name: string) {
 }
 
 export function validateProductionConfig() {
-  if (!isProduction()) {
+  if (config.onchainEscrowEnabled) {
+    requireConfig(config.onchainLockCodeHash, 'ONCHAIN_LOCK_CODE_HASH');
+    requireConfig(config.onchainLockTxHash, 'ONCHAIN_LOCK_TX_HASH');
+    requireConfig(config.onchainLockIndex, 'ONCHAIN_LOCK_INDEX');
+    if (!/^0x[a-fA-F0-9]{64}$/.test(config.onchainLockCodeHash)) {
+      throw new Error('ONCHAIN_LOCK_CODE_HASH must be a 32-byte 0x-prefixed hex value.');
+    }
+    if (!/^0x[a-fA-F0-9]{64}$/.test(config.onchainLockTxHash)) {
+      throw new Error('ONCHAIN_LOCK_TX_HASH must be a 32-byte 0x-prefixed transaction hash.');
+    }
+    if (!/^0x[a-fA-F0-9]+$/.test(config.onchainLockIndex)) {
+      throw new Error('ONCHAIN_LOCK_INDEX must be a 0x-prefixed hexadecimal index.');
+    }
+    if (config.treasurySignerProvider === 'local') {
+      requireConfig(config.treasuryPrivateKey, 'TREASURY_CKB_PRIVATE_KEY');
+    }
+  }
+
+  if (config.fiberEnabled) {
+    requireConfig(config.fiberRpcUrl, 'FIBER_RPC_URL');
+    requireConfig(config.fiberRpcApiKey, 'FIBER_RPC_API_KEY');
+  }
+
+  if (config.treasurySignerProvider === 'managed') {
+    requireConfig(config.treasurySignerUrl, 'TREASURY_SIGNER_URL');
+    requireConfig(config.treasuryAddress, 'TREASURY_CKB_ADDRESS');
+    requireConfig(config.treasurySignerToken, 'TREASURY_SIGNER_TOKEN');
+  }
+
+  if (config.aiEnabled && config.aiProvider === 'openai') {
+    requireConfig(config.openaiApiKey, 'OPENAI_API_KEY');
+  }
+
+  if (config.forumPublishEnabled) {
+    if (config.forumPublishProvider === 'DISCOURSE') {
+      requireConfig(config.forumPublishApiKey, 'FORUM_PUBLISH_API_KEY');
+      requireConfig(config.forumPublishApiUsername, 'FORUM_PUBLISH_API_USERNAME');
+    } else {
+      requireConfig(config.forumPublishWebhookUrl, 'FORUM_PUBLISH_WEBHOOK_URL');
+    }
+  }
+
+  if (!isDeployedEnvironment()) {
     return;
   }
 
   requireConfig(process.env.DATABASE_URL || '', 'DATABASE_URL');
   if (config.serviceRole === 'api' && !config.redisUrl) {
-    throw new Error('REDIS_URL or REDIS_URL_FILE is required in production for distributed rate limiting.');
+    throw new Error('REDIS_URL or REDIS_URL_FILE is required in staging and production for distributed rate limiting.');
   }
   const activeJwtKey = config.authJwtKeys[config.authJwtActiveKid] || config.authJwtSecret;
   const activeWebhookKey = config.webhookEncryptionKeys[config.webhookActiveKeyId] || config.webhookSecretEncryptionKey;
@@ -229,28 +330,26 @@ export function validateProductionConfig() {
   }
 
   if (config.treasurySignerProvider === 'local' && (config.onchainEscrowEnabled || config.ckbNetwork === 'mainnet')) {
-    throw new Error('TREASURY_SIGNER_PROVIDER=local is not allowed for mainnet or enabled on-chain escrow in production.');
+    throw new Error('TREASURY_SIGNER_PROVIDER=local is not allowed for mainnet or enabled on-chain escrow in staging or production.');
   }
 
   if (config.treasurySignerProvider === 'managed') {
-    requireConfig(config.treasurySignerUrl, 'TREASURY_SIGNER_URL');
-    requireConfig(config.treasuryAddress, 'TREASURY_CKB_ADDRESS');
     requireStrongSecret(config.treasurySignerToken, 'TREASURY_SIGNER_TOKEN');
   }
 
   if (config.serviceRole === 'api' && !config.adminAddresses.length) {
-    throw new Error('ADMIN_ADDRESSES must include at least one admin identity in production.');
+    throw new Error('ADMIN_ADDRESSES must include at least one admin identity in staging and production.');
   }
 
   if (config.serviceRole === 'api' && !process.env.CORS_ORIGIN) {
-    throw new Error('CORS_ORIGIN must be set explicitly in production.');
+    throw new Error('CORS_ORIGIN must be set explicitly in staging and production.');
   }
 
   if (config.serviceRole === 'api' && config.corsOrigins.some((origin) => hasWildcardOrigin(origin) || hasLocalhostOrigin(origin))) {
-    throw new Error('Production CORS origins cannot include wildcards, localhost, or invalid URLs.');
+    throw new Error('Staging and production CORS origins cannot include wildcards, localhost, or invalid URLs.');
   }
 
   if (config.serviceRole === 'api' && config.enableLegacyProductApi) {
-    throw new Error('ENABLE_LEGACY_PRODUCT_API must be false in production.');
+    throw new Error('ENABLE_LEGACY_PRODUCT_API must be false in staging and production.');
   }
 }

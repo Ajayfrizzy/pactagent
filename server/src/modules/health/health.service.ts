@@ -57,13 +57,19 @@ export async function getWorkerAndQueueStatus() {
 export async function getReadinessStatus() {
   try {
     await prisma.$queryRaw`SELECT 1`;
-    const operations = await getWorkerAndQueueStatus();
-    const ready = !isShuttingDown() && (!config.requireWorkerReady || operations.status === 'ok');
+    const [operations, settlement] = await Promise.all([
+      getWorkerAndQueueStatus(),
+      getSettlementStatus(),
+    ]);
+    const ready = !isShuttingDown()
+      && (!config.requireWorkerReady || operations.status === 'ok')
+      && (!config.requireSettlementReady || settlement.status === 'ok');
     return {
       status: ready ? 'ready' : 'not_ready',
       database: 'ok',
       databasePool: getDatabasePoolStatus(),
       worker: operations,
+      settlement,
       version: config.buildVersion,
       commit: config.buildCommit,
       timestamp: new Date().toISOString(),
@@ -74,5 +80,25 @@ export async function getReadinessStatus() {
       database: 'error',
       timestamp: new Date().toISOString(),
     };
+  }
+}
+
+export async function getSettlementStatus(required = config.requireSettlementReady, nodeUrl = config.ckbNodeUrl) {
+  if (!required) {
+    return { status: 'not_required' as const };
+  }
+
+  try {
+    const response = await fetch(nodeUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 1, jsonrpc: '2.0', method: 'get_tip_header', params: [] }),
+      signal: AbortSignal.timeout(3_000),
+    });
+    if (!response.ok) return { status: 'error' as const };
+    const result = await response.json() as { result?: unknown; error?: unknown };
+    return { status: result.result && !result.error ? 'ok' as const : 'error' as const };
+  } catch {
+    return { status: 'error' as const };
   }
 }

@@ -1,0 +1,6 @@
+# Default ownership; add narrower rules above this line as teams grow.
+* @oluwaseun
+
+/contracts/ @oluwaseun
+/server/prisma/migrations/ @oluwaseun
+/.github/ @oluwaseun

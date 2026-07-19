@@ -88,6 +88,13 @@ services:
       <<: *server-environment
       SERVICE_ROLE: worker
       OTEL_SERVICE_NAME: pactagent-worker
+      WORKER_HEALTH_PORT: 4001
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4001/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
     secrets:
       - webhook_keyring
       - treasury_private_key

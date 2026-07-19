@@ -123,14 +123,20 @@ export async function getInviteLinkPreview(token: string) {
   };
 }
 
-export async function listInvitesByCreator(walletAddress: string) {
+export async function listInvitesByCreator(walletAddress: string, limit = 50, cursor?: string) {
   const normalizedAddress = normalizeWalletAddress(walletAddress);
   const invites = await prisma.inviteLink.findMany({
     where: { createdByAddress: normalizedAddress },
     orderBy: { createdAt: 'desc' },
+    take: Math.min(Math.max(limit, 1), 100) + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
   });
 
-  return invites.map(serializeInvite);
+  const page = invites.slice(0, Math.min(Math.max(limit, 1), 100));
+  return {
+    data: page.map(serializeInvite),
+    pagination: { limit, cursor: invites.length > page.length ? page[page.length - 1]?.id ?? null : null },
+  };
 }
 
 export async function acceptInviteLink(token: string, acceptingAddress: string) {

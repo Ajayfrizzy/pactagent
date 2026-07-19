@@ -58,8 +58,9 @@ router.get('/', async (req: Request, res: Response) => {
       return res.status(401).json({ success: false, error: 'Authentication required' });
     }
 
-    const invites = await listInvitesByCreator(address);
-    res.json({ success: true, data: invites });
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
+    const result = await listInvitesByCreator(address, limit, req.query.cursor as string | undefined);
+    res.json({ success: true, data: result.data, pagination: result.pagination });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to load invites';
     res.status(500).json({ success: false, error: message });

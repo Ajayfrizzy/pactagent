@@ -9,6 +9,7 @@ import { installConsoleBridge, log } from '../common/observability/logger';
 import { recordWorkerCycle, registerWorker, stopWorker, touchWorker } from '../services/workerHeartbeatService';
 import os from 'os';
 import { shutdownTracing } from '../common/observability/tracing';
+import { createWorkerHealthServer } from './healthServer';
 
 /**
  * Standalone agent worker process.
@@ -19,6 +20,7 @@ let agentTimer: NodeJS.Timeout | null = null;
 let currentCycle: Promise<void> | null = null;
 let heartbeatTimer: NodeJS.Timeout | null = null;
 const workerId = config.workerId || `agent:${os.hostname()}`;
+const healthServer = createWorkerHealthServer();
 
 async function executeCycle() {
   const startedAt = Date.now();
@@ -49,12 +51,14 @@ async function main() {
   installConsoleBridge();
 
   await registerWorker(workerId);
+  healthServer.listen(config.workerHealthPort, '0.0.0.0');
   heartbeatTimer = setInterval(() => {
     void touchWorker(workerId).catch((error) => log('error', 'worker.heartbeat.failed', { workerId, error }));
   }, Math.max(1_000, Math.min(config.workerHeartbeatStaleMs / 3, 10_000)));
   log('info', 'worker.started', {
     workerId,
     intervalMs: config.agentIntervalMs,
+    healthPort: config.workerHealthPort,
     aiEnabled: config.aiEnabled,
   });
 
@@ -100,6 +104,7 @@ function shutdown(signal: string) {
         if (drainTimer) clearTimeout(drainTimer);
       }
     }
+    await new Promise<void>((resolve, reject) => healthServer.close((error) => error ? reject(error) : resolve()));
     await stopWorker(workerId);
     await prisma.$disconnect();
     await shutdownTracing();
