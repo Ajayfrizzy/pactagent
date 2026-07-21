@@ -1709,7 +1709,7 @@ router.post('/:id/jobs/:jobId/replay', requireAdmin, actionRateLimit, async (req
       return res.status(404).json({ success: false, error: 'Agreement not found' });
     }
 
-    const replayed = await replayJob(req.params.jobId);
+    const replayed = await replayJob(req.params.jobId, req.params.id);
     await createAuditLog({
       agreementId: req.params.id,
       actorAddress: req.auth?.address,

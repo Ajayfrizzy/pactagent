@@ -11,7 +11,7 @@ export function requestLogger(req: Request, res: Response, next: NextFunction) {
     path: req.path,
     statusCode: res.statusCode,
     durationMs: Number(process.hrtime.bigint() - startedAt) / 1e6,
-    appId: req.apiKey?.appId,
+    appId: req.tenant?.appId,
     apiKeyId: req.apiKey?.id,
     traceId: spanContext?.traceId,
     spanId: spanContext?.spanId,

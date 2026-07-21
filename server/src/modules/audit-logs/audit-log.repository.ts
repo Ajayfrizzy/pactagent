@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../db';
+import type { TenantContext } from '../../common/tenancy/tenant-context';
 
 export type CreateInfrastructureAuditLogInput = {
   appId?: string | null;
@@ -46,9 +47,9 @@ export function createInfrastructureAuditLog(
   });
 }
 
-export function listAuditLogsForApp(appId: string, params: { limit: number; cursor?: string }) {
+export function listAuditLogsForApp(tenant: TenantContext, params: { limit: number; cursor?: string }) {
   return prisma.auditLog.findMany({
-    where: { appId },
+    where: { appId: tenant.appId },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: params.limit + 1,
     ...(params.cursor ? { cursor: { id: params.cursor }, skip: 1 } : {}),

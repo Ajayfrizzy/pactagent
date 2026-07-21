@@ -7,10 +7,12 @@ test('redaction removes secrets from structured errors and metadata', () => {
     authorization: 'Bearer token-value',
     nested: { apiKey: 'pa_live_abc', databaseUrl: 'postgresql://user:pass@host/db' },
     safe: 'agreement-123',
+    message: 'provider rejected sk-abcdefghijklmnop and eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signaturevalue',
   });
   assert.deepEqual(result, {
     authorization: '[REDACTED]',
     nested: { apiKey: '[REDACTED]', databaseUrl: '[REDACTED]' },
     safe: 'agreement-123',
+    message: 'provider rejected [REDACTED] and [REDACTED]',
   });
 });

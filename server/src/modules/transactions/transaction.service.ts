@@ -1,4 +1,5 @@
 import { serializeTransaction } from './transaction.model';
+import { tenantContext } from '../../common/tenancy/tenant-context';
 import * as transactionRepository from './transaction.repository';
 
 export async function listAppTransactions(appId: string, params: {
@@ -7,7 +8,7 @@ export async function listAppTransactions(appId: string, params: {
   limit: number;
   cursor?: string;
 }) {
-  const transactions = await transactionRepository.listTransactionsForApp(appId, params);
+  const transactions = await transactionRepository.listTransactionsForApp(tenantContext(appId), params);
   const hasMore = transactions.length > params.limit;
   const data = transactions.slice(0, params.limit);
 

@@ -9,7 +9,7 @@ import { createAgreementForApp, getAgreementForApp } from './agreements/agreemen
 import { releaseEscrow, refundEscrow } from './escrows/escrow.service';
 import { assertWebhookUrlAllowed, fetchWebhookUrl, resetWebhookSecurityTestHooks, setWebhookSecurityTestHooks } from './webhooks/webhook.security';
 import { createInfrastructureAuditLog } from './audit-logs/audit-log.repository';
-import { claimAvailableJobs, enqueueAgreementJob, releaseStaleLocks } from '../services/jobQueueService';
+import { claimAvailableJobs, completeJob, enqueueAgreementJob, releaseStaleLocks, renewJobLease } from '../services/jobQueueService';
 import { getAppEvent, listAppEvents } from './events/event.service';
 import { listAppTransactions } from './transactions/transaction.service';
 import http from 'node:http';
@@ -232,6 +232,158 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
     assert.equal(body.error?.code, 'event_not_found');
   });
 
+  test('PostgreSQL rejects every cross-tenant infrastructure parent reference', async () => {
+    const appA = await createIntegrationApp('Constraint Matrix A');
+    const appB = await createIntegrationApp('Constraint Matrix B');
+    const agreement = await seedAgreement(appB.id);
+    const milestone = await prisma.milestone.create({
+      data: {
+        id: randomUUID(), appId: appB.id, agreementId: agreement.id,
+        title: 'B milestone', description: 'Tenant B', amount: '1000', currency: 'CKB', sortOrder: 1,
+      },
+    });
+    const proof = await prisma.proof.create({
+      data: {
+        id: randomUUID(), appId: appB.id, agreementId: agreement.id, milestoneId: milestone.id,
+        proofType: 'TEXT', content: 'proof', contentHash: randomUUID(),
+      },
+    });
+    const escrow = await prisma.escrow.create({
+      data: {
+        id: randomUUID(), appId: appB.id, agreementId: agreement.id, milestoneId: milestone.id,
+        amount: '1000', currency: 'CKB', rail: 'mock', network: 'sandbox',
+      },
+    });
+    const dispute = await prisma.dispute.create({
+      data: {
+        id: randomUUID(), appId: appB.id, agreementId: agreement.id, milestoneId: milestone.id,
+        openedBy: 'tenant-b', reason: 'constraint fixture',
+      },
+    });
+
+    const invalidWrites = [
+      () => prisma.proof.create({ data: {
+        id: randomUUID(), appId: appA.id, agreementId: agreement.id, milestoneId: milestone.id,
+        proofType: 'TEXT', content: 'invalid', contentHash: randomUUID(),
+      } }),
+      () => prisma.review.create({ data: {
+        id: randomUUID(), appId: appA.id, agreementId: agreement.id, milestoneId: milestone.id,
+        proofSubmissionId: proof.id, reviewerExternalId: 'reviewer', decision: 'approved',
+      } }),
+      () => prisma.escrow.create({ data: {
+        id: randomUUID(), appId: appA.id, agreementId: agreement.id, milestoneId: milestone.id,
+        amount: '1000', currency: 'CKB', rail: 'mock', network: 'sandbox',
+      } }),
+      () => prisma.transaction.create({ data: {
+        id: randomUUID(), appId: appA.id, agreementId: agreement.id, milestoneId: milestone.id,
+        escrowId: escrow.id, type: 'lock', rail: 'mock', network: 'sandbox', amount: '1000', currency: 'CKB',
+      } }),
+      () => prisma.dispute.create({ data: {
+        id: randomUUID(), appId: appA.id, agreementId: agreement.id, milestoneId: milestone.id,
+        openedBy: 'tenant-a', reason: 'invalid tenant',
+      } }),
+      () => prisma.event.create({ data: {
+        id: randomUUID(), appId: appA.id, agreementId: agreement.id, milestoneId: milestone.id,
+        escrowId: escrow.id, proofSubmissionId: proof.id, disputeId: dispute.id,
+        type: 'invalid.cross_tenant', payloadJson: '{}',
+      } }),
+    ];
+
+    for (const write of invalidWrites) {
+      await assert.rejects(write);
+    }
+  });
+
+  test('tenant A cannot access any tenant B infrastructure resource over HTTP', async (t) => {
+    const appA = await createIntegrationApp('HTTP Matrix A');
+    const appB = await createIntegrationApp('HTTP Matrix B');
+    const rawKey = `pa_test_${randomUUID().replace(/-/g, '')}`;
+    await prisma.apiKey.create({
+      data: {
+        id: randomUUID(), appId: appA.id, name: 'HTTP matrix key',
+        keyPrefix: getApiKeyPrefix(rawKey), keyHash: hashApiKey(rawKey), environment: 'sandbox', status: 'active',
+        scopes: [
+          'agreements:read', 'milestones:read', 'proofs:read', 'escrows:read',
+          'disputes:read', 'events:read', 'webhooks:read', 'apps:read', 'admin:read',
+        ],
+      },
+    });
+    const agreement = await seedAgreement(appB.id);
+    const milestone = await prisma.milestone.create({ data: {
+      id: randomUUID(), appId: appB.id, agreementId: agreement.id,
+      title: 'Private milestone', description: 'Tenant B only', amount: '1000', currency: 'CKB', sortOrder: 1,
+    } });
+    const proof = await prisma.proof.create({ data: {
+      id: randomUUID(), appId: appB.id, agreementId: agreement.id, milestoneId: milestone.id,
+      proofType: 'TEXT', content: 'private', contentHash: randomUUID(),
+    } });
+    const escrow = await prisma.escrow.create({ data: {
+      id: randomUUID(), appId: appB.id, agreementId: agreement.id, milestoneId: milestone.id,
+      amount: '1000', currency: 'CKB', rail: 'mock', network: 'sandbox',
+    } });
+    const event = await prisma.event.create({ data: {
+      id: randomUUID(), appId: appB.id, agreementId: agreement.id, milestoneId: milestone.id,
+      escrowId: escrow.id, proofSubmissionId: proof.id, type: 'private.event', payloadJson: '{}',
+    } });
+    const dispute = await prisma.dispute.create({ data: {
+      id: randomUUID(), appId: appB.id, agreementId: agreement.id, milestoneId: milestone.id,
+      openedBy: 'tenant-b', reason: 'private dispute',
+    } });
+    const endpoint = await prisma.webhookEndpoint.create({ data: {
+      id: randomUUID(), appId: appB.id, ownerAddress: appB.id, targetUrl: 'https://example.com/hook',
+      eventTypesJson: '[]', signingSecret: 'hash', status: 'active',
+    } });
+    const delivery = await prisma.webhookDelivery.create({ data: {
+      id: randomUUID(), appId: appB.id, endpointId: endpoint.id, eventId: event.id,
+      agreementId: agreement.id, eventType: event.type, payloadJson: '{}', payloadHash: randomUUID(),
+    } });
+    await prisma.review.create({ data: {
+      id: randomUUID(), appId: appB.id, agreementId: agreement.id, milestoneId: milestone.id,
+      proofSubmissionId: proof.id, reviewerExternalId: 'tenant-b-reviewer', decision: 'approved',
+    } });
+    await prisma.transaction.create({ data: {
+      id: randomUUID(), appId: appB.id, agreementId: agreement.id, milestoneId: milestone.id,
+      escrowId: escrow.id, type: 'lock', rail: 'mock', network: 'sandbox', amount: '1000', currency: 'CKB',
+    } });
+    await createInfrastructureAuditLog({
+      appId: appB.id, agreementId: agreement.id, actorType: 'system',
+      action: 'private.audit', targetType: 'agreement', targetId: agreement.id,
+    });
+
+    const server = http.createServer(createApp());
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+    const address = server.address();
+    assert.ok(address && typeof address !== 'string');
+    const base = `http://127.0.0.1:${address.port}`;
+    const headers = { 'x-api-key': rawKey };
+
+    for (const path of [
+      `/v1/agreements/${agreement.id}`,
+      `/v1/milestones/${milestone.id}`,
+      `/v1/proofs/${proof.id}`,
+      `/v1/escrows/${escrow.id}`,
+      `/v1/disputes/${dispute.id}`,
+      `/v1/events/${event.id}`,
+      `/v1/webhook-endpoints/${endpoint.id}`,
+      `/v1/webhook-deliveries/${delivery.id}`,
+    ]) {
+      const response = await fetch(`${base}${path}`, { headers });
+      assert.equal(response.status, 404, path);
+    }
+
+    for (const path of [
+      '/v1/agreements', '/v1/milestones', '/v1/proofs', '/v1/escrows',
+      '/v1/transactions', '/v1/reviews', '/v1/disputes', '/v1/events', '/v1/webhook-endpoints',
+      '/v1/webhook-deliveries', '/v1/audit-logs',
+    ]) {
+      const response = await fetch(`${base}${path}`, { headers });
+      assert.equal(response.status, 200, path);
+      const body = await response.json() as { data?: Array<{ id?: string }> };
+      assert.deepEqual(body.data, [], path);
+    }
+  });
+
   test('worker heartbeat lifecycle is persisted for readiness checks', async () => {
     const workerId = `integration-worker-${randomUUID()}`;
     createdWorkerIds.push(workerId);
@@ -261,19 +413,57 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
       where: { id: job.id },
       data: {
         status: 'RUNNING', lockedBy: 'crashed-worker',
-        lockedAt: new Date(Date.now() - 10 * 60_000), attempts: 1,
+        lockedAt: new Date(Date.now() - 10 * 60_000),
+        leaseExpiresAt: new Date(Date.now() - 5 * 60_000), attempts: 1,
       },
     });
 
     assert.equal((await releaseStaleLocks(5 * 60_000)).count, 1);
     const [first, second] = await Promise.all([
-      claimAvailableJobs('replacement-a', 10),
-      claimAvailableJobs('replacement-b', 10),
+      claimAvailableJobs('replacement-a', ['settlement'], 10, 60_000),
+      claimAvailableJobs('replacement-b', ['settlement'], 10, 60_000),
     ]);
     assert.equal(first.length + second.length, 1);
     const recovered = [...first, ...second][0];
     assert.equal(recovered.id, job.id);
     assert.match(recovered.lastError ?? '', /Recovered stale worker lock/);
+  });
+
+  test('atomic SKIP LOCKED claims partition jobs across concurrent workers', async () => {
+    const app = await createIntegrationApp('Concurrent Claim App');
+    const agreement = await seedAgreement(app.id);
+    const jobs = await Promise.all(Array.from({ length: 12 }, (_, index) => enqueueAgreementJob({
+      agreementId: agreement.id,
+      kind: 'AGREEMENT_CONTINUE',
+      dedupeSuffix: `concurrent-${index}`,
+      availableAt: new Date(0),
+    })));
+    const claims = await Promise.all([
+      claimAvailableJobs('claim-worker-a', ['settlement'], 6, 60_000),
+      claimAvailableJobs('claim-worker-b', ['settlement'], 6, 60_000),
+    ]);
+    const claimed = claims.flat().filter((job) => jobs.some((created) => created.id === job.id));
+    assert.equal(claimed.length, 12);
+    assert.equal(new Set(claimed.map((job) => job.id)).size, 12);
+    assert.ok(claimed.every((job) => job.status === 'RUNNING' && job.leaseExpiresAt));
+  });
+
+  test('only the lease owner can renew or complete a claimed job', async () => {
+    const app = await createIntegrationApp('Lease Ownership App');
+    const agreement = await seedAgreement(app.id);
+    const queued = await enqueueAgreementJob({
+      agreementId: agreement.id, kind: 'VERIFY_FUNDING', dedupeSuffix: randomUUID(), availableAt: new Date(0),
+    });
+    const [claimed] = await claimAvailableJobs('lease-owner', ['settlement'], 1, 60_000);
+    assert.equal(claimed.id, queued.id);
+    await assert.rejects(() => renewJobLease(claimed.id, 'other-worker', 60_000));
+    await assert.rejects(() => completeJob(claimed.id, 'other-worker'));
+    const renewedUntil = await renewJobLease(claimed.id, 'lease-owner', 60_000);
+    assert.ok(renewedUntil > new Date());
+    await completeJob(claimed.id, 'lease-owner');
+    const completed = await prisma.agentJob.findUniqueOrThrow({ where: { id: claimed.id } });
+    assert.equal(completed.status, 'COMPLETED');
+    assert.equal(completed.leaseExpiresAt, null);
   });
 
   test('audit ledger hashes new rows and rejects mutation', async () => {
@@ -311,6 +501,53 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
       },
     });
     assert.equal(milestone.targetUsd?.toFixed(12), '123456789.123456789012');
+  });
+
+  test('financial and lifecycle constraints reject invalid persisted state', async () => {
+    const app = await createIntegrationApp('Financial Constraints App');
+    const agreement = await seedAgreement(app.id);
+    const milestone = await prisma.milestone.create({ data: {
+      id: randomUUID(), appId: app.id, agreementId: agreement.id,
+      title: 'Constraint milestone', description: 'Constraint checks', amount: '1000', currency: 'CKB', sortOrder: 1,
+    } });
+    const escrow = await prisma.escrow.create({ data: {
+      id: randomUUID(), appId: app.id, agreementId: agreement.id, milestoneId: milestone.id,
+      amount: '1000', currency: 'CKB', rail: 'mock', network: 'sandbox', status: 'funded',
+    } });
+
+    await assert.rejects(() => prisma.escrow.update({
+      where: { id: escrow.id }, data: { status: 'invented_state' },
+    }));
+    await assert.rejects(() => prisma.agreement.update({
+      where: { id: agreement.id }, data: { amount: '18446744073709551616' },
+    }));
+    await assert.rejects(() => prisma.milestone.update({
+      where: { id: milestone.id }, data: { releaseQuoteUsdPerCkb: new Prisma.Decimal('0.001') },
+    }));
+
+    const transactionData = {
+      appId: app.id, agreementId: agreement.id, milestoneId: milestone.id, escrowId: escrow.id,
+      type: 'release', rail: 'ckb', network: 'testnet', status: 'confirmed',
+      txHash: `0x${'1'.repeat(64)}`, amount: '1000', currency: 'CKB',
+    };
+    await prisma.transaction.create({ data: { id: randomUUID(), ...transactionData } });
+    await assert.rejects(() => prisma.transaction.create({ data: { id: randomUUID(), ...transactionData } }));
+  });
+
+  test('idempotency response bodies migrate to native jsonb without losing data', async () => {
+    const app = await createIntegrationApp('JSONB App');
+    await prisma.idempotencyKey.create({ data: {
+      id: randomUUID(), appId: app.id, key: `jsonb-${randomUUID()}`, requestHash: randomUUID(),
+      status: 'completed', responseStatus: 201, responseBodyJson: { data: { preserved: true } }, responseBytes: 27,
+      processingExpiresAt: new Date(Date.now() + 60_000), expiresAt: new Date(Date.now() + 3_600_000),
+    } });
+    const [result] = await prisma.$queryRaw<Array<{ type: string; preserved: string }>>`
+      SELECT pg_typeof("responseBodyJson")::text AS type,
+             "responseBodyJson"->'data'->>'preserved' AS preserved
+      FROM "IdempotencyKey" WHERE "appId" = ${app.id}
+    `;
+    assert.equal(result.type, 'jsonb');
+    assert.equal(result.preserved, 'true');
   });
 
   test('agreement creation idempotency is concurrency-safe for same key/body', async () => {

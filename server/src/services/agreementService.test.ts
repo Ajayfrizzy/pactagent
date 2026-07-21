@@ -8,10 +8,17 @@ import {
   getAllowedDisputeResolutionChoices,
   matchOnchainFundingOutputsToMilestones,
   isSponsorControlledImportedAgreement,
+  convertUsdToShannonsOrThrow,
 } from './agreementService';
 
 const clientAddress = 'ckt1-client';
 const workerAddress = 'ckt1-worker';
+
+test('USD conversion rounds up to a shannon and enforces the uint64 maximum', () => {
+  assert.equal(convertUsdToShannonsOrThrow('1', '3').toString(), '33333334');
+  assert.equal(convertUsdToShannonsOrThrow('1', '0.00000001').toString(), '10000000000000000');
+  assert.throws(() => convertUsdToShannonsOrThrow('1000000000000', '0.00000001'), /maximum supported/);
+});
 
 test('buildRefundConsensusState treats a refund proposal as the proposer approval', () => {
   const state = buildRefundConsensusState({

@@ -9,6 +9,7 @@ import { beginShutdown } from './common/runtime/lifecycle';
 import { installConsoleBridge, log } from './common/observability/logger';
 import { shutdownTracing } from './common/observability/tracing';
 import { closeRateLimitStore } from './common/rate-limit/infrastructure-rate-limit';
+import { assertRequiredMigrationsApplied } from './common/migrations/migration-readiness';
 
 validateProductionConfig();
 requireDatabaseUrl();
@@ -18,15 +19,20 @@ const app = createApp();
 const server = http.createServer(app);
 initWebSocket(server);
 
-server.listen(config.port, () => {
-  log('info', 'server.started', {
-    port: config.port,
-    ckbNetwork: config.ckbNetwork,
-    aiEnabled: config.aiEnabled,
-    version: config.buildVersion,
-    commit: config.buildCommit,
+assertRequiredMigrationsApplied()
+  .then(() => server.listen(config.port, () => {
+    log('info', 'server.started', {
+      port: config.port,
+      ckbNetwork: config.ckbNetwork,
+      aiEnabled: config.aiEnabled,
+      version: config.buildVersion,
+      commit: config.buildCommit,
+    });
+  }))
+  .catch((error) => {
+    log('error', 'server.migrations.not_ready', { error });
+    void prisma.$disconnect().finally(() => { process.exitCode = 1; });
   });
-});
 
 let shutdownPromise: Promise<void> | null = null;
 function shutdown(signal: string) {

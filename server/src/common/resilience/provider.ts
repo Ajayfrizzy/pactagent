@@ -60,8 +60,16 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function retryableStatus(status: number) {
+export function retryableStatus(status: number) {
   return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+export function classifyProviderFailure(cause: unknown) {
+  if (cause instanceof ProviderError) return { retryable: cause.retryable, status: cause.status };
+  if (cause instanceof DOMException && ['TimeoutError', 'AbortError'].includes(cause.name)) return { retryable: true, status: undefined };
+  if (cause instanceof TypeError) return { retryable: true, status: undefined };
+  const code = typeof cause === 'object' && cause && 'code' in cause ? String((cause as { code?: unknown }).code) : '';
+  return { retryable: ['ECONNRESET', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'ETIMEDOUT', 'EAI_AGAIN'].includes(code), status: undefined };
 }
 
 async function acquire(provider: ProviderName, concurrency: number) {
@@ -85,6 +93,7 @@ export async function executeProviderRequest<T>(params: {
   concurrency?: number;
   failureThreshold?: number;
   circuitResetMs?: number;
+  correlation?: Record<string, unknown>;
 }): Promise<T> {
   const state = stateFor(params.provider);
   const now = Date.now();
@@ -109,10 +118,7 @@ export async function executeProviderRequest<T>(params: {
         requests.inc({ provider: params.provider, outcome: 'success' });
         return result;
       } catch (cause) {
-        const status = cause instanceof ProviderError ? cause.status : undefined;
-        const retryable = cause instanceof ProviderError
-          ? cause.retryable
-          : cause instanceof DOMException && cause.name === 'TimeoutError';
+        const { status, retryable } = classifyProviderFailure(cause);
         if (!retryable || attempt === attempts) {
           state.failures += 1;
           if (state.failures >= (params.failureThreshold ?? 5)) {
@@ -121,6 +127,7 @@ export async function executeProviderRequest<T>(params: {
           }
           requests.inc({ provider: params.provider, outcome: 'failure' });
           log('warn', 'provider.request.failed', {
+            ...params.correlation,
             provider: params.provider, operation: params.operation, providerRequestId: requestId,
             attempt, retryable, status, error: cause,
           });

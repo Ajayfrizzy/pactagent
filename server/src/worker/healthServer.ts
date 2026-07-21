@@ -2,6 +2,7 @@ import http from 'node:http';
 import { config } from '../config';
 import { prisma } from '../db';
 import { isShuttingDown } from '../common/runtime/lifecycle';
+import { metricsRegistry } from '../common/observability/metrics';
 
 function payload(status: string) {
   return JSON.stringify({
@@ -29,6 +30,16 @@ export function createWorkerHealthServer() {
         res.statusCode = 503;
         res.end(payload('not_ready'));
       }
+      return;
+    }
+    if (req.url === '/metrics') {
+      if (config.metricsBearerToken && req.headers.authorization !== `Bearer ${config.metricsBearerToken}`) {
+        res.statusCode = 401;
+        res.end('Unauthorized');
+        return;
+      }
+      res.setHeader('content-type', metricsRegistry.contentType);
+      res.end(await metricsRegistry.metrics());
       return;
     }
     res.statusCode = 404;

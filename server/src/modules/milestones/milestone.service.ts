@@ -10,6 +10,7 @@ import { MILESTONE_EVENTS } from './milestone.events';
 import { serializeMilestone } from './milestone.model';
 import * as milestoneRepository from './milestone.repository';
 import type { CreateMilestoneInput, MilestoneListQuery } from './milestone.validation';
+import { tenantContext } from '../../common/tenancy/tenant-context';
 
 function auditMilestoneCreate(tx: Prisma.TransactionClient, req: Request, params: {
   appId: string;
@@ -39,12 +40,12 @@ export async function createMilestoneForAgreement(
   input: CreateMilestoneInput,
 ) {
   const milestone = await prisma.$transaction(async (tx) => {
-    const agreement = await findAgreementForApp(appId, agreementId, tx);
+    const agreement = await findAgreementForApp(tenantContext(appId), agreementId, tx);
     if (!agreement) {
       throw notFound('Agreement not found.', 'agreement_not_found');
     }
 
-    const existingMilestones = await milestoneRepository.getMilestoneAmountSumForAgreement(agreementId, tx);
+    const existingMilestones = await milestoneRepository.getMilestoneAmountSumForAgreement(tenantContext(appId), agreementId, tx);
     const existingTotal = sumIntegerAmounts(existingMilestones.map((item) => item.amount));
     const newAmount = parsePositiveIntegerAmount(input.amount, 'amount');
     const agreementTotal = parsePositiveIntegerAmount(agreement.amount, 'agreement.totalAmount');
@@ -56,20 +57,18 @@ export async function createMilestoneForAgreement(
       );
     }
 
-    const lastMilestone = await milestoneRepository.getNextMilestoneOrder(agreementId, tx);
+    const lastMilestone = await milestoneRepository.getNextMilestoneOrder(tenantContext(appId), agreementId, tx);
     const order = input.order ?? ((lastMilestone?.sortOrder ?? 0) + 1);
     const currency = input.currency ?? agreement.currency;
 
-    const created = await milestoneRepository.createMilestone(appId, agreementId, {
+    const created = await milestoneRepository.createMilestone(tenantContext(appId), agreementId, {
       ...input,
       order,
       currency,
     }, tx);
     const serialized = serializeMilestone(created);
 
-    await createEvent({
-      appId,
-      type: MILESTONE_EVENTS.created,
+    await createEvent(tenantContext(appId), {type: MILESTONE_EVENTS.created,
       agreementId,
       milestoneId: created.id,
       payload: {
@@ -91,12 +90,12 @@ export async function createMilestoneForAgreement(
 }
 
 export async function listMilestonesForAgreement(appId: string, agreementId: string, query: MilestoneListQuery) {
-  const agreement = await findAgreementForApp(appId, agreementId);
+  const agreement = await findAgreementForApp(tenantContext(appId), agreementId);
   if (!agreement) {
     throw notFound('Agreement not found.', 'agreement_not_found');
   }
 
-  const milestones = await milestoneRepository.listMilestonesForAgreement(appId, agreementId, query);
+  const milestones = await milestoneRepository.listMilestonesForAgreement(tenantContext(appId), agreementId, query);
   const hasMore = milestones.length > query.limit;
   const data = milestones.slice(0, query.limit);
 
@@ -110,7 +109,7 @@ export async function listMilestonesForAgreement(appId: string, agreementId: str
 }
 
 export async function listMilestonesForApp(appId: string, query: MilestoneListQuery) {
-  const milestones = await milestoneRepository.listMilestonesForApp(appId, query);
+  const milestones = await milestoneRepository.listMilestonesForApp(tenantContext(appId), query);
   const hasMore = milestones.length > query.limit;
   const data = milestones.slice(0, query.limit);
 
@@ -124,7 +123,7 @@ export async function listMilestonesForApp(appId: string, query: MilestoneListQu
 }
 
 export async function getMilestoneForApp(appId: string, milestoneId: string) {
-  const milestone = await milestoneRepository.findMilestoneForApp(appId, milestoneId);
+  const milestone = await milestoneRepository.findMilestoneForApp(tenantContext(appId), milestoneId);
   if (!milestone) {
     throw notFound('Milestone not found.', 'milestone_not_found');
   }

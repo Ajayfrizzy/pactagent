@@ -7,7 +7,7 @@ Secrets should use their corresponding `*_FILE` variable where available. `NODE_
 | `NODE_ENV`, `SERVICE_ROLE`, `PORT`, `WORKER_HEALTH_PORT` | No | Runtime policy, role, and listener ports |
 | `BUILD_VERSION`, `BUILD_COMMIT`, `WORKER_ID` | No | Release and worker identity |
 | `SERVICE_NAME` | No | Structured-log service identity |
-| `DATABASE_URL`, `DIRECT_URL` | Yes | PostgreSQL credentials and endpoints |
+| `DATABASE_URL`, `DIRECT_URL` | Yes | Pooled application and distinct direct migration PostgreSQL endpoints; both are mandatory and must resolve to different endpoint identities in staging/production |
 | `DB_POOL_MAX`, `DB_POOL_IDLE_TIMEOUT_MS`, `DB_CONNECTION_TIMEOUT_MS`, `DB_STATEMENT_TIMEOUT_MS`, `DB_QUERY_TIMEOUT_MS`, `DB_TRANSACTION_MAX_WAIT_MS`, `DB_TRANSACTION_TIMEOUT_MS` | No | Database pool and timeout bounds |
 | `REDIS_URL`, `REDIS_URL_FILE` | Yes | Distributed rate-limit store |
 | `CORS_ORIGIN`, `TRUST_PROXY_HOPS`, `ENABLE_LEGACY_PRODUCT_API` | No | HTTP boundary and legacy policy |
@@ -23,6 +23,8 @@ Secrets should use their corresponding `*_FILE` variable where available. `NODE_
 | `FIBER_ENABLED`, `FIBER_RPC_URL` | No | Fiber feature gate and RPC endpoint |
 | `FIBER_RPC_API_KEY`, `FIBER_RPC_API_KEY_FILE` | Yes | Fiber RPC credential |
 | `REQUIRE_WORKER_READY`, `REQUIRE_SETTLEMENT_READY`, `WORKER_HEARTBEAT_STALE_MS`, `AGENT_INTERVAL_MS`, `SHUTDOWN_TIMEOUT_MS` | No | Readiness and worker lifecycle policy |
+| `WORKER_QUEUES`, `WORKER_CONCURRENCY`, `JOB_LEASE_MS`, `JOB_TIMEOUT_MS` | No | Worker class selection, parallelism, renewable lease duration, and per-job deadline |
+| `WEBHOOK_EGRESS_PROXY_URL` | Deployed environments | Controlled HTTP proxy used for webhook HTTP requests and HTTPS CONNECT tunnels |
 | `AI_ENABLED`, `AI_PROVIDER`, `OPENAI_MODEL`, `AI_TIMEOUT_MS` | No | AI feature, provider/model, and timeout settings |
 | `OPENAI_API_KEY` | Yes | OpenAI provider credential |
 | `WEBHOOK_SECRET_ENCRYPTION_KEY`, `WEBHOOK_SECRET_ENCRYPTION_KEY_FILE`, `WEBHOOK_ENCRYPTION_KEYRING`, `WEBHOOK_ENCRYPTION_KEYRING_FILE` | Yes | Webhook secret encryption keys |

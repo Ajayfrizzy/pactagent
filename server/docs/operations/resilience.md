@@ -22,4 +22,12 @@ Use a retention period longer than the maximum client retry window. Monitor tabl
 
 JWTs are sent through the `Sec-WebSocket-Protocol` header and must never be placed in URLs. Invalid credentials are rejected instead of being downgraded to public access. The server enforces configured origins, global and per-IP connection limits, maximum message size, heartbeat termination, and buffered-output limits.
 
+The authenticated subprotocol uses the normal session JWT, so its maximum exposure window is `AUTH_TOKEN_TTL_SECS`. Keep that TTL within the incident-response revocation window, rotate signing keys with overlap no longer than the TTL, and never log the `Sec-WebSocket-Protocol` header. Public clients receive only an allowlisted log projection; agreement objects, tenant IDs, addresses, and metadata are never broadcast publicly.
+
+API instances publish events through Redis and ignore their own pub/sub envelope, allowing each instance to deliver an event once to its local clients. Deployed environments require Redis for both distributed HTTP rate limiting and WebSocket fan-out.
+
 Production `CORS_ORIGIN` must list every allowed browser origin. When operating behind a proxy, ensure it forwards WebSocket upgrades and preserves `Sec-WebSocket-Protocol`.
+
+## Controlled webhook egress
+
+Staging and production require `WEBHOOK_EGRESS_PROXY_URL`. HTTP webhook requests use absolute-form proxy requests; HTTPS uses CONNECT to the DNS-validated IP while preserving the original hostname for TLS verification. Every redirect is shape-checked, resolved again, rejected if any answer is blocked, and pinned to an approved address. Configure the proxy itself to deny private, link-local, loopback, metadata, multicast, and internal destinations; source validation and network egress policy are both required.

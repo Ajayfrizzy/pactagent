@@ -13,6 +13,8 @@ Active outbound providers use the shared executor in `src/common/resilience/prov
 
 HTTP 408, 425, 429, and 5xx responses are retryable. Authentication, validation, and most other 4xx responses are permanent. Timeouts are retryable only for idempotent operations. Non-idempotent publishing and signing are single-attempt and require reconciliation.
 
+DNS/connectivity failures, connection resets, refused connections, unreachable networks, and timeouts are classified as retryable transport failures. Unclassified application exceptions are permanent so programming defects do not create retry storms. Unit tests enforce this classification contract.
+
 Alert on `pactagent_provider_circuit_open == 1`, elevated `pactagent_provider_requests_total{outcome="failure"}`, and provider latency. `providerRequestId` is included in structured failure logs and forwarded where supported.
 
 Fiber is not an active provider. Do not restore it by environment configuration alone; reintroduction requires a reviewed adapter, the same provider policy, and new compatibility tests.

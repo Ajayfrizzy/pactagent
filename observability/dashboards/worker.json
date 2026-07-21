@@ -1,0 +1,1 @@
+{"title":"PactAgent Workers","uid":"pactagent-workers","schemaVersion":39,"panels":[{"type":"timeseries","title":"Heartbeat age","targets":[{"expr":"pactagent_worker_heartbeat_age_seconds"}]},{"type":"timeseries","title":"Job duration","targets":[{"expr":"histogram_quantile(0.95, sum by (le,queue) (rate(pactagent_job_execution_duration_seconds_bucket[5m])))"}]}]}

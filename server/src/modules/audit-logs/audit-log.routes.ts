@@ -20,7 +20,7 @@ router.get(
   requireScope('apps:read'),
   validateQuery(auditLogListQuerySchema),
   asyncHandler(async (req, res) => {
-    const result = await listAppAuditLogs(req.apiKey!.appId, req.query as any);
+    const result = await listAppAuditLogs(req.tenant!.appId, req.query as any);
     return sendList(res, result.data, result.pagination);
   }),
 );

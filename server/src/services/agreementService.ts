@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'crypto';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { broadcast } from '../ws';
 import {
@@ -32,6 +33,7 @@ import {
 import { refreshReputationForAgreement } from './reputationService';
 import { convertUsdToCkb, fetchCkbPriceQuote, parseUsdAmount } from './marketPriceService';
 import { ensureLegacyApp } from './legacyTenantService';
+import { MAX_SHANNONS } from '../common/amounts/integer-amount';
 
 const uuid = randomUUID;
 
@@ -985,6 +987,7 @@ async function createSettlementRecord(params: {
   status?: SettlementRecordStatus;
   errorMessage?: string | null;
   confirmedAt?: Date | null;
+  operationKey?: string | null;
 }) {
   return prisma.milestoneSettlement.create({
     data: {
@@ -999,8 +1002,56 @@ async function createSettlementRecord(params: {
       status: params.status ?? 'PENDING',
       errorMessage: params.errorMessage ?? null,
       confirmedAt: params.confirmedAt ?? null,
+      operationKey: params.operationKey ?? null,
     },
   });
+}
+
+async function sendIdempotentSettlementTransfer(params: {
+  agreementId: string;
+  milestoneId?: string | null;
+  direction: Exclude<SettlementDirection, 'FUNDING'>;
+  amount: string;
+  destinationAddress: string;
+  operationSuffix?: string;
+}) {
+  const operationKey = [
+    'CKB', params.direction, params.agreementId, params.milestoneId ?? 'agreement', params.operationSuffix ?? 'default',
+  ].join(':');
+  let settlement;
+  try {
+    settlement = await createSettlementRecord({
+      agreementId: params.agreementId,
+      milestoneId: params.milestoneId ?? null,
+      direction: params.direction,
+      network: 'CKB',
+      amount: params.amount,
+      status: 'PENDING',
+      operationKey,
+    });
+  } catch (error) {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') throw error;
+    settlement = await prisma.milestoneSettlement.findUnique({ where: { operationKey } });
+    if (!settlement) throw error;
+    if (settlement.txHash) return { settlement, txHash: settlement.txHash, replayed: true };
+    throw new Error(`Settlement ${operationKey} has an uncertain prior transfer and requires reconciliation before retry.`);
+  }
+
+  try {
+    const txHash = await sendTreasuryTransfer(params.destinationAddress, params.amount);
+    const updated = await prisma.milestoneSettlement.update({
+      where: { id: settlement.id },
+      data: { txHash },
+    });
+    return { settlement: updated, txHash, replayed: false };
+  } catch (error) {
+    await markSettlementRecordStatus(settlement.id, {
+      status: 'FAILED',
+      errorMessage: error instanceof Error ? error.message : 'Settlement transfer failed.',
+      confirmedAt: null,
+    });
+    throw error;
+  }
 }
 
 async function markSettlementRecordStatus(
@@ -1095,17 +1146,21 @@ function isUsdEquivalentImportedGrant(agreement: {
   return agreement.pricingMode === 'USD_EQUIVALENT' && isSponsorControlledImportedAgreement(agreement);
 }
 
-function roundCkbAmountInput(value: number) {
-  return value.toFixed(8).replace(/0+$/, '').replace(/\.$/, '') || '0';
+function roundCkbAmountInput(value: Prisma.Decimal.Value) {
+  return new Prisma.Decimal(value).toDecimalPlaces(8, Prisma.Decimal.ROUND_CEIL).toFixed(8).replace(/0+$/, '').replace(/\.$/, '') || '0';
 }
 
-function convertUsdToShannonsOrThrow(usdAmount: number, priceUsd: number) {
+export function convertUsdToShannonsOrThrow(usdAmount: Prisma.Decimal.Value, priceUsd: Prisma.Decimal.Value) {
   const ckbAmount = convertUsdToCkb(usdAmount, priceUsd);
   if (!ckbAmount) {
     throw new Error('Unable to convert the USD-equivalent amount into CKB with the current quote.');
   }
 
-  return BigInt(Math.ceil(ckbAmount * 10 ** 8));
+  const shannons = BigInt(ckbAmount.mul('100000000').ceil().toFixed(0));
+  if (shannons > MAX_SHANNONS) {
+    throw new Error('Converted amount exceeds the maximum supported shannon amount.');
+  }
+  return shannons;
 }
 
 function getImportedMilestoneTargetUsdFromMetadata(
@@ -1267,6 +1322,8 @@ async function applyImportedGrantReserveDebit(params: {
   amountShannons: bigint;
   quoteUsdPerCkb: number;
   realizedUsdValue: number;
+  quoteSource: string;
+  quotedAt: Date;
 }) {
   const agreement = await fetchAgreementOrThrow(params.agreementId);
   const reserveRemaining = BigInt(agreement.reserveCkbRemaining || '0');
@@ -1287,6 +1344,8 @@ async function applyImportedGrantReserveDebit(params: {
         data: {
           releasedCkbAmount: params.amountShannons.toString(),
           releaseQuoteUsdPerCkb: params.quoteUsdPerCkb,
+          releaseQuoteSource: params.quoteSource,
+          releaseQuotedAt: params.quotedAt,
           releasedUsdValue: params.realizedUsdValue,
         },
       });
@@ -1350,35 +1409,40 @@ export async function sendApprovedMilestonePayout(params: {
 
   let payoutAmount = milestone.amount;
   let payoutQuoteUsdPerCkb: number | null = null;
+  let payoutQuoteSource: string | null = null;
+  let payoutQuotedAt: Date | null = null;
   let realizedUsdValue: number | null = null;
 
   if (isUsdEquivalentImportedGrant(agreement)) {
     const reserveCheck = await ensureImportedGrantReserveSufficient(agreement, milestone);
     payoutAmount = reserveCheck.amountShannons.toString();
     payoutQuoteUsdPerCkb = reserveCheck.quote.priceUsd;
+    payoutQuoteSource = reserveCheck.quote.source;
+    payoutQuotedAt = new Date(reserveCheck.quote.lastUpdatedAt ?? reserveCheck.quote.fetchedAt);
     realizedUsdValue = milestone.targetUsd == null ? null : Number(milestone.targetUsd);
   }
 
-  const payoutTxHash = await sendTreasuryTransfer(
-    agreement.workerAddress,
-    payoutAmount
-  );
-  await recordMilestoneSettlementAttempt({
+  const payoutTransfer = await sendIdempotentSettlementTransfer({
     agreementId: params.agreementId,
     milestoneId: milestone.id,
     direction: 'PAYOUT',
-    network: 'CKB',
     amount: payoutAmount,
-    txHash: payoutTxHash,
+    destinationAddress: agreement.workerAddress,
+  });
+  const payoutTxHash = payoutTransfer.txHash;
+  await setAgreementSettlementState(params.agreementId, {
+    settlementStatus: 'PAYOUT_PENDING', ckbTxHashRelease: payoutTxHash, lastSettlementError: null,
   });
 
-  if (isUsdEquivalentImportedGrant(agreement) && payoutQuoteUsdPerCkb && realizedUsdValue != null) {
+  if (isUsdEquivalentImportedGrant(agreement) && payoutQuoteUsdPerCkb && payoutQuoteSource && payoutQuotedAt && realizedUsdValue != null) {
     await applyImportedGrantReserveDebit({
       agreementId: params.agreementId,
       milestoneId: milestone.id,
       amountShannons: BigInt(payoutAmount),
       quoteUsdPerCkb: payoutQuoteUsdPerCkb,
       realizedUsdValue,
+      quoteSource: payoutQuoteSource,
+      quotedAt: payoutQuotedAt,
     });
   }
 
@@ -1442,22 +1506,22 @@ async function sendImportedCommencementPayout(params: {
     },
   });
 
-  const payoutTxHash = await sendTreasuryTransfer(agreement.workerAddress, payoutAmount);
-  await createSettlementRecord({
+  const payoutTransfer = await sendIdempotentSettlementTransfer({
     agreementId: params.agreementId,
     milestoneId: null,
     direction: 'PAYOUT',
-    network: 'CKB',
     amount: payoutAmount,
-    txHash: payoutTxHash,
-    status: 'PENDING',
+    destinationAddress: agreement.workerAddress,
   });
+  const payoutTxHash = payoutTransfer.txHash;
   await applyImportedGrantReserveDebit({
     agreementId: params.agreementId,
     milestoneId: null,
     amountShannons,
     quoteUsdPerCkb: quote.priceUsd,
     realizedUsdValue: params.amountUsd,
+    quoteSource: quote.source,
+    quotedAt: new Date(quote.lastUpdatedAt ?? quote.fetchedAt),
   });
 
   await setAgreementSettlementState(params.agreementId, {
@@ -2295,6 +2359,8 @@ export async function createAgreement(data: {
   const workerAddress = normalizeAddress(data.workerAddress);
 
   let reserveFundingQuoteUsdPerCkb: number | null = null;
+  let reserveFundingQuoteSource: string | null = null;
+  let reserveFundingQuotedAt: Date | null = null;
   let pricingMode = 'FIXED_CKB';
   let reserveCkbLocked = '0';
   let reserveCkbRemaining = '0';
@@ -2362,6 +2428,8 @@ export async function createAgreement(data: {
   if (isImportedGrant) {
     const quote = await fetchCkbPriceQuote(true);
     reserveFundingQuoteUsdPerCkb = quote.priceUsd;
+    reserveFundingQuoteSource = quote.source;
+    reserveFundingQuotedAt = new Date(quote.lastUpdatedAt ?? quote.fetchedAt);
     const reserveShannons = convertUsdToShannonsOrThrow(
       computedImportedUsdTotal * IMPORTED_GRANT_RESERVE_BUFFER_MULTIPLIER,
       quote.priceUsd,
@@ -2432,6 +2500,8 @@ export async function createAgreement(data: {
       reserveCkbLocked,
       reserveCkbRemaining,
       reserveFundingQuoteUsdPerCkb,
+      reserveFundingQuoteSource,
+      reserveFundingQuotedAt,
       reserveHealthStatus,
       settlementStatus: 'UNFUNDED',
       status: 'DRAFT',
@@ -3629,28 +3699,24 @@ export async function settleCurrentMilestoneSplit(
   await transitionMilestoneStatus(milestone.id, 'APPROVED');
   await transitionStatus(agreementId, 'APPROVED');
 
-  const payoutTxHash = await sendTreasuryTransfer(agreement.workerAddress, workerAmountValue.toString());
-  const refundTxHash = await sendTreasuryTransfer(agreement.clientAddress, clientRefundAmount);
-
-  await createSettlementRecord({
+  const payoutTransfer = await sendIdempotentSettlementTransfer({
     agreementId,
     milestoneId: milestone.id,
     direction: 'PAYOUT',
-    network: 'CKB',
     amount: workerAmountValue.toString(),
-    txHash: payoutTxHash,
-    status: 'PENDING',
+    destinationAddress: agreement.workerAddress,
+    operationSuffix: 'split',
   });
-
-  await createSettlementRecord({
+  const refundTransfer = await sendIdempotentSettlementTransfer({
     agreementId,
     milestoneId: milestone.id,
     direction: 'REFUND',
-    network: 'CKB',
     amount: clientRefundAmount,
-    txHash: refundTxHash,
-    status: 'PENDING',
+    destinationAddress: agreement.clientAddress,
+    operationSuffix: 'split',
   });
+  const payoutTxHash = payoutTransfer.txHash;
+  const refundTxHash = refundTransfer.txHash;
 
   await setAgreementSettlementState(agreementId, {
     settlementStatus: 'SPLIT_PENDING',
@@ -3697,14 +3763,16 @@ export async function refundCurrentMilestone(agreementId: string) {
   await resolveOpenMilestoneDisputes(milestone.id);
   await transitionMilestoneStatus(milestone.id, 'REFUNDED');
 
-  const refundTxHash = await sendTreasuryTransfer(agreement.clientAddress, milestone.amount);
-  await recordMilestoneSettlementAttempt({
+  const refundTransfer = await sendIdempotentSettlementTransfer({
     agreementId,
     milestoneId: milestone.id,
     direction: 'REFUND',
-    network: 'CKB',
     amount: milestone.amount,
-    txHash: refundTxHash,
+    destinationAddress: agreement.clientAddress,
+  });
+  const refundTxHash = refundTransfer.txHash;
+  await setAgreementSettlementState(agreementId, {
+    settlementStatus: 'REFUND_PENDING', ckbTxHashRelease: refundTxHash, lastSettlementError: null,
   });
 
   if (agreement.status !== 'REFUNDED') {
@@ -3998,15 +4066,13 @@ export async function retryFailedSettlement(agreementId: string) {
       settlement.direction === 'REFUND'
         ? agreement.clientAddress
         : agreement.workerAddress;
-    const retryTxHash = await sendTreasuryTransfer(destinationAddress, settlement.amount);
-    await createSettlementRecord({
+    await sendIdempotentSettlementTransfer({
       agreementId,
       milestoneId: settlement.milestoneId,
       direction: settlement.direction,
-      network: 'CKB',
       amount: settlement.amount,
-      txHash: retryTxHash,
-      status: 'PENDING',
+      destinationAddress,
+      operationSuffix: `retry:${settlement.id}`,
     });
   }
 
@@ -4079,16 +4145,15 @@ export async function completeApprovedMilestone(
     );
 
     if (isUsdEquivalentImportedGrant(agreement) && reserveRemaining > BigInt(0) && !existingReserveRefund) {
-      const refundTxHash = await sendTreasuryTransfer(agreement.clientAddress, reserveRemaining.toString());
-      await createSettlementRecord({
+      const reserveRefund = await sendIdempotentSettlementTransfer({
         agreementId,
         milestoneId: null,
         direction: 'REFUND',
-        network: 'CKB',
         amount: reserveRemaining.toString(),
-        txHash: refundTxHash,
-        status: 'PENDING',
+        destinationAddress: agreement.clientAddress,
+        operationSuffix: 'unused-reserve',
       });
+      const refundTxHash = reserveRefund.txHash;
       await prisma.agreement.update({
         where: { id: agreementId },
         data: {

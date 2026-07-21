@@ -22,3 +22,7 @@ Current accepted findings (2026-07-17): `GHSA-848j-6mx2-7j84` remains transitive
 The server depends directly on `@ckb-ccc/core@1.12.5` instead of the broad wallet integration bundle. This reduced the production audit from 20 findings to 7 while retaining the exact core version previously resolved by the bundle.
 
 Run `npm run sbom` to create `sbom.cdx.json`. Runtime dependency removal must be verified with `npm ls --omit=dev --depth=0` and both production Docker builds.
+
+Run `npm run licenses:check` from the repository root after `npm ci` to enforce `config/license-policy.json`. Unknown and explicitly denied licenses fail CI. Exceptions must identify an exact package version, document the review reason, and expire. `npm run licenses:test` proves that a forbidden license is rejected.
+
+CI scans full Git history for committed secrets with a commit-pinned Gitleaks action. A detected credential must be revoked and rotated; removing it in a later commit is not sufficient because it remains in Git history.

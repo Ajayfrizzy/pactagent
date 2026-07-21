@@ -3,6 +3,7 @@ import { asyncHandler } from '../../common/middleware/async-handler';
 import { validateBody, validateQuery } from '../../common/validation/validate';
 import { requireApiKey } from '../api-keys/api-key.middleware';
 import { requireScope } from '../auth/rbac.middleware';
+import { v1HighRiskActionRateLimit } from '../../common/rate-limit/infrastructure-rate-limit';
 import * as escrowController from './escrow.controller';
 import {
   createEscrowSchema,
@@ -40,6 +41,7 @@ router.post(
   '/:id/mark-funded',
   requireApiKey,
   requireScope('escrows:fund'),
+  v1HighRiskActionRateLimit,
   validateBody(markFundedSchema),
   asyncHandler(escrowController.markEscrowFunded),
 );
@@ -48,6 +50,7 @@ router.post(
   '/:id/release',
   requireApiKey,
   requireScope('escrows:release'),
+  v1HighRiskActionRateLimit,
   validateBody(emptyActionSchema),
   asyncHandler(escrowController.releaseEscrow),
 );
@@ -56,6 +59,7 @@ router.post(
   '/:id/refund',
   requireApiKey,
   requireScope('escrows:refund'),
+  v1HighRiskActionRateLimit,
   validateBody(emptyActionSchema),
   asyncHandler(escrowController.refundEscrow),
 );

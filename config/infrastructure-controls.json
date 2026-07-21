@@ -1,0 +1,294 @@
+{
+  "schemaVersion": 1,
+  "lastReviewed": "2026-07-20",
+  "controls": [
+    {
+      "id": "INFRA-01",
+      "backlog": 1,
+      "phase": 2,
+      "status": "implemented",
+      "evidence": [
+        "server/prisma/migrations",
+        ".github/workflows/ci.yml",
+        "server/prisma/MIGRATIONS.md",
+        "server/src/common/migrations/migration-readiness.ts",
+        "server/prisma/fixtures/migration-upgrade.sql"
+      ]
+    },
+    {
+      "id": "INFRA-02",
+      "backlog": 2,
+      "phase": 1,
+      "status": "implemented",
+      "evidence": [
+        "server/prisma/schema.prisma",
+        "server/prisma/migrations/20260720000100_complete_tenant_integrity/migration.sql",
+        "server/src/common/tenancy/tenant-context.ts",
+        "server/src/modules/infrastructure.integration.test.ts",
+        "docs/adr/0004-database-tenant-enforcement.md"
+      ]
+    },
+    {
+      "id": "INFRA-03",
+      "backlog": 3,
+      "phase": 4,
+      "status": "implemented",
+      "evidence": [
+        "server/src/modules/webhooks/webhook.security.ts",
+        "server/src/modules/webhooks/webhook.security.test.ts",
+        "server/src/config.ts",
+        "server/docs/operations/resilience.md"
+      ]
+    },
+    {
+      "id": "INFRA-04",
+      "backlog": 4,
+      "phase": 5,
+      "status": "implemented",
+      "evidence": [
+        "server/Dockerfile",
+        "web/Dockerfile",
+        ".github/workflows/deploy.yml",
+        "deploy/kubernetes/workloads.yaml",
+        "deploy/kubernetes/migration-job.yaml",
+        "scripts/deployment-smoke.mjs",
+        "server/docs/operations/container-release.md"
+      ]
+    },
+    {
+      "id": "INFRA-05",
+      "backlog": 5,
+      "phase": 0,
+      "status": "partial",
+      "evidence": [".github/workflows/ci.yml"]
+    },
+    {
+      "id": "INFRA-06",
+      "backlog": 6,
+      "phase": 5,
+      "status": "partial",
+      "evidence": [
+        "server/src/services/treasurySignerProvider.ts",
+        "server/docs/operations/secret-management.md"
+      ]
+    },
+    {
+      "id": "INFRA-07",
+      "backlog": 7,
+      "phase": 3,
+      "status": "partial",
+      "evidence": [
+        "server/src/index.ts",
+        "server/src/worker/index.ts",
+        "server/src/ws.ts"
+      ]
+    },
+    {
+      "id": "INFRA-08",
+      "backlog": 8,
+      "phase": 3,
+      "status": "implemented",
+      "evidence": [
+        "server/prisma/migrations/20260720000300_durable_job_leases/migration.sql",
+        "server/src/services/jobQueueService.ts",
+        "server/src/worker/agentLoop.ts",
+        "server/src/services/jobQueueService.test.ts",
+        "server/src/modules/infrastructure.integration.test.ts",
+        "compose.yaml",
+        "server/docs/operations/worker-jobs.md"
+      ]
+    },
+    {
+      "id": "INFRA-09",
+      "backlog": 9,
+      "phase": 2,
+      "status": "implemented",
+      "evidence": [
+        "server/prisma/schema.prisma",
+        "server/prisma/migrations/20260720000200_financial_and_lifecycle_integrity/migration.sql",
+        "server/src/common/amounts/integer-amount.ts",
+        "server/src/services/marketPriceService.ts",
+        "docs/architecture/financial-rounding.md"
+      ]
+    },
+    {
+      "id": "INFRA-10",
+      "backlog": 10,
+      "phase": 6,
+      "status": "implemented",
+      "evidence": [
+        "server/src/common/observability",
+        "observability/otel-collector.yaml",
+        "observability/prometheus/alerts.yaml",
+        "observability/dashboards",
+        "scripts/validate-observability.mjs",
+        "server/docs/operations/service-objectives.md"
+      ]
+    },
+    {
+      "id": "INFRA-11",
+      "backlog": 11,
+      "phase": 7,
+      "status": "implemented",
+      "evidence": ["server/src/db.ts", "scripts/database-backup.sh", "scripts/database-restore-verify.sh", "server/docs/operations/disaster-recovery.md"]
+    },
+    {
+      "id": "INFRA-12",
+      "backlog": 12,
+      "phase": 4,
+      "status": "implemented",
+      "evidence": [
+        "server/src/common/rate-limit/infrastructure-rate-limit.ts",
+        "server/src/common/rate-limit/infrastructure-rate-limit.test.ts",
+        "server/src/common/middleware/payload-limit.ts",
+        "server/src/app.ts"
+      ]
+    },
+    {
+      "id": "INFRA-13",
+      "backlog": 13,
+      "phase": 2,
+      "status": "implemented",
+      "evidence": ["server/src/common/idempotency", "test/load/queue.js", "server/docs/api-lifecycle.md"]
+    },
+    {
+      "id": "INFRA-14",
+      "backlog": 14,
+      "phase": 2,
+      "status": "partial",
+      "evidence": ["server/prisma/schema.prisma"]
+    },
+    {
+      "id": "INFRA-15",
+      "backlog": 15,
+      "phase": 4,
+      "status": "implemented",
+      "evidence": [
+        "server/src/ws.ts",
+        "server/src/ws.test.ts",
+        "server/src/common/websocket/websocket-bus.ts",
+        "server/docs/operations/resilience.md"
+      ]
+    },
+    {
+      "id": "INFRA-16",
+      "backlog": 16,
+      "phase": 0,
+      "status": "partial",
+      "evidence": [
+        ".github/dependabot.yml",
+        "server/docs/operations/supply-chain-policy.md"
+      ]
+    },
+    {
+      "id": "INFRA-17",
+      "backlog": 17,
+      "phase": 6,
+      "status": "implemented",
+      "evidence": [
+        "server/src/common/resilience/provider.ts",
+        "server/src/common/resilience/provider.test.ts",
+        "server/src/services/discourseThreadService.ts",
+        "server/src/services/sourceSyncService.ts",
+        "server/docs/operations/provider-resilience.md"
+      ]
+    },
+    {
+      "id": "INFRA-18",
+      "backlog": 18,
+      "phase": 7,
+      "status": "implemented",
+      "evidence": [
+        "server/src/scripts/validateOpenApi.ts",
+        "server/docs/api-lifecycle.md",
+        "server/docs/INTEGRATOR_CHANGELOG.md",
+        "server/docs/operations/production-readiness.md"
+      ]
+    },
+    {
+      "id": "INFRA-19",
+      "backlog": 19,
+      "phase": 7,
+      "status": "implemented",
+      "evidence": [
+        "server/src/scripts/applyRetention.ts",
+        "server/src/services/retentionService.ts",
+        "server/src/services/retentionService.test.ts",
+        "server/docs/operations/audit-retention.md"
+      ]
+    },
+    {
+      "id": "INFRA-20",
+      "backlog": 20,
+      "phase": 7,
+      "status": "implemented",
+      "evidence": ["server/docs/operations/disaster-recovery.md", "config/operations-exercises.json", "scripts/operations-exercise.mjs", "scripts/database-restore-verify.sh"]
+    },
+    {
+      "id": "INFRA-21",
+      "backlog": 21,
+      "phase": 0,
+      "status": "partial",
+      "evidence": ["package.json", ".gitignore", ".github/CODEOWNERS"]
+    },
+    {
+      "id": "INFRA-22",
+      "backlog": 22,
+      "phase": 0,
+      "status": "implemented",
+      "evidence": [
+        "compose.dev.yaml",
+        "scripts/local-environment.mjs",
+        "server/src/config.ts"
+      ]
+    },
+    {
+      "id": "INFRA-23",
+      "backlog": 23,
+      "phase": 7,
+      "status": "implemented",
+      "evidence": [
+        "server/src/modules/infrastructure.integration.test.ts",
+        "test/load",
+        "scripts/validate-phase7.mjs",
+        ".github/workflows/deploy.yml"
+      ]
+    },
+    {
+      "id": "INFRA-24",
+      "backlog": 24,
+      "phase": 6,
+      "status": "implemented",
+      "evidence": [
+        "server/src/modules/health",
+        "server/src/worker/healthServer.ts"
+      ]
+    },
+    {
+      "id": "INFRA-25",
+      "backlog": 25,
+      "phase": 2,
+      "status": "implemented",
+      "evidence": ["server/src/config.ts", "docs/configuration.md"]
+    },
+    {
+      "id": "INFRA-26",
+      "backlog": 26,
+      "phase": 7,
+      "status": "implemented",
+      "evidence": [
+        "docs/operations/performance.md",
+        "server/prisma/migrations/20260719000100_worker_scheduler_indexes/migration.sql",
+        "server/prisma/performance-query-plans.sql",
+        "scripts/validate-phase7.mjs"
+      ]
+    },
+    {
+      "id": "INFRA-27",
+      "backlog": 27,
+      "phase": 7,
+      "status": "implemented",
+      "evidence": ["docs/adr", "docs/architecture", "docs/operations"]
+    }
+  ]
+}

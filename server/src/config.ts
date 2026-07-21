@@ -17,6 +17,7 @@ const environmentSchema = z.object({
   DATABASE_URL: optionalUrl,
   DIRECT_URL: optionalUrl,
   REDIS_URL: optionalUrl,
+  WEBHOOK_EGRESS_PROXY_URL: optionalUrl,
   OTEL_EXPORTER_OTLP_ENDPOINT: optionalUrl,
   CKB_NODE_URL: z.string().url().default('https://testnet.ckb.dev/'),
   CKB_NETWORK: z.enum(['testnet', 'mainnet']).default('testnet'),
@@ -145,6 +146,24 @@ function hasLocalhostOrigin(origin: string) {
   }
 }
 
+export function databaseEndpointIdentity(value: string) {
+  const url = new URL(value);
+  return `${url.protocol}//${url.hostname}:${url.port || '5432'}${url.pathname}`;
+}
+
+export function assertDistinctDatabaseEndpoints(databaseUrl: string, directUrl: string) {
+  if (databaseEndpointIdentity(databaseUrl) === databaseEndpointIdentity(directUrl)) {
+    throw new Error('DATABASE_URL must use the pooled application endpoint and DIRECT_URL must use a distinct direct migration endpoint in staging and production.');
+  }
+}
+
+export function assertControlledEgressProxy(proxyUrl: string) {
+  requireConfig(proxyUrl, 'WEBHOOK_EGRESS_PROXY_URL');
+  if (new URL(proxyUrl).protocol !== 'http:') {
+    throw new Error('WEBHOOK_EGRESS_PROXY_URL must use http so HTTPS destinations can use an authenticated CONNECT tunnel.');
+  }
+}
+
 function requireStrongSecret(value: string, name: string) {
   requireConfig(value, name);
   if (value.length < 32) {
@@ -178,6 +197,10 @@ export const config = {
   shutdownTimeoutMs: parseBoundedNumber(process.env.SHUTDOWN_TIMEOUT_MS, 30_000, 'SHUTDOWN_TIMEOUT_MS', 5_000, 120_000),
   workerHeartbeatStaleMs: parseBoundedNumber(process.env.WORKER_HEARTBEAT_STALE_MS, 30_000, 'WORKER_HEARTBEAT_STALE_MS', 5_000, 10 * 60_000),
   workerId: process.env.WORKER_ID || '',
+  workerQueues: parseCsv(process.env.WORKER_QUEUES || 'settlement,webhook,ai'),
+  workerConcurrency: parseBoundedNumber(process.env.WORKER_CONCURRENCY, 4, 'WORKER_CONCURRENCY', 1, 32),
+  jobLeaseMs: parseBoundedNumber(process.env.JOB_LEASE_MS, 60_000, 'JOB_LEASE_MS', 10_000, 15 * 60_000),
+  jobTimeoutMs: parseBoundedNumber(process.env.JOB_TIMEOUT_MS, 5 * 60_000, 'JOB_TIMEOUT_MS', 5_000, 30 * 60_000),
   requireWorkerReady: parseBoolean(process.env.REQUIRE_WORKER_READY, isDeployedEnvironment(), 'REQUIRE_WORKER_READY'),
   requireSettlementReady: parseBoolean(process.env.REQUIRE_SETTLEMENT_READY, isProduction(), 'REQUIRE_SETTLEMENT_READY'),
   metricsBearerToken: secretValue('METRICS_BEARER_TOKEN'),
@@ -208,6 +231,7 @@ export const config = {
   v1IpRateLimitMax: parseBoundedNumber(process.env.V1_IP_RATE_LIMIT_MAX, 300, 'V1_IP_RATE_LIMIT_MAX', 1, 100_000),
   v1ApiKeyRateLimitWindowMs: parseBoundedNumber(process.env.V1_API_KEY_RATE_LIMIT_WINDOW_MS, 60_000, 'V1_API_KEY_RATE_LIMIT_WINDOW_MS', 1_000, 24 * 60 * 60 * 1000),
   v1ApiKeyRateLimitMax: parseBoundedNumber(process.env.V1_API_KEY_RATE_LIMIT_MAX, 600, 'V1_API_KEY_RATE_LIMIT_MAX', 1, 100_000),
+  v1TenantRateLimitMax: parseBoundedNumber(process.env.V1_TENANT_RATE_LIMIT_MAX, 1200, 'V1_TENANT_RATE_LIMIT_MAX', 1, 100_000),
   dbTransactionMaxWaitMs: parseBoundedNumber(process.env.DB_TRANSACTION_MAX_WAIT_MS, 5_000, 'DB_TRANSACTION_MAX_WAIT_MS', 1_000, 60_000),
   dbTransactionTimeoutMs: parseBoundedNumber(process.env.DB_TRANSACTION_TIMEOUT_MS, 30_000, 'DB_TRANSACTION_TIMEOUT_MS', 5_000, 120_000),
   dbPoolMax: parseBoundedNumber(process.env.DB_POOL_MAX, 10, 'DB_POOL_MAX', 1, 100),
@@ -217,6 +241,7 @@ export const config = {
   dbQueryTimeoutMs: parseBoundedNumber(process.env.DB_QUERY_TIMEOUT_MS, 35_000, 'DB_QUERY_TIMEOUT_MS', 1_000, 180_000),
   trustProxyHops: parseNonNegativeNumber(process.env.TRUST_PROXY_HOPS, 0),
   redisUrl: secretValue('REDIS_URL'),
+  webhookEgressProxyUrl: environment.WEBHOOK_EGRESS_PROXY_URL || '',
   rateLimitFailClosed: parseBoolean(process.env.RATE_LIMIT_FAIL_CLOSED, isDeployedEnvironment(), 'RATE_LIMIT_FAIL_CLOSED'),
   webhookTimeoutMs: parseBoundedNumber(process.env.WEBHOOK_TIMEOUT_MS, 10_000, 'WEBHOOK_TIMEOUT_MS', 1_000, 30_000),
   webhookMaxAttempts: parseBoundedNumber(process.env.WEBHOOK_MAX_ATTEMPTS, 5, 'WEBHOOK_MAX_ATTEMPTS', 1, 10),
@@ -313,8 +338,20 @@ export function validateProductionConfig() {
   }
 
   requireConfig(process.env.DATABASE_URL || '', 'DATABASE_URL');
+  requireConfig(process.env.DIRECT_URL || '', 'DIRECT_URL');
+  assertDistinctDatabaseEndpoints(process.env.DATABASE_URL!, process.env.DIRECT_URL!);
   if (config.serviceRole === 'api' && !config.redisUrl) {
     throw new Error('REDIS_URL or REDIS_URL_FILE is required in staging and production for distributed rate limiting.');
+  }
+  assertControlledEgressProxy(config.webhookEgressProxyUrl);
+  if (config.serviceRole === 'worker') {
+    const invalidQueues = config.workerQueues.filter((queue) => !['settlement', 'webhook', 'ai'].includes(queue));
+    if (config.workerQueues.length === 0 || invalidQueues.length > 0) {
+      throw new Error(`WORKER_QUEUES must contain settlement, webhook, or ai. Invalid values: ${invalidQueues.join(', ')}`);
+    }
+    if (config.jobTimeoutMs >= config.jobLeaseMs * 30) {
+      throw new Error('JOB_TIMEOUT_MS must be less than 30 lease periods.');
+    }
   }
   const activeJwtKey = config.authJwtKeys[config.authJwtActiveKid] || config.authJwtSecret;
   const activeWebhookKey = config.webhookEncryptionKeys[config.webhookActiveKeyId] || config.webhookSecretEncryptionKey;

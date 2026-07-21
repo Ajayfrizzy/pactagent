@@ -1,8 +1,8 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../db';
+import type { TenantContext } from '../../common/tenancy/tenant-context';
 
-export function createTransaction(data: {
-  appId: string;
+export function createTransaction(tenant: TenantContext, data: {
   agreementId?: string | null;
   milestoneId?: string | null;
   escrowId?: string | null;
@@ -17,7 +17,7 @@ export function createTransaction(data: {
 }, tx: Prisma.TransactionClient) {
   return tx.transaction.create({
     data: {
-      appId: data.appId,
+      appId: tenant.appId,
       agreementId: data.agreementId ?? null,
       milestoneId: data.milestoneId ?? null,
       escrowId: data.escrowId ?? null,
@@ -34,7 +34,7 @@ export function createTransaction(data: {
 }
 
 export function updateTransaction(
-  appId: string,
+  tenant: TenantContext,
   transactionId: string,
   data: Prisma.TransactionUpdateInput,
   tx: Prisma.TransactionClient,
@@ -42,13 +42,13 @@ export function updateTransaction(
   return tx.transaction.updateMany({
     where: {
       id: transactionId,
-      appId,
+      appId: tenant.appId,
     },
     data,
   });
 }
 
-export function listTransactionsForApp(appId: string, params: {
+export function listTransactionsForApp(tenant: TenantContext, params: {
   escrowId?: string;
   agreementId?: string;
   limit: number;
@@ -56,7 +56,7 @@ export function listTransactionsForApp(appId: string, params: {
 }) {
   return prisma.transaction.findMany({
     where: {
-      appId,
+      appId: tenant.appId,
       ...(params.escrowId ? { escrowId: params.escrowId } : {}),
       ...(params.agreementId ? { agreementId: params.agreementId } : {}),
     },

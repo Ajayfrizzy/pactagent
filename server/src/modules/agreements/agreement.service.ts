@@ -14,6 +14,7 @@ import {
   type InfrastructureAgreementStatus,
 } from './agreement.state-machine';
 import { AGREEMENT_EVENTS, eventTypeForAgreementStatus } from './agreement.events';
+import { tenantContext } from '../../common/tenancy/tenant-context';
 
 function assertInfrastructureStatus(status: string): InfrastructureAgreementStatus {
   if (!isAgreementStatus(status)) {
@@ -59,12 +60,10 @@ export async function createAgreementForApp(req: Request, appId: string, input: 
       requestId: req.requestId,
     }),
     run: async (tx) => {
-      const created = await agreementRepository.createAgreement(appId, input, tx);
+      const created = await agreementRepository.createAgreement(tenantContext(appId), input, tx);
       const serialized = serializeAgreement(created);
 
-      await createEvent({
-        appId,
-        type: AGREEMENT_EVENTS.created,
+      await createEvent(tenantContext(appId), {type: AGREEMENT_EVENTS.created,
         agreementId: created.id,
         payload: {
           agreement: serialized,
@@ -84,7 +83,7 @@ export async function createAgreementForApp(req: Request, appId: string, input: 
 }
 
 export async function listAgreementsForApp(appId: string, query: AgreementListQuery) {
-  const agreements = await agreementRepository.listAgreementsForApp(appId, query);
+  const agreements = await agreementRepository.listAgreementsForApp(tenantContext(appId), query);
   const hasMore = agreements.length > query.limit;
   const data = agreements.slice(0, query.limit);
 
@@ -98,7 +97,7 @@ export async function listAgreementsForApp(appId: string, query: AgreementListQu
 }
 
 export async function getAgreementForApp(appId: string, agreementId: string) {
-  const agreement = await agreementRepository.findAgreementForApp(appId, agreementId);
+  const agreement = await agreementRepository.findAgreementForApp(tenantContext(appId), agreementId);
   if (!agreement) {
     throw notFound('Agreement not found.', 'agreement_not_found');
   }
@@ -108,7 +107,7 @@ export async function getAgreementForApp(appId: string, agreementId: string) {
 
 async function transitionAgreement(req: Request, appId: string, agreementId: string, toStatus: InfrastructureAgreementStatus) {
   const agreement = await prisma.$transaction(async (tx) => {
-    const before = await agreementRepository.findAgreementForApp(appId, agreementId, tx);
+    const before = await agreementRepository.findAgreementForApp(tenantContext(appId), agreementId, tx);
     if (!before) {
       throw notFound('Agreement not found.', 'agreement_not_found');
     }
@@ -116,15 +115,13 @@ async function transitionAgreement(req: Request, appId: string, agreementId: str
     const fromStatus = assertInfrastructureStatus(before.status);
     assertAgreementTransition(fromStatus, toStatus);
 
-    const after = await agreementRepository.updateAgreementStatus(appId, agreementId, toStatus, tx);
+    const after = await agreementRepository.updateAgreementStatus(tenantContext(appId), agreementId, toStatus, tx);
     const eventType = eventTypeForAgreementStatus(toStatus);
     const serializedBefore = serializeAgreement(before);
     const serializedAfter = serializeAgreement(after);
 
     if (eventType) {
-      await createEvent({
-        appId,
-        type: eventType,
+      await createEvent(tenantContext(appId), {type: eventType,
         agreementId,
         payload: {
           previousStatus: fromStatus,
@@ -149,7 +146,7 @@ async function transitionAgreement(req: Request, appId: string, agreementId: str
 
 export async function acceptAgreement(req: Request, appId: string, agreementId: string) {
   return prisma.$transaction(async (tx) => {
-    const before = await agreementRepository.findAgreementForApp(appId, agreementId, tx);
+    const before = await agreementRepository.findAgreementForApp(tenantContext(appId), agreementId, tx);
     if (!before) {
       throw notFound('Agreement not found.', 'agreement_not_found');
     }
@@ -158,14 +155,12 @@ export async function acceptAgreement(req: Request, appId: string, agreementId: 
     assertAgreementTransition(fromStatus, 'pending_acceptance');
     assertAgreementTransition('pending_acceptance', 'accepted');
 
-    await agreementRepository.updateAgreementStatus(appId, agreementId, 'pending_acceptance', tx);
-    const accepted = await agreementRepository.updateAgreementStatus(appId, agreementId, 'accepted', tx);
+    await agreementRepository.updateAgreementStatus(tenantContext(appId), agreementId, 'pending_acceptance', tx);
+    const accepted = await agreementRepository.updateAgreementStatus(tenantContext(appId), agreementId, 'accepted', tx);
     const serializedBefore = serializeAgreement(before);
     const serializedAfter = serializeAgreement(accepted);
 
-    await createEvent({
-      appId,
-      type: AGREEMENT_EVENTS.accepted,
+    await createEvent(tenantContext(appId), {type: AGREEMENT_EVENTS.accepted,
       agreementId,
       payload: {
         previousStatus: fromStatus,

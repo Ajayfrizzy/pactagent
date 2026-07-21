@@ -1,0 +1,21 @@
+{
+  "title": "PactAgent Providers",
+  "uid": "pactagent-providers",
+  "schemaVersion": 39,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Provider outcomes",
+      "targets": [
+        {
+          "expr": "sum by (provider,outcome) (rate(pactagent_provider_requests_total[5m]))"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Open circuits",
+      "targets": [{ "expr": "pactagent_provider_circuit_open" }]
+    }
+  ]
+}

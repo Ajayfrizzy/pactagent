@@ -11,6 +11,10 @@
 
 Test database restore quarterly and perform a full regional recovery exercise annually. Record actual recovery time and data loss against these objectives.
 
+Create a portable backup with `npm run backup:create -- <output.dump>`. Verify it only against an isolated target with `ALLOW_RESTORE_VERIFICATION=true BACKUP_FILE=<dump> RESTORE_DATABASE_URL=<isolated-url> npm run backup:verify`. Expected evidence includes schema and representative counts, migration status, tenant-integrity audit, and audit-chain verification. The database operator must abort if the target name does not contain `restore`, `verify`, or `test`, or if any integrity check fails.
+
+Exercise definitions are machine-readable in `config/operations-exercises.json`. Run `npm run operations:exercise` to list them, `npm run operations:exercise -- --exercise=<id>` for a dry run, and add `--execute` only in an approved exercise window. Each execution writes evidence under `artifacts/exercises` and identifies the responsible owner, expected evidence, and abort condition.
+
 ## Database outage or restoration
 
 1. Stop workers and disable settlement mutations; keep liveness available but readiness failing.

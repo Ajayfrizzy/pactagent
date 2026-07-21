@@ -2,7 +2,9 @@ import dns from 'dns/promises';
 import http from 'http';
 import https from 'https';
 import net from 'net';
+import tls from 'tls';
 import { invalidRequest } from '../../common/errors/app-error';
+import { config } from '../../config';
 
 type LookupAddress = {
   address: string;
@@ -164,6 +166,9 @@ async function resolveHostname(hostname: string) {
 }
 
 function requestPinnedAddress(url: URL, init: RequestInit, address: string): Promise<Response> {
+  if (config.webhookEgressProxyUrl) {
+    return requestThroughProxy(url, init, address, new URL(config.webhookEgressProxyUrl));
+  }
   return new Promise((resolve, reject) => {
     const transport = url.protocol === 'https:' ? https : http;
     const headers = new Headers(init.headers);
@@ -229,6 +234,82 @@ function requestPinnedAddress(url: URL, init: RequestInit, address: string): Pro
     } else {
       request.destroy(new TypeError('Webhook request body must be a string or byte array.'));
     }
+  });
+}
+
+function proxyAuthorization(proxy: URL) {
+  if (!proxy.username && !proxy.password) return undefined;
+  return `Basic ${Buffer.from(`${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`).toString('base64')}`;
+}
+
+function responseToFetchResponse(response: http.IncomingMessage, resolve: (value: Response) => void, reject: (reason?: unknown) => void) {
+  const responseHeaders = new Headers();
+  for (const [name, value] of Object.entries(response.headers)) {
+    if (Array.isArray(value)) value.forEach((item) => responseHeaders.append(name, item));
+    else if (value !== undefined) responseHeaders.set(name, value);
+  }
+  const chunks: Buffer[] = [];
+  let responseBytes = 0;
+  response.on('data', (chunk: Buffer | string) => {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    responseBytes += buffer.length;
+    if (responseBytes > MAX_WEBHOOK_RESPONSE_BYTES) {
+      response.destroy(new Error(`Webhook response exceeded ${MAX_WEBHOOK_RESPONSE_BYTES} bytes.`));
+      return;
+    }
+    chunks.push(buffer);
+  });
+  response.on('end', () => resolve(new Response(Buffer.concat(chunks), {
+    status: response.statusCode ?? 500,
+    statusText: response.statusMessage,
+    headers: responseHeaders,
+  })));
+  response.on('error', reject);
+}
+
+function writeRequestBody(request: http.ClientRequest, body: RequestInit['body']) {
+  if (body === undefined || body === null) request.end();
+  else if (typeof body === 'string' || body instanceof Uint8Array) request.end(body);
+  else request.destroy(new TypeError('Webhook request body must be a string or byte array.'));
+}
+
+function requestThroughProxy(url: URL, init: RequestInit, address: string, proxy: URL): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const headers = new Headers(init.headers);
+    headers.set('host', url.host);
+    const authorization = proxyAuthorization(proxy);
+
+    if (url.protocol === 'http:') {
+      if (authorization) headers.set('proxy-authorization', authorization);
+      const pinned = new URL(url);
+      pinned.hostname = address;
+      const request = http.request({
+        hostname: proxy.hostname, port: proxy.port || 80, method: init.method ?? 'GET',
+        path: pinned.toString(), headers: Object.fromEntries(headers.entries()), signal: init.signal ?? undefined,
+      }, (response) => responseToFetchResponse(response, resolve, reject));
+      request.on('error', reject);
+      writeRequestBody(request, init.body);
+      return;
+    }
+
+    const connectHeaders: Record<string, string> = { host: `${address}:${url.port || 443}` };
+    if (authorization) connectHeaders['proxy-authorization'] = authorization;
+    const tunnel = http.request({
+      hostname: proxy.hostname, port: proxy.port || 80, method: 'CONNECT',
+      path: `${address}:${url.port || 443}`, headers: connectHeaders,
+    });
+    tunnel.on('connect', (_response, socket) => {
+      const secureSocket = tls.connect({ socket, servername: url.hostname });
+      const request = https.request({
+        hostname: url.hostname, port: Number(url.port || 443), method: init.method ?? 'GET',
+        path: `${url.pathname}${url.search}`, headers: Object.fromEntries(headers.entries()),
+        createConnection: () => secureSocket, agent: false, signal: init.signal ?? undefined,
+      }, (response) => responseToFetchResponse(response, resolve, reject));
+      request.on('error', reject);
+      writeRequestBody(request, init.body);
+    });
+    tunnel.on('error', reject);
+    tunnel.end();
   });
 }
 

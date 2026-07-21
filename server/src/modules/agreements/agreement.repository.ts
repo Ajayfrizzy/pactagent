@@ -1,13 +1,14 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../db';
 import type { CreateAgreementInput } from './agreement.validation';
+import type { TenantContext } from '../../common/tenancy/tenant-context';
 
-export function createAgreement(appId: string, input: CreateAgreementInput, tx: Prisma.TransactionClient) {
+export function createAgreement(tenant: TenantContext, input: CreateAgreementInput, tx: Prisma.TransactionClient) {
   const now = new Date();
 
   return tx.agreement.create({
     data: {
-      appId,
+      appId: tenant.appId,
       externalReferenceId: input.externalReferenceId ?? null,
       title: input.title,
       description: input.description,
@@ -33,7 +34,7 @@ export function createAgreement(appId: string, input: CreateAgreementInput, tx: 
   });
 }
 
-export function listAgreementsForApp(appId: string, params: {
+export function listAgreementsForApp(tenant: TenantContext, params: {
   status?: string;
   externalReferenceId?: string;
   limit: number;
@@ -41,7 +42,7 @@ export function listAgreementsForApp(appId: string, params: {
 }) {
   return prisma.agreement.findMany({
     where: {
-      appId,
+      appId: tenant.appId,
       ...(params.status ? { status: params.status } : {}),
       ...(params.externalReferenceId ? { externalReferenceId: params.externalReferenceId } : {}),
     },
@@ -60,11 +61,11 @@ export function listAgreementsForApp(appId: string, params: {
   });
 }
 
-export function findAgreementForApp(appId: string, agreementId: string, tx?: Prisma.TransactionClient) {
+export function findAgreementForApp(tenant: TenantContext, agreementId: string, tx?: Prisma.TransactionClient) {
   return (tx ?? prisma).agreement.findFirst({
     where: {
       id: agreementId,
-      appId,
+      appId: tenant.appId,
     },
     include: {
       milestones: {
@@ -80,7 +81,7 @@ export function findAgreementForApp(appId: string, agreementId: string, tx?: Pri
 }
 
 export function updateAgreementStatus(
-  appId: string,
+  tenant: TenantContext,
   agreementId: string,
   status: string,
   tx: Prisma.TransactionClient,
@@ -88,7 +89,7 @@ export function updateAgreementStatus(
   return tx.agreement.update({
     where: {
       id: agreementId,
-      appId,
+      appId: tenant.appId,
     },
     data: {
       status,

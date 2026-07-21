@@ -1,6 +1,7 @@
 {
   "name": "@pact-agent/server",
   "version": "1.0.0",
+  "license": "MIT",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
@@ -9,6 +10,7 @@
     "worker": "tsx src/worker/index.ts",
     "seed": "tsx src/seed.ts",
     "backfill:legacy-tenant": "tsx src/scripts/backfillLegacyTenant.ts",
+    "audit:tenant-integrity": "tsx src/scripts/auditTenantIntegrity.ts",
     "rotate:webhook-secrets": "tsx src/scripts/rotateWebhookSecrets.ts",
     "rotate:webhook-encryption": "tsx src/scripts/rotateWebhookSecrets.ts",
     "test": "node --import tsx --test --test-concurrency=1 $(find src -type f -name '*.test.ts' ! -name '*.integration.test.ts' -print)",

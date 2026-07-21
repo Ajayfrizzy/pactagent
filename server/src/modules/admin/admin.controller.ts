@@ -64,3 +64,20 @@ export async function listAuditLogs(req: Request, res: Response) {
   await auditAdminRead(req, 'audit_log');
   return sendList(res, result.data, result.pagination);
 }
+
+export async function listJobs(req: Request, res: Response) {
+  const result = await adminService.listJobs(req.query as any);
+  await auditAdminRead(req, 'agent_job');
+  return sendList(res, result.data, result.pagination);
+}
+
+export async function replayJob(req: Request, res: Response) {
+  const replayed = await adminService.replayDeadLetterJob(req.params.id);
+  await createInfrastructureAuditLog({
+    actorType: 'user', actorId: req.auth?.address ?? null, actorAddress: req.auth?.address ?? null,
+    action: 'admin.agent_job_replayed', targetType: 'agent_job', targetId: req.params.id,
+    after: { replayedJobId: replayed.id }, ipAddress: req.ip,
+    userAgent: req.header('user-agent') ?? null, requestId: req.requestId,
+  });
+  return sendSuccess(res, replayed);
+}

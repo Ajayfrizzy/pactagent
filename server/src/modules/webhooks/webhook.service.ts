@@ -1,5 +1,6 @@
 import type { Request } from 'express';
 import { config } from '../../config';
+import { tenantContext } from '../../common/tenancy/tenant-context';
 import { invalidRequest, notFound } from '../../common/errors/app-error';
 import { createInfrastructureAuditLog } from '../audit-logs/audit-log.repository';
 import { assertProviderResponse, executeProviderRequest } from '../../common/resilience/provider';
@@ -57,7 +58,7 @@ function responseSnippet(body: string) {
 }
 
 function deliveryEndpointUrl(delivery: Awaited<ReturnType<typeof webhookRepository.findWebhookDeliveryWithEndpoint>>) {
-  if (!delivery) {
+  if (!delivery?.endpoint) {
     return null;
   }
 
@@ -89,7 +90,7 @@ export async function createWebhookEndpointForApp(req: Request, app: AppContext,
   const secretHash = hashWebhookSecret(secret);
   const secretCiphertext = encryptWebhookSecret(secret);
   const endpoint = await webhookRepository.createWebhookEndpoint({
-    appId: app.id,
+    tenant: tenantContext(app.id),
     input,
     normalizedUrl,
     secretHash,
@@ -109,7 +110,7 @@ export async function createWebhookEndpointForApp(req: Request, app: AppContext,
 }
 
 export async function listWebhookEndpointsForApp(appId: string, query: WebhookEndpointListQuery) {
-  const endpoints = await webhookRepository.listWebhookEndpointsForApp(appId, query);
+  const endpoints = await webhookRepository.listWebhookEndpointsForApp(tenantContext(appId), query);
   const hasMore = endpoints.length > query.limit;
   const data = endpoints.slice(0, query.limit);
 
@@ -123,7 +124,7 @@ export async function listWebhookEndpointsForApp(appId: string, query: WebhookEn
 }
 
 export async function getWebhookEndpointForApp(appId: string, endpointId: string) {
-  const endpoint = await webhookRepository.findWebhookEndpointForApp(appId, endpointId);
+  const endpoint = await webhookRepository.findWebhookEndpointForApp(tenantContext(appId), endpointId);
   if (!endpoint) {
     throw notFound('Webhook endpoint not found.', 'webhook_endpoint_not_found');
   }
@@ -137,13 +138,13 @@ export async function updateWebhookEndpointForApp(
   endpointId: string,
   input: UpdateWebhookEndpointInput,
 ) {
-  const before = await webhookRepository.findWebhookEndpointForApp(app.id, endpointId);
+  const before = await webhookRepository.findWebhookEndpointForApp(tenantContext(app.id), endpointId);
   if (!before) {
     throw notFound('Webhook endpoint not found.', 'webhook_endpoint_not_found');
   }
 
   const normalizedUrl = input.url ? await assertWebhookUrlAllowed(input.url, app.environment) : undefined;
-  const updated = await webhookRepository.updateWebhookEndpointForApp(app.id, endpointId, {
+  const updated = await webhookRepository.updateWebhookEndpointForApp(tenantContext(app.id), endpointId, {
     ...input,
     normalizedUrl,
   });
@@ -163,12 +164,12 @@ export async function updateWebhookEndpointForApp(
 }
 
 export async function deleteWebhookEndpointForApp(req: Request, appId: string, endpointId: string) {
-  const before = await webhookRepository.findWebhookEndpointForApp(appId, endpointId);
+  const before = await webhookRepository.findWebhookEndpointForApp(tenantContext(appId), endpointId);
   if (!before) {
     throw notFound('Webhook endpoint not found.', 'webhook_endpoint_not_found');
   }
 
-  const deleted = await webhookRepository.deleteWebhookEndpointForApp(appId, endpointId);
+  const deleted = await webhookRepository.deleteWebhookEndpointForApp(tenantContext(appId), endpointId);
   const serializedBefore = serializeWebhookEndpoint(before);
   const serializedAfter = serializeWebhookEndpoint(deleted);
 
@@ -185,7 +186,7 @@ export async function deleteWebhookEndpointForApp(req: Request, appId: string, e
 }
 
 export async function listWebhookDeliveriesForApp(appId: string, query: WebhookDeliveryListQuery) {
-  const deliveries = await webhookRepository.listWebhookDeliveriesForApp(appId, query);
+  const deliveries = await webhookRepository.listWebhookDeliveriesForApp(tenantContext(appId), query);
   const hasMore = deliveries.length > query.limit;
   const data = deliveries.slice(0, query.limit);
 
@@ -199,7 +200,7 @@ export async function listWebhookDeliveriesForApp(appId: string, query: WebhookD
 }
 
 export async function getWebhookDeliveryForApp(appId: string, deliveryId: string) {
-  const delivery = await webhookRepository.findWebhookDeliveryForApp(appId, deliveryId);
+  const delivery = await webhookRepository.findWebhookDeliveryForApp(tenantContext(appId), deliveryId);
   if (!delivery) {
     throw notFound('Webhook delivery not found.', 'webhook_delivery_not_found');
   }
@@ -208,7 +209,7 @@ export async function getWebhookDeliveryForApp(appId: string, deliveryId: string
 }
 
 export async function retryWebhookDeliveryForApp(req: Request, appId: string, deliveryId: string) {
-  const before = await webhookRepository.findWebhookDeliveryForApp(appId, deliveryId);
+  const before = await webhookRepository.findWebhookDeliveryForApp(tenantContext(appId), deliveryId);
   if (!before) {
     throw notFound('Webhook delivery not found.', 'webhook_delivery_not_found');
   }
@@ -217,7 +218,10 @@ export async function retryWebhookDeliveryForApp(req: Request, appId: string, de
     throw invalidRequest('Delivered webhook deliveries cannot be retried.', 'webhook_delivery_already_delivered');
   }
 
-  const updated = await webhookRepository.markWebhookDeliveryForRetry(appId, deliveryId);
+  const updated = await webhookRepository.markWebhookDeliveryForRetry(tenantContext(appId), deliveryId);
+  if (!updated) {
+    throw invalidRequest('Webhook delivery is already queued or being delivered.', 'webhook_delivery_retry_in_progress');
+  }
   const serializedBefore = serializeWebhookDelivery(before);
   const serializedAfter = serializeWebhookDelivery(updated);
 
@@ -244,8 +248,7 @@ async function recordFinalDeliveryFailure(delivery: { appId: string | null; even
     return;
   }
 
-  await createEvent({
-    appId: delivery.appId,
+  await createEvent(tenantContext(delivery.appId), {
     type: WEBHOOK_EVENTS.deliveryFailed,
     payload: {
       deliveryId: delivery.id,
@@ -260,6 +263,15 @@ export async function deliverWebhookDelivery(deliveryId: string) {
   const delivery = await webhookRepository.findWebhookDeliveryWithEndpoint(deliveryId);
   if (!delivery) {
     throw notFound('Webhook delivery not found.', 'webhook_delivery_not_found');
+  }
+
+  if (!delivery.endpoint) {
+    throw notFound('Webhook endpoint not found for delivery.', 'webhook_endpoint_not_found');
+  }
+  const endpoint = delivery.endpoint;
+
+  if (delivery.status === 'DELIVERED') {
+    return serializeWebhookDelivery(delivery);
   }
 
   const endpointUrl = deliveryEndpointUrl(delivery);
@@ -288,13 +300,14 @@ export async function deliverWebhookDelivery(deliveryId: string) {
   try {
     const response = await executeProviderRequest({
       provider: 'webhook', operation: 'deliver', timeoutMs: config.webhookTimeoutMs, maxAttempts: 1, concurrency: 20,
+      correlation: { appId: delivery.appId, agreementId: delivery.agreementId, deliveryId: delivery.id },
       run: async ({ signal, requestId }) => {
         const result = await fetchWebhookUrl(endpointUrl, {
           method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': 'PactAgent-Webhooks/1.0',
             'PactAgent-Event-Id': delivery.eventId ?? delivery.id, 'PactAgent-Timestamp': timestamp,
             'PactAgent-Signature': signature, 'PactAgent-Request-Id': requestId },
           body: delivery.payloadJson, signal,
-        }, delivery.endpoint.app?.environment ?? 'sandbox', config.webhookMaxRedirects);
+        }, endpoint.app?.environment ?? 'sandbox', config.webhookMaxRedirects);
         assertProviderResponse(result, 'webhook', requestId);
         return result;
       },

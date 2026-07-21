@@ -1,5 +1,5 @@
 const SENSITIVE_KEY = /(authorization|cookie|token|secret|private.?key|password|signature|ciphertext|database.?url)/i;
-const SENSITIVE_VALUE = /(Bearer\s+\S+|pa_(?:test|live)_\S+|whsec_\S+|postgres(?:ql)?:\/\/[^\s]+)/gi;
+const SENSITIVE_VALUE = /(Bearer\s+\S+|pa_(?:test|live)_\S+|whsec_\S+|sk-[A-Za-z0-9_-]{12,}|gh[oprsu]_[A-Za-z0-9_]{12,}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|postgres(?:ql)?:\/\/[^\s]+)/gi;
 
 export function redactSensitive(value: unknown, seen = new WeakSet<object>()): unknown {
   if (typeof value === 'string') {

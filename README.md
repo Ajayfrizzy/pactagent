@@ -63,6 +63,8 @@ npm run db:migrate:deploy
 
 Do not use `prisma db push` against production. Existing databases that predate the migration history must follow `server/prisma/MIGRATIONS.md` before the first migration deployment.
 
+API and worker startup compare the committed migration directories with PostgreSQL's `_prisma_migrations` ledger. They do not accept traffic or begin polling when a required migration is missing or failed. Staging and production also require separate pooled `DATABASE_URL` and direct migration `DIRECT_URL` endpoints.
+
 ### Container deployment
 
 The repository builds separate API, worker, migration, and web roles. For a local production-shaped stack:
@@ -84,6 +86,8 @@ Integrator documentation is served by the API server:
 - `server/docs/examples/integrator-quickstart.md` for curl examples
 
 Architecture and operations references live under `docs/`: configuration, ADRs, trust and tenant boundaries, settlement failure modes, environment policy, ownership and incident severity, and release checklists.
+
+The remaining source-controlled infrastructure work is organized into phased deliverables and acceptance criteria in [`docs/infrastructure-implementation-roadmap.md`](docs/infrastructure-implementation-roadmap.md). External cloud and operational handoffs are separated there so they are not mistaken for repository-complete controls.
 
 
 ### Response Format

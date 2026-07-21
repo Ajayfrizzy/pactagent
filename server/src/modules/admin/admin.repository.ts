@@ -124,3 +124,16 @@ export function listAuditLogs(params: AdminListQuery) {
     ...(params.cursor ? { cursor: { id: params.cursor }, skip: 1 } : {}),
   });
 }
+
+export function listJobs(params: AdminListQuery) {
+  return prisma.agentJob.findMany({
+    where: {
+      ...(params.status ? { status: params.status } : {}),
+      ...(params.type ? { queue: params.type } : {}),
+      ...(params.appId ? { agreement: { appId: params.appId } } : {}),
+    },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: params.limit + 1,
+    ...(params.cursor ? { cursor: { id: params.cursor }, skip: 1 } : {}),
+  });
+}

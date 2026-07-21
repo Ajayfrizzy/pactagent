@@ -1,0 +1,41 @@
+{
+  "allowed": [
+    "0BSD",
+    "Apache-2.0",
+    "BlueOak-1.0.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC-BY-3.0",
+    "CC-BY-4.0",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "Python-2.0",
+    "Unlicense",
+    "WTFPL",
+    "Zlib"
+  ],
+  "denied": [
+    "AGPL-1.0",
+    "AGPL-1.0-only",
+    "AGPL-1.0-or-later",
+    "AGPL-3.0",
+    "AGPL-3.0-only",
+    "AGPL-3.0-or-later",
+    "BUSL-1.1",
+    "Commons-Clause",
+    "SSPL-1.0"
+  ],
+  "exceptions": {
+    "seq-queue@0.0.5": {
+      "reason": "Package metadata omits the license field; the installed distribution includes an MIT license file. Revalidate when the package changes.",
+      "expires": "2027-01-20"
+    },
+    "@img/sharp-libvips-darwin-arm64@1.2.4": {
+      "reason": "Sharp distributes libvips as a dynamically linked runtime artifact under LGPL-3.0-or-later. Distribution obligations remain documented and must be reassessed on upgrade.",
+      "expires": "2027-01-20"
+    }
+  }
+}

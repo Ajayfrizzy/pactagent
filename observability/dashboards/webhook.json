@@ -1,0 +1,25 @@
+{
+  "title": "PactAgent Webhooks",
+  "uid": "pactagent-webhooks",
+  "schemaVersion": 39,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Delivery provider outcomes",
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(pactagent_provider_requests_total{provider=\"webhook\"}[5m]))"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Webhook queue duration",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(pactagent_job_execution_duration_seconds_bucket{queue=\"webhook\"}[5m])))"
+        }
+      ]
+    }
+  ]
+}

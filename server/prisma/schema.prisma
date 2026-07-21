@@ -103,6 +103,8 @@ model Agreement {
   reserveCkbLocked             String    @default("0")
   reserveCkbRemaining          String    @default("0")
   reserveFundingQuoteUsdPerCkb Decimal?  @db.Decimal(30, 12)
+  reserveFundingQuoteSource    String?
+  reserveFundingQuotedAt       DateTime?
   reserveHealthStatus          String    @default("HEALTHY") // HEALTHY | TOP_UP_REQUIRED
   settlementStatus             String    @default("UNFUNDED") // SettlementStatus enum
   fundingConfirmedAt           DateTime?
@@ -285,11 +287,12 @@ model WebhookDelivery {
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
-  endpoint  WebhookEndpoint @relation(fields: [endpointId], references: [id])
-  app       App?            @relation(fields: [appId], references: [id])
-  event     Event?          @relation(fields: [eventId], references: [id])
-  agreement Agreement?      @relation(fields: [agreementId], references: [id])
+  endpoint  WebhookEndpoint? @relation(fields: [endpointId, appId], references: [id, appId], onDelete: Restrict)
+  app       App?             @relation(fields: [appId], references: [id])
+  event     Event?           @relation(fields: [eventId, appId], references: [id, appId], onDelete: Restrict)
+  agreement Agreement?       @relation(fields: [agreementId, appId], references: [id, appId], onDelete: Restrict)
 
+  @@unique([id, appId])
   @@index([appId, createdAt])
   @@index([appId, status, nextRetryAt])
   @@index([endpointId, createdAt])
@@ -309,6 +312,8 @@ model Milestone {
   currency              String?
   targetUsd             Decimal?  @db.Decimal(30, 12)
   releaseQuoteUsdPerCkb Decimal?  @db.Decimal(30, 12)
+  releaseQuoteSource    String?
+  releaseQuotedAt       DateTime?
   releasedCkbAmount     String?
   releasedUsdValue      Decimal?  @db.Decimal(30, 12)
   sortOrder             Int
@@ -322,7 +327,7 @@ model Milestone {
   updatedAt             DateTime  @updatedAt
 
   app                        App                   @relation(fields: [appId], references: [id])
-  agreement                  Agreement             @relation(fields: [agreementId], references: [id])
+  agreement                  Agreement             @relation(fields: [agreementId, appId], references: [id, appId], onDelete: Restrict)
   proofs                     Proof[]
   disputes                   Dispute[]
   reviews                    Review[]
@@ -353,9 +358,11 @@ model Event {
   createdAt         DateTime @default(now())
 
   app               App               @relation(fields: [appId], references: [id])
-  agreement         Agreement?        @relation(fields: [agreementId], references: [id])
-  milestone         Milestone?        @relation(fields: [milestoneId], references: [id])
-  escrow            Escrow?           @relation(fields: [escrowId], references: [id])
+  agreement         Agreement?        @relation(fields: [agreementId, appId], references: [id, appId], onDelete: Restrict)
+  milestone         Milestone?        @relation(fields: [milestoneId, appId], references: [id, appId], onDelete: Restrict)
+  escrow            Escrow?           @relation(fields: [escrowId, appId], references: [id, appId], onDelete: Restrict)
+  proof             Proof?            @relation(fields: [proofSubmissionId, appId], references: [id, appId], onDelete: Restrict)
+  dispute           Dispute?          @relation(fields: [disputeId, appId], references: [id, appId], onDelete: Restrict)
   webhookDeliveries WebhookDelivery[]
 
   @@unique([id, appId])
@@ -383,8 +390,8 @@ model Escrow {
   updatedAt     DateTime @updatedAt
 
   app          App           @relation(fields: [appId], references: [id])
-  agreement    Agreement     @relation(fields: [agreementId], references: [id])
-  milestone    Milestone?    @relation(fields: [milestoneId], references: [id])
+  agreement    Agreement     @relation(fields: [agreementId, appId], references: [id, appId], onDelete: Restrict)
+  milestone    Milestone?    @relation(fields: [milestoneId, appId], references: [id, appId], onDelete: Restrict)
   events       Event[]
   transactions Transaction[]
 
@@ -413,10 +420,12 @@ model Transaction {
   updatedAt      DateTime @updatedAt
 
   app       App        @relation(fields: [appId], references: [id])
-  agreement Agreement? @relation(fields: [agreementId], references: [id])
-  milestone Milestone? @relation(fields: [milestoneId], references: [id])
-  escrow    Escrow?    @relation(fields: [escrowId], references: [id])
+  agreement Agreement? @relation(fields: [agreementId, appId], references: [id, appId], onDelete: Restrict)
+  milestone Milestone? @relation(fields: [milestoneId, appId], references: [id, appId], onDelete: Restrict)
+  escrow    Escrow?    @relation(fields: [escrowId, appId], references: [id, appId], onDelete: Restrict)
 
+  @@unique([id, appId])
+  @@unique([rail, network, type, txHash, escrowId])
   @@index([appId, createdAt])
   @@index([escrowId, type, createdAt])
   @@index([agreementId, createdAt])
@@ -430,7 +439,7 @@ model IdempotencyKey {
   requestHash         String
   status              String   @default("pending") // pending | completed
   responseStatus      Int?
-  responseBodyJson    String?
+  responseBodyJson    Json?    @db.JsonB
   responseBytes       Int?
   processingExpiresAt DateTime
   expiresAt           DateTime
@@ -463,11 +472,12 @@ model Proof {
   lastCheckedAt         DateTime?
 
   app          App           @relation(fields: [appId], references: [id])
-  agreement    Agreement     @relation(fields: [agreementId], references: [id])
-  milestone    Milestone     @relation(fields: [milestoneId], references: [id])
+  agreement    Agreement     @relation(fields: [agreementId, appId], references: [id, appId], onDelete: Restrict)
+  milestone    Milestone     @relation(fields: [milestoneId, appId], references: [id, appId], onDelete: Restrict)
   reviews      Review[]
   proofChecks  ProofCheck[]
   infoRequests InfoRequest[]
+  events       Event[]
 
   @@unique([id, appId])
   @@index([appId, submittedAt])
@@ -487,10 +497,11 @@ model Review {
   createdAt          DateTime @default(now())
 
   app       App        @relation(fields: [appId], references: [id])
-  agreement Agreement  @relation(fields: [agreementId], references: [id])
-  milestone Milestone? @relation(fields: [milestoneId], references: [id])
-  proof     Proof      @relation(fields: [proofSubmissionId], references: [id])
+  agreement Agreement  @relation(fields: [agreementId, appId], references: [id, appId], onDelete: Restrict)
+  milestone Milestone? @relation(fields: [milestoneId, appId], references: [id, appId], onDelete: Restrict)
+  proof     Proof      @relation(fields: [proofSubmissionId, appId], references: [id, appId], onDelete: Restrict)
 
+  @@unique([id, appId])
   @@index([appId, createdAt])
   @@index([proofSubmissionId, createdAt])
   @@index([agreementId, createdAt])
@@ -572,9 +583,10 @@ model Dispute {
   createdAt          DateTime  @default(now())
 
   app             App               @relation(fields: [appId], references: [id])
-  agreement       Agreement         @relation(fields: [agreementId], references: [id])
-  milestone       Milestone         @relation(fields: [milestoneId], references: [id])
+  agreement       Agreement         @relation(fields: [agreementId, appId], references: [id, appId], onDelete: Restrict)
+  milestone       Milestone         @relation(fields: [milestoneId, appId], references: [id, appId], onDelete: Restrict)
   evidenceEntries DisputeEvidence[]
+  events          Event[]
 
   @@unique([id, appId])
   @@index([appId, createdAt])
@@ -631,7 +643,7 @@ model AuditLog {
   createdAt    DateTime @default(now())
 
   app       App?       @relation(fields: [appId], references: [id])
-  agreement Agreement? @relation(fields: [agreementId], references: [id])
+  agreement Agreement? @relation(fields: [agreementId, appId], references: [id, appId], onDelete: Restrict)
 
   @@index([appId, createdAt])
   @@index([agreementId, createdAt])
@@ -650,6 +662,7 @@ model MilestoneSettlement {
   amount           String
   txHash           String?
   paymentReference String?
+  operationKey     String?   @unique
   errorMessage     String?
   confirmedAt      DateTime?
   createdAt        DateTime  @default(now())
@@ -658,6 +671,8 @@ model MilestoneSettlement {
   agreement Agreement  @relation(fields: [agreementId], references: [id])
   milestone Milestone? @relation(fields: [milestoneId], references: [id])
 
+  @@unique([network, direction, txHash, milestoneId], map: "MilestoneSettlement_tx_identity_key")
+  @@unique([network, direction, paymentReference, milestoneId], map: "MilestoneSettlement_payment_identity_key")
   @@index([agreementId, direction, status, createdAt])
   @@index([milestoneId, direction, createdAt])
 }
@@ -703,6 +718,7 @@ model AgentJob {
   id             String    @id @default(uuid())
   agreementId    String?
   kind           String
+  queue          String    @default("settlement")
   status         String    @default("QUEUED")
   dedupeKey      String?   @unique
   payloadJson    String?
@@ -710,6 +726,7 @@ model AgentJob {
   maxAttempts    Int       @default(5)
   availableAt    DateTime  @default(now())
   lockedAt       DateTime?
+  leaseExpiresAt DateTime?
   lockedBy       String?
   lastError      String?
   completedAt    DateTime?
@@ -719,7 +736,7 @@ model AgentJob {
 
   agreement Agreement? @relation(fields: [agreementId], references: [id])
 
-  @@index([status, availableAt, createdAt])
+  @@index([queue, status, availableAt, leaseExpiresAt, createdAt])
   @@index([agreementId, createdAt])
 }
 

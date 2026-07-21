@@ -14,6 +14,42 @@ permissions:
   contents: read
 
 jobs:
+  secrets:
+    name: Secret scanning
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  workspace:
+    name: Workspace and supply-chain policy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm exec --workspace @pact-agent/server -- prisma generate
+        env:
+          DATABASE_URL: postgresql://build:build@127.0.0.1:5432/build
+      - run: npm run controls:check
+      - run: npm run deploy:check
+      - run: npm run observability:check
+      - run: npm run phase7:check
+      - run: npm run licenses:test
+      - run: npm run licenses:check
+      - run: npm run lint
+      - run: npm run build
+      - name: Verify build does not modify tracked files
+        run: test -z "$(git status --porcelain --untracked-files=no)"
+
   server:
     name: Server and migrations
     runs-on: ubuntu-24.04
@@ -52,18 +88,32 @@ jobs:
       - run: npx prisma generate
       - run: npx prisma format --check
       - run: npx prisma validate
-      - run: npm run db:migrate:deploy
+      - name: Deploy migrations and record duration
+        run: /usr/bin/time -v npm run db:migrate:deploy 2>&1 | tee /tmp/phase0-migration-baseline.txt
       - run: npm run db:migrate:status
+      - name: Record representative query plans
+        run: psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U pactagent -d pactagent_test -f prisma/phase0-query-baseline.sql | tee /tmp/phase0-query-baseline.txt
+      - name: Measure critical Phase 7 query plans
+        run: psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U pactagent -d pactagent_test -f prisma/performance-query-plans.sql | tee /tmp/phase7-query-plans.json
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: phase0-query-baseline
+          path: |
+            /tmp/phase0-migration-baseline.txt
+            /tmp/phase0-query-baseline.txt
+            /tmp/phase7-query-plans.json
       - name: Test upgrade from the baseline migration
         timeout-minutes: 5
         run: |
           createdb -h 127.0.0.1 -U pactagent pactagent_upgrade
           psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U pactagent -d pactagent_upgrade -f prisma/migrations/20260715000100_baseline/migration.sql
-          psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U pactagent -d pactagent_upgrade -c "INSERT INTO \"App\" (id, name, slug, \"ownerUserId\", environment, status, \"defaultCurrency\", \"defaultNetwork\", \"createdAt\", \"updatedAt\") VALUES ('00000000-0000-4000-8000-000000000099', 'Upgrade Fixture', 'upgrade-fixture', 'upgrade-owner', 'sandbox', 'active', 'CKB', 'sandbox', now(), now())"
-          DATABASE_URL=postgresql://pactagent:pactagent@127.0.0.1:5432/pactagent_upgrade npx prisma migrate resolve --applied 20260715000100_baseline
-          DATABASE_URL=postgresql://pactagent:pactagent@127.0.0.1:5432/pactagent_upgrade npm run db:migrate:deploy
-          DATABASE_URL=postgresql://pactagent:pactagent@127.0.0.1:5432/pactagent_upgrade npm run db:migrate:status
+          psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U pactagent -d pactagent_upgrade -f prisma/fixtures/migration-upgrade.sql
+          DATABASE_URL=postgresql://pactagent:pactagent@127.0.0.1:5432/pactagent_upgrade DIRECT_URL=postgresql://pactagent:pactagent@127.0.0.1:5432/pactagent_upgrade npx prisma migrate resolve --applied 20260715000100_baseline
+          DATABASE_URL=postgresql://pactagent:pactagent@127.0.0.1:5432/pactagent_upgrade DIRECT_URL=postgresql://pactagent:pactagent@127.0.0.1:5432/pactagent_upgrade npm run db:migrate:deploy
+          DATABASE_URL=postgresql://pactagent:pactagent@127.0.0.1:5432/pactagent_upgrade DIRECT_URL=postgresql://pactagent:pactagent@127.0.0.1:5432/pactagent_upgrade npm run db:migrate:status
           test "$(psql -At -h 127.0.0.1 -U pactagent -d pactagent_upgrade -c "SELECT name FROM \"App\" WHERE id = '00000000-0000-4000-8000-000000000099'")" = "Upgrade Fixture"
+          test "$(psql -At -h 127.0.0.1 -U pactagent -d pactagent_upgrade -c "SELECT title FROM \"Agreement\" WHERE id = '00000000-0000-4000-8000-000000000199'")" = "Existing agreement"
+          test "$(psql -At -h 127.0.0.1 -U pactagent -d pactagent_upgrade -c "SELECT \"responseBodyJson\"->'data'->>'id' FROM \"IdempotencyKey\" WHERE id = '00000000-0000-4000-8000-000000000499'")" = "fixture"
       - run: npm test
       - run: npm run env:check --prefix ..
       - run: npm run test:integration

@@ -1,6 +1,7 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { prisma } from '../../db';
 import { createWebhookDeliveriesForEvent } from '../webhooks/webhook.repository';
+import type { TenantContext } from '../../common/tenancy/tenant-context';
 
 type PrismaTransaction = Omit<
   PrismaClient,
@@ -11,8 +12,7 @@ function getClient(tx?: Prisma.TransactionClient | PrismaTransaction) {
   return tx ?? prisma;
 }
 
-export async function createEvent(data: {
-  appId: string;
+export async function createEvent(tenant: TenantContext, data: {
   type: string;
   agreementId?: string | null;
   milestoneId?: string | null;
@@ -23,7 +23,7 @@ export async function createEvent(data: {
 }, tx?: Prisma.TransactionClient | PrismaTransaction) {
   const event = await getClient(tx).event.create({
     data: {
-      appId: data.appId,
+      appId: tenant.appId,
       type: data.type,
       agreementId: data.agreementId ?? null,
       milestoneId: data.milestoneId ?? null,
@@ -39,7 +39,7 @@ export async function createEvent(data: {
   return event;
 }
 
-export function listEventsForApp(appId: string, params: {
+export function listEventsForApp(tenant: TenantContext, params: {
   type?: string;
   agreementId?: string;
   limit: number;
@@ -47,7 +47,7 @@ export function listEventsForApp(appId: string, params: {
 }) {
   return prisma.event.findMany({
     where: {
-      appId,
+      appId: tenant.appId,
       ...(params.type ? { type: params.type } : {}),
       ...(params.agreementId ? { agreementId: params.agreementId } : {}),
     },
@@ -57,11 +57,11 @@ export function listEventsForApp(appId: string, params: {
   });
 }
 
-export function findEventForApp(appId: string, eventId: string) {
+export function findEventForApp(tenant: TenantContext, eventId: string) {
   return prisma.event.findFirst({
     where: {
       id: eventId,
-      appId,
+      appId: tenant.appId,
     },
   });
 }

@@ -4,6 +4,8 @@ import { prisma } from './db';
 import { config } from './config';
 import { normalizeWalletAddress, verifyAuthToken } from './services/authService';
 import { log } from './common/observability/logger';
+import { closeWebSocketBus, publishWebSocketEvent, subscribeWebSocketEvents } from './common/websocket/websocket-bus';
+import { websocketConnections, websocketPressure } from './common/observability/metrics';
 
 type WsEvent =
   | { type: 'LOG'; payload: any }
@@ -20,7 +22,7 @@ const pendingContexts = new WeakMap<IncomingMessage, { context: ClientContext; i
 const connectionsByIp = new Map<string, number>();
 let heartbeatTimer: NodeJS.Timeout | null = null;
 
-function getAuthToken(request: IncomingMessage) {
+export function getAuthToken(request: IncomingMessage) {
   const requestUrl = new URL(request.url || '/ws', 'http://localhost');
   if (requestUrl.searchParams.has('token')) {
     throw new Error('WebSocket credentials must not be sent in the URL.');
@@ -60,7 +62,7 @@ function getClientIp(request: IncomingMessage) {
   return request.socket.remoteAddress || 'unknown';
 }
 
-function isOriginAllowed(request: IncomingMessage) {
+export function isOriginAllowed(request: IncomingMessage) {
   const origin = request.headers.origin;
   if (!origin) return config.nodeEnv !== 'production';
   return config.corsOrigins.includes(origin);
@@ -83,7 +85,7 @@ function getAgreementIdFromEvent(event: WsEvent) {
   return null;
 }
 
-function isPublicLogEvent(event: WsEvent) {
+export function isPublicLogEvent(event: WsEvent) {
   return (
     event.type === 'LOG' &&
     Boolean(event.payload?.agreementId) &&
@@ -91,16 +93,21 @@ function isPublicLogEvent(event: WsEvent) {
   );
 }
 
-function toPublicEvent(event: WsEvent): WsEvent {
+export function toPublicEvent(event: WsEvent): WsEvent {
   if (event.type !== 'LOG') {
     return event;
   }
 
+  const payload = event.payload || {};
   return {
     type: 'LOG',
     payload: {
-      ...event.payload,
-      metadataJson: null,
+      id: payload.id,
+      agreementId: payload.agreementId,
+      level: payload.level,
+      eventType: payload.eventType,
+      message: payload.message,
+      createdAt: payload.createdAt,
     },
   };
 }
@@ -121,12 +128,13 @@ async function isAgreementVisibleToAddress(agreementId: string, address: string)
   return Boolean(agreement);
 }
 
-function sendJson(ws: WebSocket, data: unknown) {
+export function sendJson(ws: WebSocket, data: unknown) {
   if (ws.readyState !== WebSocket.OPEN) {
     return;
   }
 
   if (ws.bufferedAmount > config.wsMaxBufferedBytes) {
+    websocketPressure.inc({ reason: 'backpressure' });
     ws.close(1013, 'Client is not consuming messages');
     return;
   }
@@ -134,12 +142,29 @@ function sendJson(ws: WebSocket, data: unknown) {
   ws.send(JSON.stringify(data));
 }
 
-export function initWebSocket(server: Server): void {
-  wss = new WebSocketServer({
-    noServer: true,
+export function canAcceptWebSocketConnection(totalConnections: number, ipConnections: number) {
+  return totalConnections < config.wsMaxConnections && ipConnections < config.wsMaxConnectionsPerIp;
+}
+
+export function webSocketServerOptions() {
+  return {
+    noServer: true as const,
     maxPayload: config.wsMaxPayloadBytes,
-    handleProtocols: (protocols) => protocols.has('pactagent') ? 'pactagent' : false,
-  });
+    handleProtocols: (protocols: Set<string>) => protocols.has('pactagent') ? 'pactagent' : false,
+  };
+}
+
+export function heartbeatWebSocket(client: WebSocket) {
+  const tracked = client as WebSocket & { checkAlive?: () => boolean };
+  if (tracked.checkAlive && !tracked.checkAlive()) {
+    websocketPressure.inc({ reason: 'heartbeat_timeout' });
+    client.terminate();
+  }
+  else client.ping();
+}
+
+export function initWebSocket(server: Server): void {
+  wss = new WebSocketServer(webSocketServerOptions());
 
   server.on('upgrade', (request, socket, head) => {
     const path = new URL(request.url || '/', 'http://localhost').pathname;
@@ -153,7 +178,8 @@ export function initWebSocket(server: Server): void {
     }
 
     const ip = getClientIp(request);
-    if (wss!.clients.size >= config.wsMaxConnections || (connectionsByIp.get(ip) || 0) >= config.wsMaxConnectionsPerIp) {
+    if (!canAcceptWebSocketConnection(wss!.clients.size, connectionsByIp.get(ip) || 0)) {
+      websocketPressure.inc({ reason: 'connection_limit' });
       rejectUpgrade(request, 429, 'Too Many Requests');
       return;
     }
@@ -178,6 +204,7 @@ export function initWebSocket(server: Server): void {
     const { context, ip } = pending;
     clientContexts.set(ws, context);
     connectionsByIp.set(ip, (connectionsByIp.get(ip) || 0) + 1);
+    websocketConnections.inc({ mode: context.mode });
     let isAlive = true;
     ws.on('pong', () => { isAlive = true; });
     log('info', 'websocket.connected', { mode: context.mode });
@@ -194,6 +221,7 @@ export function initWebSocket(server: Server): void {
       const remaining = Math.max(0, (connectionsByIp.get(ip) || 1) - 1);
       if (remaining) connectionsByIp.set(ip, remaining);
       else connectionsByIp.delete(ip);
+      websocketConnections.dec({ mode: context.mode });
       log('info', 'websocket.disconnected', { mode: context.mode });
     });
 
@@ -205,13 +233,12 @@ export function initWebSocket(server: Server): void {
   });
 
   heartbeatTimer = setInterval(() => {
-    for (const client of wss?.clients || []) {
-      const tracked = client as WebSocket & { checkAlive?: () => boolean };
-      if (tracked.checkAlive && !tracked.checkAlive()) client.terminate();
-      else client.ping();
-    }
+    for (const client of wss?.clients || []) heartbeatWebSocket(client);
   }, config.wsHeartbeatIntervalMs);
   heartbeatTimer.unref();
+  void subscribeWebSocketEvents((event) => broadcastLocal(event as WsEvent)).catch((error) => {
+    log('error', 'websocket.subscribe.failed', { error });
+  });
   log('info', 'websocket.initialized', { path: '/ws' });
 }
 
@@ -226,9 +253,10 @@ export async function closeWebSocketServer() {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   wss = null;
   connectionsByIp.clear();
+  await closeWebSocketBus();
 }
 
-export function broadcast(event: WsEvent): void {
+function broadcastLocal(event: WsEvent): void {
   if (!wss) return;
 
   const agreementId = getAgreementIdFromEvent(event);
@@ -264,4 +292,11 @@ export function broadcast(event: WsEvent): void {
       }
     }
   })();
+}
+
+export function broadcast(event: WsEvent): void {
+  broadcastLocal(event);
+  void publishWebSocketEvent(event).catch((error) => {
+    log('error', 'websocket.publish.failed', { error });
+  });
 }

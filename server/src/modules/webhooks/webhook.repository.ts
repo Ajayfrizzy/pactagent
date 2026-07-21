@@ -8,6 +8,7 @@ import type {
   WebhookEndpointListQuery,
 } from './webhook.validation';
 import { getWebhookEncryptionKeyId } from './webhook.signing';
+import type { TenantContext } from '../../common/tenancy/tenant-context';
 
 type PrismaTransaction = Omit<
   PrismaClient,
@@ -59,7 +60,7 @@ function deliveryStatusFilter(status?: string) {
 }
 
 export function createWebhookEndpoint(params: {
-  appId: string;
+  tenant: TenantContext;
   input: CreateWebhookEndpointInput;
   normalizedUrl: string;
   secretHash: string;
@@ -67,8 +68,8 @@ export function createWebhookEndpoint(params: {
 }) {
   return prisma.webhookEndpoint.create({
     data: {
-      appId: params.appId,
-      ownerAddress: params.appId,
+      appId: params.tenant.appId,
+      ownerAddress: params.tenant.appId,
       label: params.input.description ?? null,
       targetUrl: params.normalizedUrl,
       url: params.normalizedUrl,
@@ -85,10 +86,10 @@ export function createWebhookEndpoint(params: {
   });
 }
 
-export function listWebhookEndpointsForApp(appId: string, params: WebhookEndpointListQuery) {
+export function listWebhookEndpointsForApp(tenant: TenantContext, params: WebhookEndpointListQuery) {
   return prisma.webhookEndpoint.findMany({
     where: {
-      appId,
+      appId: tenant.appId,
       deletedAt: null,
       ...(params.status ? { status: params.status } : {}),
     },
@@ -99,21 +100,21 @@ export function listWebhookEndpointsForApp(appId: string, params: WebhookEndpoin
 }
 
 export function findWebhookEndpointForApp(
-  appId: string,
+  tenant: TenantContext,
   endpointId: string,
   tx?: Prisma.TransactionClient | PrismaTransaction,
 ) {
   return getClient(tx).webhookEndpoint.findFirst({
     where: {
       id: endpointId,
-      appId,
+      appId: tenant.appId,
       deletedAt: null,
     },
   });
 }
 
 export function updateWebhookEndpointForApp(
-  appId: string,
+  tenant: TenantContext,
   endpointId: string,
   input: UpdateWebhookEndpointInput & { normalizedUrl?: string },
 ) {
@@ -140,14 +141,14 @@ export function updateWebhookEndpointForApp(
   }
 
   return prisma.webhookEndpoint.update({
-    where: { id: endpointId },
+    where: { id_appId: { id: endpointId, appId: tenant.appId } },
     data,
   });
 }
 
-export function deleteWebhookEndpointForApp(appId: string, endpointId: string) {
+export function deleteWebhookEndpointForApp(tenant: TenantContext, endpointId: string) {
   return prisma.webhookEndpoint.update({
-    where: { id: endpointId },
+    where: { id_appId: { id: endpointId, appId: tenant.appId } },
     data: {
       status: 'disabled',
       isActive: false,
@@ -208,10 +209,10 @@ export async function createWebhookDeliveriesForEvent(
   return deliveries;
 }
 
-export function listWebhookDeliveriesForApp(appId: string, params: WebhookDeliveryListQuery) {
+export function listWebhookDeliveriesForApp(tenant: TenantContext, params: WebhookDeliveryListQuery) {
   return prisma.webhookDelivery.findMany({
     where: {
-      appId,
+      appId: tenant.appId,
       ...(params.endpointId ? { endpointId: params.endpointId } : {}),
       ...(params.eventId ? { eventId: params.eventId } : {}),
       ...(params.status ? { status: deliveryStatusFilter(params.status) } : {}),
@@ -222,11 +223,11 @@ export function listWebhookDeliveriesForApp(appId: string, params: WebhookDelive
   });
 }
 
-export function findWebhookDeliveryForApp(appId: string, deliveryId: string) {
+export function findWebhookDeliveryForApp(tenant: TenantContext, deliveryId: string) {
   return prisma.webhookDelivery.findFirst({
     where: {
       id: deliveryId,
-      appId,
+      appId: tenant.appId,
     },
   });
 }
@@ -244,15 +245,25 @@ export function findWebhookDeliveryWithEndpoint(deliveryId: string) {
   });
 }
 
-export function markWebhookDeliveryForRetry(appId: string, deliveryId: string) {
-  return prisma.webhookDelivery.update({
-    where: { id: deliveryId },
+export async function markWebhookDeliveryForRetry(
+  tenant: TenantContext,
+  deliveryId: string,
+  client: Pick<typeof prisma, 'webhookDelivery'> = prisma,
+) {
+  const reserved = await client.webhookDelivery.updateMany({
+    where: {
+      id: deliveryId,
+      appId: tenant.appId,
+      status: { in: ['FAILED', 'RETRY'] },
+    },
     data: {
       status: 'PENDING',
       nextRetryAt: new Date(),
       lastError: null,
     },
   });
+  if (reserved.count !== 1) return null;
+  return client.webhookDelivery.findUnique({ where: { id_appId: { id: deliveryId, appId: tenant.appId } } });
 }
 
 export function listDueWebhookDeliveries(limit: number) {

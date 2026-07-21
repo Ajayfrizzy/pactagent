@@ -32,6 +32,7 @@ import * as proofRepository from './proof.repository';
 import * as reviewRepository from '../reviews/review.repository';
 import { serializeReview } from '../reviews/review.model';
 import type { CreateProofInput, ProofListQuery, ReviewProofInput } from './proof.validation';
+import { tenantContext } from '../../common/tenancy/tenant-context';
 
 function assertInfrastructureAgreementStatus(status: string): InfrastructureAgreementStatus {
   if (!isAgreementStatus(status)) {
@@ -67,7 +68,7 @@ async function advanceAgreement(
 
   for (const toStatus of path) {
     assertAgreementTransition(current, toStatus);
-    updated = await updateAgreementStatus(appId, agreementId, toStatus, tx);
+    updated = await updateAgreementStatus(tenantContext(appId), agreementId, toStatus, tx);
     current = toStatus;
   }
 
@@ -86,7 +87,7 @@ async function advanceMilestone(
 
   for (const toStatus of path) {
     assertMilestoneTransition(current, toStatus);
-    updated = await updateMilestoneStatus(appId, milestoneId, toStatus, tx);
+    updated = await updateMilestoneStatus(tenantContext(appId), milestoneId, toStatus, tx);
     current = toStatus;
   }
 
@@ -124,12 +125,12 @@ export async function createProofForApp(req: Request, appId: string, input: Crea
     statusCode: 201,
     responseBody: (result) => ({ data: result, requestId: req.requestId }),
     run: async (tx) => {
-    const agreement = await findAgreementForApp(appId, input.agreementId, tx);
+    const agreement = await findAgreementForApp(tenantContext(appId), input.agreementId, tx);
     if (!agreement) {
       throw notFound('Agreement not found.', 'agreement_not_found');
     }
 
-    const milestone = await findMilestoneForApp(appId, input.milestoneId, tx);
+    const milestone = await findMilestoneForApp(tenantContext(appId), input.milestoneId, tx);
     if (!milestone || milestone.agreementId !== agreement.id) {
       throw notFound('Milestone not found for agreement.', 'milestone_not_found');
     }
@@ -138,16 +139,14 @@ export async function createProofForApp(req: Request, appId: string, input: Crea
     const milestoneStatus = assertInfrastructureMilestoneStatus(milestone.status);
     const agreementPath = agreementPathForProofSubmission(agreementStatus);
     const milestonePath = milestonePathForProofSubmission(milestoneStatus);
-    const created = await proofRepository.createProof(appId, input, tx);
+    const created = await proofRepository.createProof(tenantContext(appId), input, tx);
 
     await advanceAgreement(appId, agreement.id, agreementStatus, agreementPath, tx);
     await advanceMilestone(appId, milestone.id, milestoneStatus, milestonePath, tx);
 
     const serialized = serializeProof(created);
 
-    await createEvent({
-      appId,
-      type: PROOF_EVENTS.submitted,
+    await createEvent(tenantContext(appId), {type: PROOF_EVENTS.submitted,
       agreementId: agreement.id,
       milestoneId: milestone.id,
       proofSubmissionId: created.id,
@@ -156,9 +155,7 @@ export async function createProofForApp(req: Request, appId: string, input: Crea
       },
     }, tx);
 
-    await createEvent({
-      appId,
-      type: MILESTONE_EVENTS.proofSubmitted,
+    await createEvent(tenantContext(appId), {type: MILESTONE_EVENTS.proofSubmitted,
       agreementId: agreement.id,
       milestoneId: milestone.id,
       proofSubmissionId: created.id,
@@ -182,7 +179,7 @@ export async function createProofForApp(req: Request, appId: string, input: Crea
 }
 
 export async function listProofsForApp(appId: string, query: ProofListQuery) {
-  const proofs = await proofRepository.listProofsForApp(appId, query);
+  const proofs = await proofRepository.listProofsForApp(tenantContext(appId), query);
   const hasMore = proofs.length > query.limit;
   const data = proofs.slice(0, query.limit);
 
@@ -196,7 +193,7 @@ export async function listProofsForApp(appId: string, query: ProofListQuery) {
 }
 
 export async function getProofForApp(appId: string, proofId: string) {
-  const proof = await proofRepository.findProofForApp(appId, proofId);
+  const proof = await proofRepository.findProofForApp(tenantContext(appId), proofId);
   if (!proof) {
     throw notFound('Proof submission not found.', 'proof_not_found');
   }
@@ -206,7 +203,7 @@ export async function getProofForApp(appId: string, proofId: string) {
 
 export async function reviewProofForApp(req: Request, appId: string, proofId: string, input: ReviewProofInput) {
   return prisma.$transaction(async (tx) => {
-    const proof = await proofRepository.findProofForApp(appId, proofId, tx);
+    const proof = await proofRepository.findProofForApp(tenantContext(appId), proofId, tx);
     if (!proof) {
       throw notFound('Proof submission not found.', 'proof_not_found');
     }
@@ -215,12 +212,12 @@ export async function reviewProofForApp(req: Request, appId: string, proofId: st
       throw invalidRequest('Proof submission has already been reviewed.', 'proof_already_reviewed');
     }
 
-    const agreement = await findAgreementForApp(appId, proof.agreementId, tx);
+    const agreement = await findAgreementForApp(tenantContext(appId), proof.agreementId, tx);
     if (!agreement) {
       throw notFound('Agreement not found.', 'agreement_not_found');
     }
 
-    const milestone = await findMilestoneForApp(appId, proof.milestoneId, tx);
+    const milestone = await findMilestoneForApp(tenantContext(appId), proof.milestoneId, tx);
     if (!milestone || milestone.agreementId !== agreement.id) {
       throw notFound('Milestone not found for proof.', 'milestone_not_found');
     }
@@ -231,14 +228,12 @@ export async function reviewProofForApp(req: Request, appId: string, proofId: st
     const milestonePath = milestonePathForReviewDecision(milestoneStatus, input.decision);
 
     if (agreementPath[0] === 'under_review' || milestonePath[0] === 'under_review') {
-      await proofRepository.updateProofStatus(appId, proof.id, {
+      await proofRepository.updateProofStatus(tenantContext(appId), proof.id, {
         status: 'under_review',
         reviewStatus: 'READY_FOR_HUMAN_REVIEW',
       }, tx);
 
-      await createEvent({
-        appId,
-        type: PROOF_EVENTS.underReview,
+      await createEvent(tenantContext(appId), {type: PROOF_EVENTS.underReview,
         agreementId: proof.agreementId,
         milestoneId: proof.milestoneId,
         proofSubmissionId: proof.id,
@@ -249,11 +244,11 @@ export async function reviewProofForApp(req: Request, appId: string, proofId: st
     await advanceAgreement(appId, agreement.id, agreementStatus, agreementPath, tx);
     await advanceMilestone(appId, milestone.id, milestoneStatus, milestonePath, tx);
 
-    const reviewedProof = await proofRepository.updateProofStatus(appId, proof.id, {
+    const reviewedProof = await proofRepository.updateProofStatus(tenantContext(appId), proof.id, {
       status: proofStatusForReviewDecision(input.decision),
       reviewStatus: reviewStatusForDecision(input.decision),
     }, tx);
-    const review = await reviewRepository.createReview(appId, {
+    const review = await reviewRepository.createReview(tenantContext(appId), {
       ...input,
       agreementId: proof.agreementId,
       milestoneId: proof.milestoneId,
@@ -265,9 +260,7 @@ export async function reviewProofForApp(req: Request, appId: string, proofId: st
     const eventType = eventTypeForReviewDecision(input.decision);
 
     if (eventType) {
-      await createEvent({
-        appId,
-        type: eventType,
+      await createEvent(tenantContext(appId), {type: eventType,
         agreementId: proof.agreementId,
         milestoneId: proof.milestoneId,
         proofSubmissionId: proof.id,
@@ -279,9 +272,7 @@ export async function reviewProofForApp(req: Request, appId: string, proofId: st
     }
 
     if (input.decision === 'approved') {
-      await createEvent({
-        appId,
-        type: MILESTONE_EVENTS.approved,
+      await createEvent(tenantContext(appId), {type: MILESTONE_EVENTS.approved,
         agreementId: proof.agreementId,
         milestoneId: proof.milestoneId,
         proofSubmissionId: proof.id,

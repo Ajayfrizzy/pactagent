@@ -14,3 +14,7 @@ test('convertUsdToCkb converts valid USD values using the live quote', () => {
   assert.equal(convertUsdToCkb(0, 0.00151515), null);
   assert.equal(convertUsdToCkb(100, 0), null);
 });
+
+test('convertUsdToCkb uses decimal arithmetic for fractional values', () => {
+  assert.equal(convertUsdToCkb('0.1', '0.03')?.toFixed(18), '3.333333333333333333');
+});

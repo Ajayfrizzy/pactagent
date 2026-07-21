@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "exercises": [
+    {
+      "id": "migration",
+      "owner": "release-engineer",
+      "command": "npm run db:migrate:status --workspace @pact-agent/server",
+      "expectedEvidence": "No failed or unapplied required migration and recorded execution duration.",
+      "abortCondition": "Migration status reports failure, unexpected drift, or target identity mismatch."
+    },
+    {
+      "id": "restore",
+      "owner": "database-operator",
+      "command": "bash scripts/database-restore-verify.sh",
+      "expectedEvidence": "Schema, representative row counts, tenant integrity, migration status, and audit-chain checks pass.",
+      "abortCondition": "Target name is not isolated or any integrity check fails."
+    },
+    {
+      "id": "rolling-restart",
+      "owner": "release-engineer",
+      "command": "kubectl -n pactagent rollout restart deployment/pactagent-api deployment/pactagent-worker-settlement deployment/pactagent-worker-webhook deployment/pactagent-worker-ai",
+      "expectedEvidence": "All Deployments become ready and in-flight jobs complete or recover without duplicate settlement.",
+      "abortCondition": "Readiness fails, queue age grows beyond five minutes, or settlement reconciliation fails."
+    },
+    {
+      "id": "dead-letter-replay",
+      "owner": "incident-commander",
+      "command": "node scripts/deployment-smoke.mjs",
+      "expectedEvidence": "Root cause is documented, one audited canary replay succeeds, and queue/dead-letter metrics recover.",
+      "abortCondition": "Original external side effect is uncertain or canary creates a duplicate."
+    },
+    {
+      "id": "incorrect-release",
+      "owner": "incident-commander",
+      "command": "node scripts/ckb-testnet-smoke.mjs",
+      "expectedEvidence": "Settlement workers are paused, chain state is independently reconciled, and affected transactions are recorded.",
+      "abortCondition": "Chain state cannot be independently established or signer access is not contained."
+    }
+  ]
+}

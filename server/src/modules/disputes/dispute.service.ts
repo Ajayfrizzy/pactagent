@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import type { Request } from 'express';
 import { prisma } from '../../db';
+import { tenantContext } from '../../common/tenancy/tenant-context';
 import { runIdempotentTransaction } from '../../common/idempotency/idempotency.service';
 import { invalidRequest, notFound } from '../../common/errors/app-error';
 import { createInfrastructureAuditLog } from '../audit-logs/audit-log.repository';
@@ -62,7 +63,7 @@ async function advanceAgreement(
 
   for (const toStatus of path) {
     assertAgreementTransition(current, toStatus);
-    await updateAgreementStatus(appId, agreementId, toStatus, tx);
+    await updateAgreementStatus(tenantContext(appId), agreementId, toStatus, tx);
     current = toStatus;
   }
 }
@@ -78,7 +79,7 @@ async function advanceMilestone(
 
   for (const toStatus of path) {
     assertMilestoneTransition(current, toStatus);
-    await updateMilestoneStatus(appId, milestoneId, toStatus, tx);
+    await updateMilestoneStatus(tenantContext(appId), milestoneId, toStatus, tx);
     current = toStatus;
   }
 }
@@ -109,12 +110,12 @@ function auditDispute(tx: Prisma.TransactionClient, req: Request, params: {
 
 export async function createDisputeForApp(req: Request, appId: string, input: CreateDisputeInput) {
   return prisma.$transaction(async (tx) => {
-    const agreement = await findAgreementForApp(appId, input.agreementId, tx);
+    const agreement = await findAgreementForApp(tenantContext(appId), input.agreementId, tx);
     if (!agreement) {
       throw notFound('Agreement not found.', 'agreement_not_found');
     }
 
-    const milestone = await findMilestoneForApp(appId, input.milestoneId, tx);
+    const milestone = await findMilestoneForApp(tenantContext(appId), input.milestoneId, tx);
     if (!milestone || milestone.agreementId !== agreement.id) {
       throw notFound('Milestone not found for agreement.', 'milestone_not_found');
     }
@@ -129,9 +130,7 @@ export async function createDisputeForApp(req: Request, appId: string, input: Cr
     await advanceAgreement(appId, agreement.id, agreementStatus, agreementPath, tx);
     await advanceMilestone(appId, milestone.id, milestoneStatus, milestonePath, tx);
 
-    await createEvent({
-      appId,
-      type: DISPUTE_EVENTS.opened,
+    await createEvent(tenantContext(appId), {type: DISPUTE_EVENTS.opened,
       agreementId: agreement.id,
       milestoneId: milestone.id,
       disputeId: created.id,
@@ -189,12 +188,12 @@ export async function resolveDisputeForApp(req: Request, appId: string, disputeI
 
     assertDisputeResolvable(dispute.status);
 
-    const agreement = await findAgreementForApp(appId, dispute.agreementId, tx);
+    const agreement = await findAgreementForApp(tenantContext(appId), dispute.agreementId, tx);
     if (!agreement) {
       throw notFound('Agreement not found.', 'agreement_not_found');
     }
 
-    const milestone = await findMilestoneForApp(appId, dispute.milestoneId, tx);
+    const milestone = await findMilestoneForApp(tenantContext(appId), dispute.milestoneId, tx);
     if (!milestone || milestone.agreementId !== agreement.id) {
       throw notFound('Milestone not found for dispute.', 'milestone_not_found');
     }
@@ -210,9 +209,7 @@ export async function resolveDisputeForApp(req: Request, appId: string, disputeI
     await advanceAgreement(appId, agreement.id, agreementStatus, agreementPath, tx);
     await advanceMilestone(appId, milestone.id, milestoneStatus, milestonePath, tx);
 
-    await createEvent({
-      appId,
-      type: DISPUTE_EVENTS.resolved,
+    await createEvent(tenantContext(appId), {type: DISPUTE_EVENTS.resolved,
       agreementId: dispute.agreementId,
       milestoneId: dispute.milestoneId,
       disputeId: dispute.id,

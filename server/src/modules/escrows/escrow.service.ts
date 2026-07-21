@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import type { Request } from 'express';
 import { prisma } from '../../db';
+import { tenantContext } from '../../common/tenancy/tenant-context';
 import { conflict, invalidRequest, notFound } from '../../common/errors/app-error';
 import { parsePositiveIntegerAmount } from '../../common/amounts/integer-amount';
 import {
@@ -77,7 +78,7 @@ async function transitionMilestoneIfAllowed(params: {
   escrowId: string;
   tx: Prisma.TransactionClient;
 }) {
-  const milestone = await findMilestoneForApp(params.appId, params.milestoneId, params.tx);
+  const milestone = await findMilestoneForApp(tenantContext(params.appId), params.milestoneId, params.tx);
   if (!milestone || !isMilestoneStatus(milestone.status)) {
     return;
   }
@@ -90,12 +91,10 @@ async function transitionMilestoneIfAllowed(params: {
     return;
   }
 
-  await updateMilestoneStatus(params.appId, params.milestoneId, params.toStatus, params.tx);
+  await updateMilestoneStatus(tenantContext(params.appId), params.milestoneId, params.toStatus, params.tx);
 
   if (params.toStatus === 'released') {
-    await createEvent({
-      appId: params.appId,
-      type: MILESTONE_EVENTS.released,
+    await createEvent(tenantContext(params.appId), {type: MILESTONE_EVENTS.released,
       agreementId: params.agreementId,
       milestoneId: params.milestoneId,
       escrowId: params.escrowId,
@@ -113,7 +112,7 @@ async function transitionAgreementWhenAllEscrowsTerminal(params: {
   toStatus: Extract<InfrastructureAgreementStatus, 'released' | 'refunded'>;
   tx: Prisma.TransactionClient;
 }) {
-  const agreement = await findAgreementForApp(params.appId, params.agreementId, params.tx);
+  const agreement = await findAgreementForApp(tenantContext(params.appId), params.agreementId, params.tx);
   if (!agreement || !isAgreementStatus(agreement.status)) {
     return;
   }
@@ -122,7 +121,7 @@ async function transitionAgreementWhenAllEscrowsTerminal(params: {
     return;
   }
 
-  const escrows = await escrowRepository.listEscrowsForAgreement(params.appId, params.agreementId, params.tx);
+  const escrows = await escrowRepository.listEscrowsForAgreement(tenantContext(params.appId), params.agreementId, params.tx);
   if (escrows.length === 0 || escrows.some((escrow) => !['released', 'refunded'].includes(escrow.status))) {
     return;
   }
@@ -140,24 +139,24 @@ async function transitionAgreementWhenAllEscrowsTerminal(params: {
   }
 
   if (canTransitionAgreement(agreement.status, 'release_pending') && targetStatus === 'released') {
-    await updateAgreementStatus(params.appId, params.agreementId, 'release_pending', params.tx);
-    await updateAgreementStatus(params.appId, params.agreementId, 'released', params.tx);
+    await updateAgreementStatus(tenantContext(params.appId), params.agreementId, 'release_pending', params.tx);
+    await updateAgreementStatus(tenantContext(params.appId), params.agreementId, 'released', params.tx);
     return;
   }
 
   if (canTransitionAgreement(agreement.status, targetStatus)) {
-    await updateAgreementStatus(params.appId, params.agreementId, targetStatus, params.tx);
+    await updateAgreementStatus(tenantContext(params.appId), params.agreementId, targetStatus, params.tx);
   }
 }
 
 async function assertEscrowAgreementScope(appId: string, input: CreateEscrowInput, tx: Prisma.TransactionClient) {
-  const agreement = await findAgreementForApp(appId, input.agreementId, tx);
+  const agreement = await findAgreementForApp(tenantContext(appId), input.agreementId, tx);
   if (!agreement) {
     throw notFound('Agreement not found.', 'agreement_not_found');
   }
 
   if (input.milestoneId) {
-    const milestone = await findMilestoneForApp(appId, input.milestoneId, tx);
+    const milestone = await findMilestoneForApp(tenantContext(appId), input.milestoneId, tx);
     if (!milestone || milestone.agreementId !== agreement.id) {
       throw notFound('Milestone not found for agreement.', 'milestone_not_found');
     }
@@ -179,13 +178,13 @@ export async function createEscrowForApp(req: Request, appId: string, input: Cre
     run: async (tx) => {
     const agreement = await assertEscrowAgreementScope(appId, input, tx);
     const terminalEscrow = input.milestoneId
-      ? await escrowRepository.findTerminalEscrowForMilestone(appId, input.milestoneId, tx)
-      : await escrowRepository.findTerminalEscrowForAgreement(appId, input.agreementId, tx);
+      ? await escrowRepository.findTerminalEscrowForMilestone(tenantContext(appId), input.milestoneId, tx)
+      : await escrowRepository.findTerminalEscrowForAgreement(tenantContext(appId), input.agreementId, tx);
     if (terminalEscrow) {
       throw invalidRequest('Cannot create a new escrow after the escrow scope reached a terminal state.', 'escrow_terminal_state_exists');
     }
 
-    const created = await escrowRepository.createEscrow(appId, input, tx);
+    const created = await escrowRepository.createEscrow(tenantContext(appId), input, tx);
     const adapter = getEscrowAdapter(created.rail);
     const adapterResult = await adapter.createEscrowLock({
       escrowId: created.id,
@@ -199,16 +198,14 @@ export async function createEscrowForApp(req: Request, appId: string, input: Cre
     });
     assertEscrowTransition('not_created', adapterResult.status as EscrowStatus);
 
-    const updated = await escrowRepository.updateEscrow(appId, created.id, {
+    const updated = await escrowRepository.updateEscrow(tenantContext(appId), created.id, {
       status: adapterResult.status,
       lockAddress: adapterResult.lockAddress ?? null,
       lockTxHash: adapterResult.txHash ?? null,
     }, tx);
     const serialized = serializeEscrow(updated);
 
-    await createTransaction({
-      appId,
-      agreementId: updated.agreementId,
+    await createTransaction(tenantContext(appId), { agreementId: updated.agreementId,
       milestoneId: updated.milestoneId,
       escrowId: updated.id,
       type: 'lock',
@@ -221,9 +218,7 @@ export async function createEscrowForApp(req: Request, appId: string, input: Cre
       rawPayload: adapterResult.rawPayload,
     }, tx);
 
-    await createEvent({
-      appId,
-      type: ESCROW_EVENTS.created,
+    await createEvent(tenantContext(appId), {type: ESCROW_EVENTS.created,
       agreementId: updated.agreementId,
       milestoneId: updated.milestoneId,
       escrowId: updated.id,
@@ -244,7 +239,7 @@ export async function createEscrowForApp(req: Request, appId: string, input: Cre
 }
 
 export async function listEscrowsForApp(appId: string, query: EscrowListQuery) {
-  const escrows = await escrowRepository.listEscrowsForApp(appId, query);
+  const escrows = await escrowRepository.listEscrowsForApp(tenantContext(appId), query);
   const hasMore = escrows.length > query.limit;
   const data = escrows.slice(0, query.limit);
 
@@ -258,7 +253,7 @@ export async function listEscrowsForApp(appId: string, query: EscrowListQuery) {
 }
 
 export async function getEscrowForApp(appId: string, escrowId: string) {
-  const escrow = await escrowRepository.findEscrowForApp(appId, escrowId);
+  const escrow = await escrowRepository.findEscrowForApp(tenantContext(appId), escrowId);
   if (!escrow) {
     throw notFound('Escrow not found.', 'escrow_not_found');
   }
@@ -268,7 +263,7 @@ export async function getEscrowForApp(appId: string, escrowId: string) {
 
 export async function markEscrowFunded(req: Request, appId: string, escrowId: string, input: MarkFundedInput) {
   const escrow = await prisma.$transaction(async (tx) => {
-    const before = await escrowRepository.findEscrowForApp(appId, escrowId, tx);
+    const before = await escrowRepository.findEscrowForApp(tenantContext(appId), escrowId, tx);
     if (!before) {
       throw notFound('Escrow not found.', 'escrow_not_found');
     }
@@ -286,16 +281,14 @@ export async function markEscrowFunded(req: Request, appId: string, escrowId: st
 
     const adapter = getEscrowAdapter(before.rail);
     const adapterResult = await adapter.markFunded({ escrowId, txHash: input.txHash });
-    const updated = await escrowRepository.updateEscrow(appId, escrowId, {
+    const updated = await escrowRepository.updateEscrow(tenantContext(appId), escrowId, {
       status: 'funded',
       lockTxHash: adapterResult.txHash ?? before.lockTxHash,
     }, tx);
     const serializedBefore = serializeEscrow(before);
     const serializedAfter = serializeEscrow(updated);
 
-    await createTransaction({
-      appId,
-      agreementId: updated.agreementId,
+    await createTransaction(tenantContext(appId), { agreementId: updated.agreementId,
       milestoneId: updated.milestoneId,
       escrowId: updated.id,
       type: 'manual_adjustment',
@@ -308,27 +301,23 @@ export async function markEscrowFunded(req: Request, appId: string, escrowId: st
       rawPayload: adapterResult.rawPayload,
     }, tx);
 
-    await createEvent({
-      appId,
-      type: ESCROW_EVENTS.funded,
+    await createEvent(tenantContext(appId), {type: ESCROW_EVENTS.funded,
       agreementId: updated.agreementId,
       milestoneId: updated.milestoneId,
       escrowId: updated.id,
       payload: { escrow: serializedAfter },
     }, tx);
 
-    const agreement = await findAgreementForApp(appId, updated.agreementId, tx);
+    const agreement = await findAgreementForApp(tenantContext(appId), updated.agreementId, tx);
     if (agreement && isAgreementStatus(agreement.status) && agreement.status === 'funding_required') {
-      await updateAgreementStatus(appId, updated.agreementId, 'funded', tx);
+      await updateAgreementStatus(tenantContext(appId), updated.agreementId, 'funded', tx);
     }
 
     if (updated.milestoneId) {
-      const milestone = await findMilestoneForApp(appId, updated.milestoneId, tx);
+      const milestone = await findMilestoneForApp(tenantContext(appId), updated.milestoneId, tx);
       if (milestone && ['pending', 'funding_required'].includes(milestone.status)) {
-        await updateMilestoneStatus(appId, updated.milestoneId, 'funded', tx);
-        await createEvent({
-          appId,
-          type: MILESTONE_EVENTS.funded,
+        await updateMilestoneStatus(tenantContext(appId), updated.milestoneId, 'funded', tx);
+        await createEvent(tenantContext(appId), {type: MILESTONE_EVENTS.funded,
           agreementId: updated.agreementId,
           milestoneId: updated.milestoneId,
           escrowId: updated.id,
@@ -475,14 +464,14 @@ async function reserveEscrowSettlement(params: {
   return prisma.$transaction(async (tx) => {
     await reserveIdempotentRequest(params.appId, params.idempotencyContext, tx);
 
-    const before = await escrowRepository.findEscrowForApp(params.appId, params.escrowId, tx);
+    const before = await escrowRepository.findEscrowForApp(tenantContext(params.appId), params.escrowId, tx);
     if (!before) {
       throw notFound('Escrow not found.', 'escrow_not_found');
     }
 
-    const agreement = await findAgreementForApp(params.appId, before.agreementId, tx);
+    const agreement = await findAgreementForApp(tenantContext(params.appId), before.agreementId, tx);
     if (params.operation === 'release') {
-      const milestone = before.milestoneId ? await findMilestoneForApp(params.appId, before.milestoneId, tx) : null;
+      const milestone = before.milestoneId ? await findMilestoneForApp(tenantContext(params.appId), before.milestoneId, tx) : null;
       await assertReleaseAllowed(params.appId, before, agreement, milestone, tx);
     } else {
       assertRefundAllowed(before, agreement);
@@ -491,21 +480,19 @@ async function reserveEscrowSettlement(params: {
     const pendingStatus = settlementPendingStatus(params.operation);
     assertEscrowTransition(assertStatus(before.status), pendingStatus);
 
-    const updateResult = await escrowRepository.transitionEscrowStatus(params.appId, params.escrowId, before.status, {
+    const updateResult = await escrowRepository.transitionEscrowStatus(tenantContext(params.appId), params.escrowId, before.status, {
       status: pendingStatus,
     }, tx);
     if (updateResult.count !== 1) {
       throw conflict(`Escrow ${params.operation} is already processing.`, `escrow_${params.operation}_in_progress`);
     }
 
-    const pending = await escrowRepository.findEscrowForApp(params.appId, params.escrowId, tx);
+    const pending = await escrowRepository.findEscrowForApp(tenantContext(params.appId), params.escrowId, tx);
     if (!pending) {
       throw notFound('Escrow not found after settlement reservation.', 'escrow_not_found');
     }
 
-    const transaction = await createTransaction({
-      appId: params.appId,
-      agreementId: pending.agreementId,
+    const transaction = await createTransaction(tenantContext(params.appId), {agreementId: pending.agreementId,
       milestoneId: pending.milestoneId,
       escrowId: pending.id,
       type: params.operation,
@@ -525,9 +512,7 @@ async function reserveEscrowSettlement(params: {
     const serializedBefore = serializeEscrow(before);
     const serializedPending = serializeEscrow(pending);
 
-    await createEvent({
-      appId: params.appId,
-      type: settlementPendingEvent(params.operation),
+    await createEvent(tenantContext(params.appId), {type: settlementPendingEvent(params.operation),
       agreementId: pending.agreementId,
       milestoneId: pending.milestoneId,
       escrowId: pending.id,
@@ -564,7 +549,7 @@ async function finalizeFailedEscrowSettlement(params: {
   error: unknown;
 }) {
   return prisma.$transaction(async (tx) => {
-    const current = await escrowRepository.findEscrowForApp(params.appId, params.reserved.pending.id, tx);
+    const current = await escrowRepository.findEscrowForApp(tenantContext(params.appId), params.reserved.pending.id, tx);
     if (!current) {
       throw notFound('Escrow not found.', 'escrow_not_found');
     }
@@ -575,8 +560,8 @@ async function finalizeFailedEscrowSettlement(params: {
     }
 
     assertEscrowTransition(assertStatus(current.status), 'failed');
-    await escrowRepository.transitionEscrowStatus(params.appId, current.id, pendingStatus, { status: 'failed' }, tx);
-    const failed = await escrowRepository.findEscrowForApp(params.appId, current.id, tx);
+    await escrowRepository.transitionEscrowStatus(tenantContext(params.appId), current.id, pendingStatus, { status: 'failed' }, tx);
+    const failed = await escrowRepository.findEscrowForApp(tenantContext(params.appId), current.id, tx);
     if (!failed) {
       throw notFound('Escrow not found after failure finalization.', 'escrow_not_found');
     }
@@ -585,7 +570,7 @@ async function finalizeFailedEscrowSettlement(params: {
     const serializedAfter = serializeEscrow(failed);
     const errorPayload = serializeErrorPayload(params.error);
 
-    await updateTransaction(params.appId, params.reserved.transactionId, {
+    await updateTransaction(tenantContext(params.appId), params.reserved.transactionId, {
       status: 'failed',
       rawPayloadJson: JSON.stringify({
         operation: params.operation,
@@ -593,9 +578,7 @@ async function finalizeFailedEscrowSettlement(params: {
       }),
     }, tx);
 
-    await createEvent({
-      appId: params.appId,
-      type: ESCROW_EVENTS.failed,
+    await createEvent(tenantContext(params.appId), {type: ESCROW_EVENTS.failed,
       agreementId: failed.agreementId,
       milestoneId: failed.milestoneId,
       escrowId: failed.id,
@@ -636,7 +619,7 @@ async function finalizeSuccessfulEscrowSettlement(params: {
   adapterResult: AdapterSettlementResult;
 }) {
   return prisma.$transaction(async (tx) => {
-    const current = await escrowRepository.findEscrowForApp(params.appId, params.reserved.pending.id, tx);
+    const current = await escrowRepository.findEscrowForApp(tenantContext(params.appId), params.reserved.pending.id, tx);
     if (!current) {
       throw notFound('Escrow not found.', 'escrow_not_found');
     }
@@ -659,10 +642,10 @@ async function finalizeSuccessfulEscrowSettlement(params: {
 
     const hashField = settlementHashField(params.operation);
     const updated = nextStatus === current.status
-      ? await escrowRepository.updateEscrow(params.appId, current.id, {
+      ? await escrowRepository.updateEscrow(tenantContext(params.appId), current.id, {
           [hashField]: params.adapterResult.txHash ?? null,
         }, tx)
-      : await escrowRepository.updateEscrow(params.appId, current.id, {
+      : await escrowRepository.updateEscrow(tenantContext(params.appId), current.id, {
           status: nextStatus,
           [hashField]: params.adapterResult.txHash ?? null,
         }, tx);
@@ -670,16 +653,14 @@ async function finalizeSuccessfulEscrowSettlement(params: {
     const serializedBefore = serializeEscrow(params.reserved.before);
     const serializedAfter = serializeEscrow(updated);
 
-    await updateTransaction(params.appId, params.reserved.transactionId, {
+    await updateTransaction(tenantContext(params.appId), params.reserved.transactionId, {
       status: immediateConfirmation ? 'confirmed' : 'pending',
       txHash: params.adapterResult.txHash ?? null,
       rawPayloadJson: JSON.stringify(params.adapterResult.rawPayload ?? null),
     }, tx);
 
     if (nextStatus === terminalStatus) {
-      await createEvent({
-        appId: params.appId,
-        type: settlementTerminalEvent(params.operation),
+      await createEvent(tenantContext(params.appId), {type: settlementTerminalEvent(params.operation),
         agreementId: updated.agreementId,
         milestoneId: updated.milestoneId,
         escrowId: updated.id,

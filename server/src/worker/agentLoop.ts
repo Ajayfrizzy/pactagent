@@ -25,6 +25,8 @@ import {
   failJob,
   parseJobPayload,
   releaseStaleLocks,
+  renewJobLease,
+  type WorkerQueue,
 } from '../services/jobQueueService';
 import {
   completeProofReview,
@@ -34,6 +36,10 @@ import {
 import { listSourceSyncCandidates, syncAgreementSource } from '../services/sourceSyncService';
 import { deliverWebhookDelivery as deliverInfrastructureWebhookDelivery } from '../modules/webhooks/webhook.service';
 import { cleanupExpiredIdempotencyKeys } from '../common/idempotency/idempotency.repository';
+import { log } from '../common/observability/logger';
+import { config } from '../config';
+import { runWithJobDeadline } from '../common/runtime/job-deadline';
+import { jobExecutionDuration, jobLeaseRenewals, jobRetries, settlementReconciliations } from '../common/observability/metrics';
 
 let lastIdempotencyCleanupAt = 0;
 let schedulerCursor: string | undefined;
@@ -141,43 +147,80 @@ function buildProcessKey(agreement: any, now: Date) {
   return parts.join(':');
 }
 
-export async function runAgentCycle(): Promise<boolean> {
+async function executeClaimedJob(job: Awaited<ReturnType<typeof claimAvailableJobs>>[number], activeWorkerId: string) {
+  const startedAt = process.hrtime.bigint();
+  let outcome = 'success';
+  const abortController = new AbortController();
+  const renewalTimer = setInterval(() => {
+    void renewJobLease(job.id, activeWorkerId, config.jobLeaseMs)
+      .then(() => jobLeaseRenewals.inc({ queue: job.queue, outcome: 'success' }))
+      .catch((error) => {
+        jobLeaseRenewals.inc({ queue: job.queue, outcome: 'failure' });
+        abortController.abort(error);
+      });
+  }, Math.max(1_000, Math.floor(config.jobLeaseMs / 3)));
+
+  try {
+    await runWithJobDeadline(config.jobTimeoutMs, async (deadlineSignal) => {
+      const abortFromDeadline = () => abortController.abort(deadlineSignal.reason);
+      deadlineSignal.addEventListener('abort', abortFromDeadline, { once: true });
+      try {
+        return await processJob(job, abortController.signal);
+      } finally {
+        deadlineSignal.removeEventListener('abort', abortFromDeadline);
+      }
+    });
+    await completeJob(job.id, activeWorkerId);
+  } catch (err) {
+    outcome = 'failure';
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    const failure = await failJob(job, activeWorkerId, msg);
+    jobRetries.inc({ queue: job.queue, outcome: failure.deadLettered ? 'dead_letter' : 'retry' });
+    if (job.kind === 'RECONCILE_SETTLEMENT') settlementReconciliations.inc({ outcome: 'failure' });
+    if (job.agreementId) {
+      const owner = await prisma.agreement.findUnique({ where: { id: job.agreementId }, select: { appId: true } });
+      log('error', 'worker.job.failed', {
+        appId: owner?.appId, agreementId: job.agreementId, jobId: job.id,
+        milestoneId: parseJobPayload(job.payloadJson).milestoneId,
+        deliveryId: parseJobPayload(job.payloadJson).deliveryId,
+        jobKind: job.kind, attempts: job.attempts, deadLettered: failure.deadLettered, error: err,
+      });
+      await createLog({
+        agreementId: job.agreementId, level: 'ERROR', eventType: 'ERROR',
+        message: `Agent job ${job.kind} failed: ${msg}`,
+        metadata: { appId: owner?.appId, jobId: job.id, attempts: job.attempts, deadLettered: failure.deadLettered },
+      });
+    }
+  } finally {
+    clearInterval(renewalTimer);
+    if (job.kind === 'RECONCILE_SETTLEMENT' && outcome === 'success') settlementReconciliations.inc({ outcome: 'success' });
+    jobExecutionDuration.observe({ queue: job.queue, outcome }, Number(process.hrtime.bigint() - startedAt) / 1e9);
+  }
+}
+
+export async function runAgentCycle(options: {
+  workerId?: string;
+  queues?: WorkerQueue[];
+  concurrency?: number;
+} = {}): Promise<boolean> {
   if (cycleInProgress) {
     return true;
   }
 
   cycleInProgress = true;
+  const activeWorkerId = options.workerId ?? workerId;
+  const queues = options.queues ?? config.workerQueues as WorkerQueue[];
+  const concurrency = options.concurrency ?? config.workerConcurrency;
 
   try {
-    if (Date.now() - lastIdempotencyCleanupAt >= 10 * 60 * 1000) {
+    if (queues.includes('settlement') && Date.now() - lastIdempotencyCleanupAt >= 10 * 60 * 1000) {
       await cleanupExpiredIdempotencyKeys();
       lastIdempotencyCleanupAt = Date.now();
     }
-    await releaseStaleLocks();
-    await scheduleSystemJobs();
-    const claimedJobs = await claimAvailableJobs(workerId, 12);
-
-    for (const job of claimedJobs) {
-      try {
-        await processJob(job);
-        await completeJob(job.id);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Unknown error';
-        await failJob(job, msg);
-        if (job.agreementId) {
-          await createLog({
-            agreementId: job.agreementId,
-            level: 'ERROR',
-            eventType: 'ERROR',
-            message: `Agent job ${job.kind} failed: ${msg}`,
-            metadata: {
-              jobId: job.id,
-              attempts: job.attempts,
-            },
-          });
-        }
-      }
-    }
+    await releaseStaleLocks(config.jobLeaseMs);
+    if (queues.includes('settlement')) await scheduleSystemJobs();
+    const claimedJobs = await claimAvailableJobs(activeWorkerId, queues, concurrency, config.jobLeaseMs);
+    await Promise.all(claimedJobs.map((job) => executeClaimedJob(job, activeWorkerId)));
   } catch (err) {
     console.error('[AGENT] Cycle error:', err);
     return false;
@@ -330,7 +373,8 @@ async function processJob(job: {
   agreementId: string | null;
   kind: string;
   payloadJson: string | null;
-}) {
+}, signal: AbortSignal) {
+  signal.throwIfAborted();
   const payload = parseJobPayload(job.payloadJson);
 
   switch (job.kind) {

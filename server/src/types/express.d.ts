@@ -1,8 +1,10 @@
 import 'express-serve-static-core';
+import type { TenantContext } from '../common/tenancy/tenant-context';
 
 declare module 'express-serve-static-core' {
   interface Request {
     requestId: string;
+    tenant?: TenantContext;
     auth?: {
       address: string;
       isAdmin?: boolean;

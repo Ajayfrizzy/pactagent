@@ -2,6 +2,7 @@ import { createHash } from 'crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../db';
 import type { CreateProofInput, ProofListQuery } from './proof.validation';
+import type { TenantContext } from '../../common/tenancy/tenant-context';
 
 export function createProofContentHash(input: Pick<CreateProofInput, 'type' | 'content' | 'links' | 'fileRefs'>) {
   return createHash('sha256')
@@ -14,10 +15,10 @@ export function createProofContentHash(input: Pick<CreateProofInput, 'type' | 'c
     .digest('hex');
 }
 
-export function createProof(appId: string, input: CreateProofInput, tx: Prisma.TransactionClient) {
+export function createProof(tenant: TenantContext, input: CreateProofInput, tx: Prisma.TransactionClient) {
   return tx.proof.create({
     data: {
-      appId,
+      appId: tenant.appId,
       agreementId: input.agreementId,
       milestoneId: input.milestoneId,
       submittedByExternalId: input.submittedByExternalId,
@@ -32,10 +33,10 @@ export function createProof(appId: string, input: CreateProofInput, tx: Prisma.T
   });
 }
 
-export function listProofsForApp(appId: string, params: ProofListQuery) {
+export function listProofsForApp(tenant: TenantContext, params: ProofListQuery) {
   return prisma.proof.findMany({
     where: {
-      appId,
+      appId: tenant.appId,
       ...(params.agreementId ? { agreementId: params.agreementId } : {}),
       ...(params.milestoneId ? { milestoneId: params.milestoneId } : {}),
       ...(params.status ? { status: params.status } : {}),
@@ -46,17 +47,17 @@ export function listProofsForApp(appId: string, params: ProofListQuery) {
   });
 }
 
-export function findProofForApp(appId: string, proofId: string, tx?: Prisma.TransactionClient) {
+export function findProofForApp(tenant: TenantContext, proofId: string, tx?: Prisma.TransactionClient) {
   return (tx ?? prisma).proof.findFirst({
     where: {
       id: proofId,
-      appId,
+      appId: tenant.appId,
     },
   });
 }
 
 export function updateProofStatus(
-  appId: string,
+  tenant: TenantContext,
   proofId: string,
   data: {
     status: string;
@@ -67,7 +68,7 @@ export function updateProofStatus(
   return tx.proof.update({
     where: {
       id: proofId,
-      appId,
+      appId: tenant.appId,
     },
     data,
   });

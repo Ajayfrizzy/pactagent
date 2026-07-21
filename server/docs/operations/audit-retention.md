@@ -14,4 +14,16 @@ Default operational retention:
 | Completed/dead-letter jobs | 30 days | Delete |
 | Audit records | 365 days hot | Copy to archive; retain according to legal policy |
 
-Run `npm run retention:run` from the worker image under a scheduled job. Back up the database before changing retention values.
+Preview all eligible rows without mutation:
+
+```bash
+npm run retention:run --workspace @pact-agent/server -- --dry-run --batch-size=500 --max-batches=10
+```
+
+Run bounded live batches:
+
+```bash
+npm run retention:run --workspace @pact-agent/server -- --batch-size=500 --max-batches=10
+```
+
+The JSON report records eligible and affected rows, batches, and whether work remains for every record class. Exit code `2` means the configured bound was reached and the next scheduled run must resume; exit code `1` means execution failed. Prometheus exposes row and duration metrics. The data-platform owner reviews dry-run evidence and aborts if counts exceed the approved change window or audit export has not completed. Back up the database before changing retention values.

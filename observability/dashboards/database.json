@@ -1,0 +1,17 @@
+{
+  "title": "PactAgent Database",
+  "uid": "pactagent-database",
+  "schemaVersion": 39,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Pool connections",
+      "targets": [{ "expr": "pactagent_db_pool_connections" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Pool saturation",
+      "targets": [{ "expr": "pactagent_db_pool_saturation_ratio" }]
+    }
+  ]
+}

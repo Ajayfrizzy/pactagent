@@ -36,7 +36,6 @@ export function completeIdempotencyKey(data: {
   requestHash: string;
   responseStatus: number;
   responseBody: unknown;
-  responseBodyJson: string;
   responseBytes: number;
 }, tx: Prisma.TransactionClient) {
   return tx.idempotencyKey.update({
@@ -50,7 +49,7 @@ export function completeIdempotencyKey(data: {
       requestHash: data.requestHash,
       status: 'completed',
       responseStatus: data.responseStatus,
-      responseBodyJson: data.responseBodyJson,
+      responseBodyJson: data.responseBody as Prisma.InputJsonValue,
       responseBytes: data.responseBytes,
       expiresAt: new Date(Date.now() + config.idempotencyRetentionMs),
     },

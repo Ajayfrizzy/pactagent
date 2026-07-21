@@ -289,17 +289,17 @@ export async function syncAgreementSource(params: {
         const topic = await fetchDiscourseTopicJson(nextThreadUrl, config.forumPublishTimeoutMs);
         latestSummary = summarizeDiscourseTopicJson(nextThreadUrl, topic);
       } else {
-        const response = await fetch(nextThreadUrl, {
-          headers: {
-            'User-Agent': 'PactAgent SourceSync/1.0',
-            Accept: 'text/html,application/xhtml+xml',
+        const response = await executeProviderRequest({
+          provider: 'forum', operation: 'read-thread', timeoutMs: config.forumPublishTimeoutMs, maxAttempts: 3, concurrency: 5,
+          run: async ({ signal, requestId }) => {
+            const result = await fetch(nextThreadUrl, {
+              headers: { 'User-Agent': 'PactAgent SourceSync/1.0', Accept: 'text/html,application/xhtml+xml', 'x-request-id': requestId },
+              signal,
+            });
+            assertProviderResponse(result, 'forum', requestId);
+            return result;
           },
-          signal: AbortSignal.timeout(config.forumPublishTimeoutMs),
         });
-
-        if (!response.ok) {
-          throw new Error(`Source thread returned ${response.status}`);
-        }
 
         const html = await response.text();
         latestSummary = summarizeSourceThreadHtml(nextThreadUrl, html);

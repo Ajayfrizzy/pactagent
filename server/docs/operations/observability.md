@@ -34,6 +34,14 @@ Important series include:
 - `pactagent_jobs_queued`
 - `pactagent_jobs_dead_letter_total`
 - `pactagent_oldest_queued_job_age_seconds`
+- `pactagent_db_pool_saturation_ratio`
+- `pactagent_job_execution_duration_seconds`
+- `pactagent_job_lease_renewals_total`
+- `pactagent_job_retries_total`
+- `pactagent_settlement_reconciliations_total`
+- `pactagent_provider_request_duration_seconds`
+- `pactagent_websocket_connections`
+- `pactagent_websocket_pressure_total`
 
 Recommended initial alerts:
 
@@ -48,6 +56,8 @@ Recommended initial alerts:
 
 API and worker runtime logs are JSON and include timestamp, level, event, service, and environment. Request completion logs include request ID, method, path, status, duration, app ID, and API-key ID. Sensitive fields and common credential values are redacted.
 
+Lifecycle and failure logs carry the applicable `appId`, `agreementId`, `milestoneId`, `transactionId`, `settlementId`, `deliveryId`, `jobId`, and `providerRequestId`. The logger adds active `traceId` and `spanId` automatically. IDs remain in logs and traces only and are intentionally excluded from metric labels.
+
 Set `BUILD_VERSION` and `BUILD_COMMIT` from the immutable release/image metadata. `/health` and `/ready` expose them for deployment correlation.
 
 ## Distributed tracing
@@ -61,6 +71,8 @@ OTEL_EXPORTER_OTLP_HEADERS_FILE=/run/secrets/otel-headers
 ```
 
 Use a distinct `OTEL_SERVICE_NAME` for the worker. Request logs include the active trace and span IDs. Place the collector on a private network and apply sampling/retention controls there.
+
+The version-controlled collector configuration is `observability/otel-collector.yaml`. It receives OTLP traces, scrapes API and worker metrics, applies memory limiting, resource enrichment and batching, exposes metrics for Prometheus, and forwards traces to the configured OTLP backend.
 
 Set `SERVICE_ROLE=api` on API replicas and `SERVICE_ROLE=worker` on workers. Production validation then enforces JWT and metrics credentials only for the API; the worker does not need access to those secrets.
 

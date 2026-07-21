@@ -3,7 +3,7 @@ import { sendList, sendSuccess } from '../../common/middleware/response';
 import * as disputeService from './dispute.service';
 
 function currentAppId(req: Request) {
-  return req.apiKey!.appId;
+  return req.tenant!.appId;
 }
 
 export async function createDispute(req: Request, res: Response) {

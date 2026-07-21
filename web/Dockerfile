@@ -8,8 +8,14 @@ COPY web ./
 RUN npm run build
 
 FROM node:24-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS runtime
+ARG BUILD_VERSION=development
+ARG BUILD_COMMIT=unknown
 WORKDIR /app
-ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0 BUILD_VERSION=$BUILD_VERSION BUILD_COMMIT=$BUILD_COMMIT
+LABEL org.opencontainers.image.title="PactAgent web" \
+      org.opencontainers.image.version=$BUILD_VERSION \
+      org.opencontainers.image.revision=$BUILD_COMMIT \
+      org.opencontainers.image.source="https://github.com/pactagent/pactagent"
 RUN groupadd --system --gid 1001 pactagent && useradd --system --uid 1001 --gid pactagent pactagent
 # The standalone runtime only needs Node; remove npm and its bundled dependencies.
 RUN corepack disable && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx

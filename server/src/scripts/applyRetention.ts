@@ -1,32 +1,25 @@
-import { config } from '../config';
 import { prisma } from '../db';
-import { cleanupExpiredIdempotencyKeys } from '../common/idempotency/idempotency.repository';
+import { runRetention } from '../services/retentionService';
 
-const cutoff = (days: number) => new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-
-async function main() {
-  const [webhooks, events, jobs, idempotency] = await prisma.$transaction([
-    prisma.webhookDelivery.deleteMany({
-      where: { status: { in: ['DELIVERED', 'FAILED'] }, updatedAt: { lt: cutoff(config.webhookRetentionDays) } },
-    }),
-    prisma.event.deleteMany({
-      where: { createdAt: { lt: cutoff(config.eventRetentionDays) }, webhookDeliveries: { none: {} } },
-    }),
-    prisma.agentJob.deleteMany({
-      where: { status: { in: ['COMPLETED', 'DEAD_LETTER'] }, updatedAt: { lt: cutoff(config.jobRetentionDays) } },
-    }),
-    cleanupExpiredIdempotencyKeys(),
-  ]);
-  const archived = await prisma.$queryRaw<Array<{ pactagent_archive_audit_logs: bigint }>>`
-    SELECT pactagent_archive_audit_logs(${cutoff(config.auditArchiveAfterDays)})
-  `;
-  console.log(JSON.stringify({
-    webhookDeliveriesDeleted: webhooks.count,
-    eventsDeleted: events.count,
-    jobsDeleted: jobs.count,
-    idempotencyKeysDeleted: idempotency.count,
-    auditLogsArchived: String(archived[0]?.pactagent_archive_audit_logs ?? 0),
-  }));
+function numberOption(name: string, fallback: number, min: number, max: number) {
+  const prefix = `--${name}=`;
+  const value = process.argv.find((argument) => argument.startsWith(prefix))?.slice(prefix.length);
+  const parsed = value ? Number.parseInt(value, 10) : fallback;
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) throw new Error(`${name} must be between ${min} and ${max}`);
+  return parsed;
 }
 
-main().finally(() => prisma.$disconnect());
+async function main() {
+  const dryRun = process.argv.includes('--dry-run');
+  const batchSize = numberOption('batch-size', 500, 1, 5000);
+  const maxBatches = numberOption('max-batches', 10, 1, 1000);
+  const startedAt = new Date();
+  const results = await runRetention({ dryRun, batchSize, maxBatches });
+  process.stdout.write(`${JSON.stringify({ dryRun, batchSize, maxBatches, startedAt, completedAt: new Date(), results })}\n`);
+  if (results.some((result) => result.truncated)) process.exitCode = 2;
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+}).finally(() => prisma.$disconnect());

@@ -1,0 +1,57 @@
+groups:
+  - name: pactagent-availability
+    rules:
+      - alert: PactAgentHighErrorRatio
+        expr: sum(rate(pactagent_http_requests_total{status=~"5.."}[10m])) / clamp_min(sum(rate(pactagent_http_requests_total[10m])), 0.001) > 0.02
+        for: 10m
+        labels: { severity: page }
+        annotations: { summary: "PactAgent HTTP 5xx ratio exceeds 2%" }
+      - alert: PactAgentHighLatency
+        expr: histogram_quantile(0.95, sum by (le) (rate(pactagent_http_request_duration_seconds_bucket[10m]))) > 1
+        for: 10m
+        labels: { severity: ticket }
+        annotations: { summary: "PactAgent p95 API latency exceeds one second" }
+      - alert: PactAgentWorkerStale
+        expr: pactagent_worker_heartbeat_age_seconds > 60
+        for: 2m
+        labels: { severity: page }
+        annotations: { summary: "No fresh settlement worker heartbeat" }
+  - name: pactagent-jobs-and-settlement
+    rules:
+      - alert: PactAgentQueueTooOld
+        expr: pactagent_oldest_queued_job_age_seconds > 300
+        for: 5m
+        labels: { severity: page }
+        annotations: { summary: "Oldest runnable job exceeds five minutes" }
+      - alert: PactAgentDeadLettersPresent
+        expr: pactagent_jobs_dead_letter_total > 0
+        for: 5m
+        labels: { severity: ticket }
+        annotations: { summary: "Durable jobs are in dead letter" }
+      - alert: PactAgentLeaseRenewalFailures
+        expr: increase(pactagent_job_lease_renewals_total{outcome="failure"}[10m]) > 0
+        for: 2m
+        labels: { severity: page }
+        annotations: { summary: "Worker job lease renewal failed" }
+      - alert: PactAgentSettlementReconciliationFailures
+        expr: increase(pactagent_settlement_reconciliations_total{outcome="failure"}[15m]) > 2
+        for: 5m
+        labels: { severity: page }
+        annotations: { summary: "Settlement reconciliation failures are elevated" }
+  - name: pactagent-dependencies
+    rules:
+      - alert: PactAgentDatabasePoolSaturated
+        expr: pactagent_db_pool_saturation_ratio > 0.9
+        for: 5m
+        labels: { severity: page }
+        annotations: { summary: "Database pool saturation exceeds 90%" }
+      - alert: PactAgentProviderCircuitOpen
+        expr: pactagent_provider_circuit_open == 1
+        for: 2m
+        labels: { severity: page }
+        annotations: { summary: "An external provider circuit is open" }
+      - alert: PactAgentWebSocketPressure
+        expr: increase(pactagent_websocket_pressure_total[10m]) > 20
+        for: 5m
+        labels: { severity: ticket }
+        annotations: { summary: "WebSocket clients are hitting resource pressure controls" }

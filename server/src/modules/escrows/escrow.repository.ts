@@ -1,11 +1,12 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../db';
 import type { CreateEscrowInput } from './escrow.validation';
+import type { TenantContext } from '../../common/tenancy/tenant-context';
 
-export function createEscrow(appId: string, input: CreateEscrowInput, tx: Prisma.TransactionClient) {
+export function createEscrow(tenant: TenantContext, input: CreateEscrowInput, tx: Prisma.TransactionClient) {
   return tx.escrow.create({
     data: {
-      appId,
+      appId: tenant.appId,
       agreementId: input.agreementId,
       milestoneId: input.milestoneId ?? null,
       amount: input.amount,
@@ -18,7 +19,7 @@ export function createEscrow(appId: string, input: CreateEscrowInput, tx: Prisma
 }
 
 export function updateEscrow(
-  appId: string,
+  tenant: TenantContext,
   escrowId: string,
   data: Prisma.EscrowUpdateInput,
   tx: Prisma.TransactionClient,
@@ -27,7 +28,7 @@ export function updateEscrow(
     where: {
       id_appId: {
         id: escrowId,
-        appId,
+        appId: tenant.appId,
       },
     },
     data,
@@ -35,7 +36,7 @@ export function updateEscrow(
 }
 
 export function transitionEscrowStatus(
-  appId: string,
+  tenant: TenantContext,
   escrowId: string,
   fromStatus: string,
   data: Prisma.EscrowUpdateInput,
@@ -44,23 +45,23 @@ export function transitionEscrowStatus(
   return tx.escrow.updateMany({
     where: {
       id: escrowId,
-      appId,
+      appId: tenant.appId,
       status: fromStatus,
     },
     data,
   });
 }
 
-export function findEscrowForApp(appId: string, escrowId: string, tx?: Prisma.TransactionClient) {
+export function findEscrowForApp(tenant: TenantContext, escrowId: string, tx?: Prisma.TransactionClient) {
   return (tx ?? prisma).escrow.findFirst({
     where: {
       id: escrowId,
-      appId,
+      appId: tenant.appId,
     },
   });
 }
 
-export function listEscrowsForApp(appId: string, params: {
+export function listEscrowsForApp(tenant: TenantContext, params: {
   agreementId?: string;
   status?: string;
   limit: number;
@@ -68,7 +69,7 @@ export function listEscrowsForApp(appId: string, params: {
 }) {
   return prisma.escrow.findMany({
     where: {
-      appId,
+      appId: tenant.appId,
       ...(params.agreementId ? { agreementId: params.agreementId } : {}),
       ...(params.status ? { status: params.status } : {}),
     },
@@ -78,10 +79,10 @@ export function listEscrowsForApp(appId: string, params: {
   });
 }
 
-export function findTerminalEscrowForAgreement(appId: string, agreementId: string, tx: Prisma.TransactionClient) {
+export function findTerminalEscrowForAgreement(tenant: TenantContext, agreementId: string, tx: Prisma.TransactionClient) {
   return tx.escrow.findFirst({
     where: {
-      appId,
+      appId: tenant.appId,
       agreementId,
       milestoneId: null,
       status: {
@@ -91,10 +92,10 @@ export function findTerminalEscrowForAgreement(appId: string, agreementId: strin
   });
 }
 
-export function findTerminalEscrowForMilestone(appId: string, milestoneId: string, tx: Prisma.TransactionClient) {
+export function findTerminalEscrowForMilestone(tenant: TenantContext, milestoneId: string, tx: Prisma.TransactionClient) {
   return tx.escrow.findFirst({
     where: {
-      appId,
+      appId: tenant.appId,
       milestoneId,
       status: {
         in: ['released', 'refunded'],
@@ -103,10 +104,10 @@ export function findTerminalEscrowForMilestone(appId: string, milestoneId: strin
   });
 }
 
-export function listEscrowsForAgreement(appId: string, agreementId: string, tx: Prisma.TransactionClient) {
+export function listEscrowsForAgreement(tenant: TenantContext, agreementId: string, tx: Prisma.TransactionClient) {
   return tx.escrow.findMany({
     where: {
-      appId,
+      appId: tenant.appId,
       agreementId,
     },
     select: {

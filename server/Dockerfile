@@ -19,8 +19,14 @@ COPY server/prisma.config.ts ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 FROM node:24-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS runtime
+ARG BUILD_VERSION=development
+ARG BUILD_COMMIT=unknown
 WORKDIR /app/server
-ENV NODE_ENV=production PORT=4000
+ENV NODE_ENV=production PORT=4000 BUILD_VERSION=$BUILD_VERSION BUILD_COMMIT=$BUILD_COMMIT
+LABEL org.opencontainers.image.title="PactAgent server" \
+      org.opencontainers.image.version=$BUILD_VERSION \
+      org.opencontainers.image.revision=$BUILD_COMMIT \
+      org.opencontainers.image.source="https://github.com/pactagent/pactagent"
 RUN groupadd --system --gid 1001 pactagent && useradd --system --uid 1001 --gid pactagent pactagent
 RUN corepack disable && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=production-deps --chown=pactagent:pactagent /app/server/node_modules ./node_modules
@@ -35,10 +41,15 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 CMD ["node", "dist/index.js"]
 
 FROM build AS migrate
+ARG BUILD_VERSION=development
+ARG BUILD_COMMIT=unknown
 ENV NODE_ENV=production
+LABEL org.opencontainers.image.title="PactAgent migrations" \
+      org.opencontainers.image.version=$BUILD_VERSION \
+      org.opencontainers.image.revision=$BUILD_COMMIT
 RUN groupadd --system --gid 1001 pactagent && useradd --system --uid 1001 --gid pactagent pactagent
 RUN corepack disable \
     && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
     && rm -rf node_modules/@cyclonedx node_modules/.bin/cyclonedx-npm package.json package-lock.json
 USER pactagent
-CMD ["node", "node_modules/prisma/build/index.js", "migrate", "deploy"]
+CMD ["sh", "-c", "node dist/scripts/auditTenantIntegrity.js && node node_modules/prisma/build/index.js migrate deploy"]

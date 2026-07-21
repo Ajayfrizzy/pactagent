@@ -24,4 +24,8 @@ Do not resolve the tenant-integrity migration manually. It must execute against 
 
 `prisma.config.ts` uses `DIRECT_URL` when present, so migrations can bypass a transaction-pooling connection while the application continues to use `DATABASE_URL`.
 
+Staging and production require both variables. `DATABASE_URL` must identify the transaction/session pool used by application replicas; `DIRECT_URL` must identify a different direct PostgreSQL endpoint used only by migration jobs. The API and worker validate this policy before startup.
+
+Before deploying tenant-integrity migrations, run `npm run audit:tenant-integrity`. It is read-only and reports up to 100 mismatches per relationship, including both app IDs. Do not rewrite ownership automatically: determine the authoritative tenant from audit and business records, repair the data under an approved change, rerun the audit, and only then deploy migrations.
+
 The composite tenant foreign keys are maintained as custom migration SQL because the schema also supports nullable legacy product records. Review future generated migrations and do not remove constraints ending in `_appId_fkey`.

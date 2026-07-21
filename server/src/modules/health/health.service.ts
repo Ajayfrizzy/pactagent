@@ -1,12 +1,14 @@
 import { dbPool, prisma } from '../../db';
 import { config } from '../../config';
 import { isShuttingDown } from '../../common/runtime/lifecycle';
-import { dbPoolConnections, deadLetterJobs, oldestQueuedJobAge, queuedJobs, workerCycles, workerHeartbeatAge } from '../../common/observability/metrics';
+import { dbPoolConnections, dbPoolSaturation, deadLetterJobs, oldestQueuedJobAge, queuedJobs, workerCycles, workerHeartbeatAge } from '../../common/observability/metrics';
+import { assertProviderResponse, executeProviderRequest } from '../../common/resilience/provider';
 
 function getDatabasePoolStatus() {
   dbPoolConnections.set({ state: 'total' }, dbPool.totalCount);
   dbPoolConnections.set({ state: 'idle' }, dbPool.idleCount);
   dbPoolConnections.set({ state: 'waiting' }, dbPool.waitingCount);
+  dbPoolSaturation.set(Math.min(1, (dbPool.totalCount - dbPool.idleCount + dbPool.waitingCount) / config.dbPoolMax));
   return { total: dbPool.totalCount, idle: dbPool.idleCount, waiting: dbPool.waitingCount, max: config.dbPoolMax };
 }
 
@@ -89,11 +91,16 @@ export async function getSettlementStatus(required = config.requireSettlementRea
   }
 
   try {
-    const response = await fetch(nodeUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: 1, jsonrpc: '2.0', method: 'get_tip_header', params: [] }),
-      signal: AbortSignal.timeout(3_000),
+    const response = await executeProviderRequest({
+      provider: 'ckb', operation: 'readiness', timeoutMs: 3_000, maxAttempts: 1, concurrency: 2,
+      run: async ({ signal, requestId }) => {
+        const result = await fetch(nodeUrl, {
+          method: 'POST', headers: { 'content-type': 'application/json', 'x-request-id': requestId },
+          body: JSON.stringify({ id: 1, jsonrpc: '2.0', method: 'get_tip_header', params: [] }), signal,
+        });
+        assertProviderResponse(result, 'ckb', requestId);
+        return result;
+      },
     });
     if (!response.ok) return { status: 'error' as const };
     const result = await response.json() as { result?: unknown; error?: unknown };

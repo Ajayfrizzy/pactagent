@@ -1,3 +1,5 @@
+import { assertProviderResponse, executeProviderRequest } from '../common/resilience/provider';
+
 function normalizeWhitespace(value: string) {
   return value.replace(/\s+/g, ' ').trim();
 }
@@ -104,17 +106,17 @@ export async function fetchDiscourseTopicJson(threadUrl: string, timeoutMs = 10_
     throw new Error('The source thread URL is not a supported Discourse topic URL.');
   }
 
-  const response = await fetch(`${target.apiBaseUrl}/t/${target.topicId}.json`, {
-    headers: {
-      'User-Agent': 'PactAgent SourceSync/1.0',
-      Accept: 'application/json',
+  const response = await executeProviderRequest({
+    provider: 'forum', operation: 'read-topic', timeoutMs, maxAttempts: 3, concurrency: 5,
+    run: async ({ signal, requestId }) => {
+      const result = await fetch(`${target.apiBaseUrl}/t/${target.topicId}.json`, {
+        headers: { 'User-Agent': 'PactAgent SourceSync/1.0', Accept: 'application/json', 'x-request-id': requestId },
+        signal,
+      });
+      assertProviderResponse(result, 'forum', requestId);
+      return result;
     },
-    signal: AbortSignal.timeout(timeoutMs),
   });
-
-  if (!response.ok) {
-    throw new Error(`Source thread returned ${response.status}`);
-  }
 
   return response.json() as Promise<DiscourseTopicPayload>;
 }

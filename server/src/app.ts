@@ -74,7 +74,7 @@ export function createApp() {
       },
     })
   );
-  app.use(express.json({ limit: '5mb' }));
+  app.use(express.json({ limit: '2mb' }));
   app.use((_req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     next();
@@ -88,6 +88,10 @@ export function createApp() {
   app.use('/v1/proofs', payloadLimit(1024 * 1024));
   app.use('/v1/webhook-endpoints', payloadLimit(64 * 1024));
   app.use('/v1/disputes', payloadLimit(256 * 1024));
+  app.use('/v1/escrows', payloadLimit(64 * 1024));
+  app.use('/v1/reviews', payloadLimit(128 * 1024));
+  app.use('/v1/admin', payloadLimit(64 * 1024));
+  app.use('/v1', payloadLimit(256 * 1024));
 
   app.use('/v1/apps', appRoutes);
   app.use('/v1/api-keys', apiKeyRoutes);
@@ -129,6 +133,13 @@ export function createApp() {
   });
 
   if (config.enableLegacyProductApi) {
+    app.use('/api/auth', payloadLimit(16 * 1024));
+    app.use('/api/profiles', payloadLimit(128 * 1024));
+    app.use('/api/invites', payloadLimit(64 * 1024));
+    app.use('/api/integrations', payloadLimit(64 * 1024));
+    app.use('/api/webhooks', payloadLimit(64 * 1024));
+    app.use('/api/agreements', payloadLimit(1024 * 1024));
+    app.use('/api', payloadLimit(1024 * 1024));
     app.use('/api/auth', authRoutes);
     app.use('/api/me', meRoutes);
     app.use('/api/profiles', profileRoutes);

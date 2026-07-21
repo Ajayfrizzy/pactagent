@@ -1,6 +1,7 @@
 import type { Request } from 'express';
 import { createInfrastructureAuditLog, listAuditLogsForApp } from './audit-log.repository';
 import { serializeAuditLog } from './audit-log.model';
+import { tenantContext } from '../../common/tenancy/tenant-context';
 
 export function createAuditLogForRequest(req: Request, params: {
   appId?: string | null;
@@ -26,7 +27,7 @@ export function createAuditLogForRequest(req: Request, params: {
 }
 
 export async function listAppAuditLogs(appId: string, params: { limit: number; cursor?: string }) {
-  const rows = await listAuditLogsForApp(appId, params);
+  const rows = await listAuditLogsForApp(tenantContext(appId), params);
   const hasMore = rows.length > params.limit;
   const data = rows.slice(0, params.limit);
 

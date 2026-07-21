@@ -3,7 +3,7 @@ import { sendList, sendSuccess } from '../../common/middleware/response';
 import * as escrowService from './escrow.service';
 
 function currentAppId(req: Request) {
-  return req.apiKey!.appId;
+  return req.tenant!.appId;
 }
 
 export async function createEscrow(req: Request, res: Response) {

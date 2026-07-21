@@ -1,0 +1,317 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pactagent-api
+  namespace: pactagent
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pactagent-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pactagent-api
+    spec:
+      terminationGracePeriodSeconds: 45
+      automountServiceAccountToken: false
+      securityContext: &podSecurity
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: IMAGE_SERVER
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 4000
+          envFrom: &serverEnvironment
+            - configMapRef:
+                name: pactagent-config
+            - secretRef:
+                name: pactagent-secrets
+          env:
+            - name: SERVICE_ROLE
+              value: api
+            - name: OTEL_SERVICE_NAME
+              value: pactagent-api
+          readinessProbe:
+            httpGet: { path: /ready, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 5
+            failureThreshold: 24
+          securityContext: &containerSecurity
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          resources:
+            requests: { cpu: 200m, memory: 256Mi }
+            limits: { cpu: "1", memory: 1Gi }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pactagent-worker-settlement
+  namespace: pactagent
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy: { type: RollingUpdate, rollingUpdate: { maxUnavailable: 0, maxSurge: 1 } }
+  selector:
+    matchLabels: { app.kubernetes.io/name: pactagent-worker-settlement }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: pactagent-worker-settlement }
+    spec:
+      terminationGracePeriodSeconds: 45
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: worker
+          image: IMAGE_SERVER
+          imagePullPolicy: IfNotPresent
+          command: ["node", "dist/worker/index.js"]
+          ports: [{ name: health, containerPort: 4001 }]
+          envFrom:
+            - configMapRef: { name: pactagent-config }
+            - secretRef: { name: pactagent-secrets }
+          env:
+            - { name: SERVICE_ROLE, value: worker }
+            - { name: WORKER_QUEUES, value: settlement }
+            - { name: OTEL_SERVICE_NAME, value: pactagent-worker-settlement }
+            - name: WORKER_ID
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+          readinessProbe: { httpGet: { path: /ready, port: health }, periodSeconds: 10, timeoutSeconds: 5, failureThreshold: 6 }
+          livenessProbe: { httpGet: { path: /health, port: health }, periodSeconds: 20, timeoutSeconds: 5, failureThreshold: 3 }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+            readOnlyRootFilesystem: true
+          resources:
+            requests: { cpu: 200m, memory: 256Mi }
+            limits: { cpu: "1", memory: 1Gi }
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes: [{ name: tmp, emptyDir: {} }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pactagent-worker-webhook
+  namespace: pactagent
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy: { type: RollingUpdate, rollingUpdate: { maxUnavailable: 0, maxSurge: 1 } }
+  selector:
+    matchLabels: { app.kubernetes.io/name: pactagent-worker-webhook }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: pactagent-worker-webhook }
+    spec:
+      terminationGracePeriodSeconds: 45
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: worker
+          image: IMAGE_SERVER
+          imagePullPolicy: IfNotPresent
+          command: ["node", "dist/worker/index.js"]
+          ports: [{ name: health, containerPort: 4001 }]
+          envFrom:
+            - configMapRef: { name: pactagent-config }
+            - secretRef: { name: pactagent-secrets }
+          env:
+            - { name: SERVICE_ROLE, value: worker }
+            - { name: WORKER_QUEUES, value: webhook }
+            - { name: OTEL_SERVICE_NAME, value: pactagent-worker-webhook }
+            - name: WORKER_ID
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+          readinessProbe: { httpGet: { path: /ready, port: health }, periodSeconds: 10, timeoutSeconds: 5, failureThreshold: 6 }
+          livenessProbe: { httpGet: { path: /health, port: health }, periodSeconds: 20, timeoutSeconds: 5, failureThreshold: 3 }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+            readOnlyRootFilesystem: true
+          resources:
+            requests: { cpu: 100m, memory: 192Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes: [{ name: tmp, emptyDir: {} }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pactagent-worker-ai
+  namespace: pactagent
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  strategy: { type: RollingUpdate, rollingUpdate: { maxUnavailable: 0, maxSurge: 1 } }
+  selector:
+    matchLabels: { app.kubernetes.io/name: pactagent-worker-ai }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: pactagent-worker-ai }
+    spec:
+      terminationGracePeriodSeconds: 45
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: worker
+          image: IMAGE_SERVER
+          imagePullPolicy: IfNotPresent
+          command: ["node", "dist/worker/index.js"]
+          ports: [{ name: health, containerPort: 4001 }]
+          envFrom:
+            - configMapRef: { name: pactagent-config }
+            - secretRef: { name: pactagent-secrets }
+          env:
+            - { name: SERVICE_ROLE, value: worker }
+            - { name: WORKER_QUEUES, value: ai }
+            - { name: OTEL_SERVICE_NAME, value: pactagent-worker-ai }
+            - name: WORKER_ID
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+          readinessProbe: { httpGet: { path: /ready, port: health }, periodSeconds: 10, timeoutSeconds: 5, failureThreshold: 6 }
+          livenessProbe: { httpGet: { path: /health, port: health }, periodSeconds: 20, timeoutSeconds: 5, failureThreshold: 3 }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+            readOnlyRootFilesystem: true
+          resources:
+            requests: { cpu: 200m, memory: 256Mi }
+            limits: { cpu: "1", memory: 1Gi }
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes: [{ name: tmp, emptyDir: {} }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pactagent-web
+  namespace: pactagent
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy: { type: RollingUpdate, rollingUpdate: { maxUnavailable: 0, maxSurge: 1 } }
+  selector:
+    matchLabels: { app.kubernetes.io/name: pactagent-web }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: pactagent-web }
+    spec:
+      terminationGracePeriodSeconds: 30
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: web
+          image: IMAGE_WEB
+          imagePullPolicy: IfNotPresent
+          ports: [{ name: http, containerPort: 3000 }]
+          env:
+            - { name: API_PROXY_TARGET, value: "http://pactagent-api:4000" }
+          readinessProbe: { httpGet: { path: /, port: http }, periodSeconds: 10, timeoutSeconds: 5, failureThreshold: 6 }
+          livenessProbe: { httpGet: { path: /, port: http }, periodSeconds: 20, timeoutSeconds: 5, failureThreshold: 3 }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+            readOnlyRootFilesystem: true
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            - { name: next-cache, mountPath: /app/.next/cache }
+      volumes:
+        - { name: tmp, emptyDir: {} }
+        - { name: next-cache, emptyDir: {} }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pactagent-retention
+  namespace: pactagent
+spec:
+  schedule: "17 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 900
+      template:
+        metadata:
+          labels: { app.kubernetes.io/name: pactagent-retention }
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+            fsGroup: 1001
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: retention
+              image: IMAGE_SERVER
+              imagePullPolicy: IfNotPresent
+              command: ["node", "dist/scripts/applyRetention.js", "--batch-size=500", "--max-batches=10"]
+              envFrom:
+                - configMapRef: { name: pactagent-config }
+                - secretRef: { name: pactagent-secrets }
+              env:
+                - { name: SERVICE_ROLE, value: worker }
+                - { name: OTEL_SERVICE_NAME, value: pactagent-retention }
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: { drop: ["ALL"] }
+                readOnlyRootFilesystem: true
+              resources:
+                requests: { cpu: 100m, memory: 192Mi }
+                limits: { cpu: 500m, memory: 512Mi }
+              volumeMounts: [{ name: tmp, mountPath: /tmp }]
+          volumes: [{ name: tmp, emptyDir: {} }]

@@ -1,14 +1,18 @@
 import { redactSensitive } from '../security/redact';
+import { context, trace } from '@opentelemetry/api';
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export function log(level: LogLevel, event: string, fields: Record<string, unknown> = {}) {
+  const spanContext = trace.getSpan(context.active())?.spanContext();
   const entry = redactSensitive({
     timestamp: new Date().toISOString(),
     level,
     event,
     service: process.env.SERVICE_NAME || 'pactagent-server',
     environment: process.env.NODE_ENV || 'development',
+    traceId: spanContext?.traceId,
+    spanId: spanContext?.spanId,
     ...fields,
   });
   const line = JSON.stringify(entry);

@@ -7,6 +7,7 @@ import { serializeEvent } from '../events/event.model';
 import { serializeWebhookDelivery } from '../webhooks/webhook.model';
 import * as adminRepository from './admin.repository';
 import type { AdminListQuery } from './admin.validation';
+import { replayJob } from '../../services/jobQueueService';
 
 export function paginateAdminRows<T extends { id?: string }>(rows: T[], limit: number, serializer: (row: T) => unknown) {
   const hasMore = rows.length > limit;
@@ -66,4 +67,14 @@ export async function listWebhookDeliveries(query: AdminListQuery) {
 
 export async function listAuditLogs(query: AdminListQuery) {
   return paginateAdminRows(await adminRepository.listAuditLogs(query), query.limit, serializeAuditLog);
+}
+
+export async function listJobs(query: AdminListQuery) {
+  return paginateAdminRows(await adminRepository.listJobs(query), query.limit, (job) => job);
+}
+
+export async function replayDeadLetterJob(jobId: string) {
+  const job = await prisma.agentJob.findUnique({ where: { id: jobId } });
+  if (!job?.agreementId) throw new Error('Dead-letter job with agreement not found.');
+  return replayJob(jobId, job.agreementId);
 }

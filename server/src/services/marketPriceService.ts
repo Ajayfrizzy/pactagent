@@ -1,5 +1,6 @@
 import { config } from '../config';
 import { assertProviderResponse, executeProviderRequest } from '../common/resilience/provider';
+import { Prisma } from '@prisma/client';
 
 type CachedQuote = {
   expiresAt: number;
@@ -14,6 +15,7 @@ export type CkbPriceQuote = {
   inversePriceCkbPerUsd: number;
   lastUpdatedAt: string | null;
   fetchedAt: string;
+  source: 'coingecko';
 };
 
 let cachedQuote: CachedQuote | null = null;
@@ -38,6 +40,7 @@ function buildQuote(priceUsd: number, lastUpdatedAt: string | null): CkbPriceQuo
     inversePriceCkbPerUsd: 1 / priceUsd,
     lastUpdatedAt,
     fetchedAt: new Date().toISOString(),
+    source: 'coingecko',
   };
 }
 
@@ -64,12 +67,17 @@ export function parseUsdAmount(value: string | null | undefined) {
   return Number.isFinite(amount) ? amount : null;
 }
 
-export function convertUsdToCkb(usdAmount: number, priceUsd: number) {
-  if (!Number.isFinite(usdAmount) || usdAmount <= 0 || !Number.isFinite(priceUsd) || priceUsd <= 0) {
+export function convertUsdToCkb(usdAmount: Prisma.Decimal.Value, priceUsd: Prisma.Decimal.Value) {
+  let usd: Prisma.Decimal;
+  let price: Prisma.Decimal;
+  try {
+    usd = new Prisma.Decimal(usdAmount);
+    price = new Prisma.Decimal(priceUsd);
+  } catch {
     return null;
   }
-
-  return usdAmount / priceUsd;
+  if (usd.lte(0) || price.lte(0)) return null;
+  return usd.div(price);
 }
 
 export async function fetchCkbPriceQuote(forceFresh = false): Promise<CkbPriceQuote> {

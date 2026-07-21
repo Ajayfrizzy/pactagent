@@ -2,12 +2,13 @@ import os from 'os';
 import { prisma } from '../db';
 import { config } from '../config';
 
-export function registerWorker(workerId: string) {
+export function registerWorker(workerId: string, service = 'agent') {
   const now = new Date();
   return prisma.workerHeartbeat.upsert({
     where: { id: workerId },
     create: {
       id: workerId,
+      service,
       hostname: os.hostname(),
       processId: process.pid,
       version: config.buildVersion,
@@ -16,6 +17,7 @@ export function registerWorker(workerId: string) {
       lastHeartbeatAt: now,
     },
     update: {
+      service,
       hostname: os.hostname(),
       processId: process.pid,
       version: config.buildVersion,

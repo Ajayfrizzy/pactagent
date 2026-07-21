@@ -78,7 +78,7 @@ export async function getIdempotencyReplay<T>(req: Request, appId: string): Prom
     replay: {
       replayed: true,
       statusCode: existing.responseStatus,
-      body: JSON.parse(existing.responseBodyJson) as T,
+      body: existing.responseBodyJson as T,
     },
   };
 }
@@ -112,7 +112,6 @@ export function storeIdempotentResponse(params: {
     requestHash: params.context.requestHash,
     responseStatus: params.statusCode,
     responseBody: params.body,
-    responseBodyJson,
     responseBytes,
   }, tx);
 }

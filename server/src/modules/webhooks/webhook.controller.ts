@@ -7,7 +7,7 @@ function currentApp(req: Request) {
 }
 
 function currentAppId(req: Request) {
-  return req.apiKey!.appId;
+  return req.tenant!.appId;
 }
 
 export async function createWebhookEndpoint(req: Request, res: Response) {

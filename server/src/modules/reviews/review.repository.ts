@@ -1,15 +1,16 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../db';
 import type { ReviewProofInput } from '../proofs/proof.validation';
+import type { TenantContext } from '../../common/tenancy/tenant-context';
 
-export function createReview(appId: string, input: {
+export function createReview(tenant: TenantContext, input: {
   agreementId: string;
   milestoneId: string | null;
   proofSubmissionId: string;
 } & ReviewProofInput, tx: Prisma.TransactionClient) {
   return tx.review.create({
     data: {
-      appId,
+      appId: tenant.appId,
       agreementId: input.agreementId,
       milestoneId: input.milestoneId,
       proofSubmissionId: input.proofSubmissionId,
@@ -20,7 +21,7 @@ export function createReview(appId: string, input: {
   });
 }
 
-export function listReviewsForApp(appId: string, params: {
+export function listReviewsForApp(tenant: TenantContext, params: {
   agreementId?: string;
   milestoneId?: string;
   proofSubmissionId?: string;
@@ -30,7 +31,7 @@ export function listReviewsForApp(appId: string, params: {
 }) {
   return prisma.review.findMany({
     where: {
-      appId,
+      appId: tenant.appId,
       ...(params.agreementId ? { agreementId: params.agreementId } : {}),
       ...(params.milestoneId ? { milestoneId: params.milestoneId } : {}),
       ...(params.proofSubmissionId ? { proofSubmissionId: params.proofSubmissionId } : {}),

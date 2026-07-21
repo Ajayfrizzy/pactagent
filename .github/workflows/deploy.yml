@@ -1,44 +1,165 @@
-name: Deploy To VPS
+name: Build and deploy immutable release
 
 on:
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
   workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment environment
+        type: choice
+        options: [staging, production]
+        default: staging
+
+concurrency:
+  group: deploy-${{ inputs.environment || 'staging' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  SERVER_IMAGE: ghcr.io/${{ github.repository_owner }}/pactagent-server
+  MIGRATE_IMAGE: ghcr.io/${{ github.repository_owner }}/pactagent-migrate
+  WEB_IMAGE: ghcr.io/${{ github.repository_owner }}/pactagent-web
+  RELEASE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
 
 jobs:
-  deploy:
-    runs-on: ubuntu-latest
-
+  publish:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    outputs:
+      server: ${{ steps.refs.outputs.server }}
+      migrate: ${{ steps.refs.outputs.migrate }}
+      web: ${{ steps.refs.outputs.web }}
     steps:
-      - name: Deploy over SSH
-        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          passphrase: ${{ secrets.SSH_PASSPHRASE }}
-          port: ${{ secrets.SERVER_PORT || 22 }}
-          timeout: 30s
-          command_timeout: 20m
+          ref: ${{ env.RELEASE_SHA }}
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+      - uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: server
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: server/Dockerfile
+          target: runtime
+          push: true
+          tags: ${{ env.SERVER_IMAGE }}:sha-${{ env.RELEASE_SHA }}
+          build-args: |
+            BUILD_COMMIT=${{ env.RELEASE_SHA }}
+            BUILD_VERSION=${{ github.ref_name }}
+      - id: migrate
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: server/Dockerfile
+          target: migrate
+          push: true
+          tags: ${{ env.MIGRATE_IMAGE }}:sha-${{ env.RELEASE_SHA }}
+          build-args: |
+            BUILD_COMMIT=${{ env.RELEASE_SHA }}
+            BUILD_VERSION=${{ github.ref_name }}
+      - id: web
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: web/Dockerfile
+          target: runtime
+          push: true
+          tags: ${{ env.WEB_IMAGE }}:sha-${{ env.RELEASE_SHA }}
+          build-args: |
+            BUILD_COMMIT=${{ env.RELEASE_SHA }}
+            BUILD_VERSION=${{ github.ref_name }}
+      - id: refs
+        env:
+          SERVER_DIGEST: ${{ steps.server.outputs.digest }}
+          MIGRATE_DIGEST: ${{ steps.migrate.outputs.digest }}
+          WEB_DIGEST: ${{ steps.web.outputs.digest }}
+        run: |
+          echo "server=${SERVER_IMAGE}@${SERVER_DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "migrate=${MIGRATE_IMAGE}@${MIGRATE_DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "web=${WEB_IMAGE}@${WEB_DIGEST}" >> "$GITHUB_OUTPUT"
 
-          script: |
-            set -e
-
-            git config --global --add safe.directory /home/pactagent
-
-            cd /home/pactagent
-
-            git fetch origin
-            git reset --hard origin/main
-
-            cd server
-            npm ci
-            npx prisma generate
-            npx prisma migrate deploy
-            npm run build
-            pm2 restart pactagent-server || pm2 start dist/index.js --name pactagent-server
-
-            cd ../web
-            npm ci
-            npm run build
-            pm2 restart pactagent-web || pm2 start npm --name pactagent-web -- start
-
-            pm2 save
+  deploy:
+    needs: publish
+    runs-on: ubuntu-24.04
+    environment: ${{ inputs.environment || 'staging' }}
+    env:
+      NAMESPACE: pactagent
+      SERVER_REF: ${{ needs.publish.outputs.server }}
+      MIGRATE_REF: ${{ needs.publish.outputs.migrate }}
+      WEB_REF: ${{ needs.publish.outputs.web }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm run deploy:check
+      - name: Configure cluster access
+        env:
+          KUBECONFIG_B64: ${{ secrets.KUBECONFIG_B64 }}
+        run: |
+          mkdir -p "$HOME/.kube"
+          echo "$KUBECONFIG_B64" | base64 --decode > "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
+      - name: Apply configuration and services
+        run: kubectl apply -f deploy/kubernetes/platform.yaml -f deploy/kubernetes/services.yaml
+      - name: Run migrations once
+        run: |
+          kubectl -n "$NAMESPACE" delete job pactagent-migrate --ignore-not-found
+          sed "s|IMAGE_MIGRATE|${MIGRATE_REF}|g" deploy/kubernetes/migration-job.yaml | kubectl apply -f -
+          kubectl -n "$NAMESPACE" wait --for=condition=complete job/pactagent-migrate --timeout=10m
+      - name: Apply application workloads
+        run: |
+          sed -e "s|IMAGE_SERVER|${SERVER_REF}|g" -e "s|IMAGE_WEB|${WEB_REF}|g" deploy/kubernetes/workloads.yaml | kubectl apply -f -
+      - name: Health-gated rollout and smoke checks
+        id: promote
+        env:
+          SMOKE_API_URL: ${{ vars.SMOKE_API_URL }}
+          SMOKE_WEB_URL: ${{ vars.SMOKE_WEB_URL }}
+          SMOKE_METRICS_TOKEN: ${{ secrets.SMOKE_METRICS_TOKEN }}
+          EXPECTED_COMMIT: ${{ env.RELEASE_SHA }}
+        run: |
+          set -e
+          for deployment in pactagent-api pactagent-worker-settlement pactagent-worker-webhook pactagent-worker-ai pactagent-web; do
+            kubectl -n "$NAMESPACE" rollout status "deployment/$deployment" --timeout=8m
+          done
+          node scripts/deployment-smoke.mjs
+      - name: Validate staging performance thresholds
+        id: load
+        if: inputs.environment != 'production'
+        env:
+          BASE_URL: ${{ vars.SMOKE_API_URL }}
+          API_KEY: ${{ secrets.SMOKE_API_KEY }}
+        run: |
+          for profile in api queue webhooks; do
+            docker run --rm -i -e BASE_URL -e API_KEY grafana/k6:0.54.0 run - < "test/load/${profile}.js"
+          done
+      - name: Roll back application workloads on failed promotion
+        if: failure() && (steps.promote.outcome == 'failure' || steps.load.outcome == 'failure')
+        run: |
+          for deployment in pactagent-api pactagent-worker-settlement pactagent-worker-webhook pactagent-worker-ai pactagent-web; do
+            kubectl -n "$NAMESPACE" rollout undo "deployment/$deployment"
+            kubectl -n "$NAMESPACE" rollout status "deployment/$deployment" --timeout=8m || true
+          done
+      - name: Record immutable release
+        if: success()
+        run: |
+          kubectl -n "$NAMESPACE" annotate deployments --all --overwrite \
+            pactagent.dev/release-commit="$RELEASE_SHA" \
+            pactagent.dev/server-image="$SERVER_REF" \
+            pactagent.dev/web-image="$WEB_REF"

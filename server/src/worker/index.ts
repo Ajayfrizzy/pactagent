@@ -10,6 +10,7 @@ import { recordWorkerCycle, registerWorker, stopWorker, touchWorker } from '../s
 import os from 'os';
 import { shutdownTracing } from '../common/observability/tracing';
 import { createWorkerHealthServer } from './healthServer';
+import { assertRequiredMigrationsApplied } from '../common/migrations/migration-readiness';
 
 /**
  * Standalone agent worker process.
@@ -25,7 +26,11 @@ const healthServer = createWorkerHealthServer();
 async function executeCycle() {
   const startedAt = Date.now();
   try {
-    const succeeded = await runAgentCycle();
+    const succeeded = await runAgentCycle({
+      workerId,
+      queues: config.workerQueues as Array<'settlement' | 'webhook' | 'ai'>,
+      concurrency: config.workerConcurrency,
+    });
     await recordWorkerCycle(workerId, Date.now() - startedAt, succeeded ? undefined : 'Agent cycle failed.');
   } catch (error) {
     await recordWorkerCycle(workerId, Date.now() - startedAt, error);
@@ -49,8 +54,10 @@ async function main() {
   validateProductionConfig();
   requireDatabaseUrl();
   installConsoleBridge();
+  await assertRequiredMigrationsApplied();
 
-  await registerWorker(workerId);
+  const heartbeatService = config.workerQueues.includes('settlement') ? 'agent' : config.workerQueues.join('+');
+  await registerWorker(workerId, heartbeatService);
   healthServer.listen(config.workerHealthPort, '0.0.0.0');
   heartbeatTimer = setInterval(() => {
     void touchWorker(workerId).catch((error) => log('error', 'worker.heartbeat.failed', { workerId, error }));
@@ -59,6 +66,8 @@ async function main() {
     workerId,
     intervalMs: config.agentIntervalMs,
     healthPort: config.workerHealthPort,
+    queues: config.workerQueues,
+    concurrency: config.workerConcurrency,
     aiEnabled: config.aiEnabled,
   });
 

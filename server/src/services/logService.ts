@@ -3,6 +3,7 @@ import { broadcast } from '../ws';
 import { randomUUID as uuid } from 'crypto';
 import { normalizeWalletAddress } from './authService';
 import { enqueueWebhookEventsForLog } from './webhookService';
+import { log as runtimeLog } from '../common/observability/logger';
 
 /**
  * Agent Log Service
@@ -35,10 +36,19 @@ export async function createLog(params: {
     },
   });
 
-  console.log(`[AGENT][${params.level}] ${params.eventType}: ${params.message}`);
+  runtimeLog(params.level === 'ERROR' ? 'error' : params.level === 'WARN' ? 'warn' : 'info', 'agent.lifecycle', {
+    appId: params.metadata?.appId,
+    agreementId: params.agreementId,
+    milestoneId: params.metadata?.milestoneId,
+    transactionId: params.metadata?.transactionId,
+    settlementId: params.metadata?.settlementId,
+    deliveryId: params.metadata?.deliveryId,
+    eventType: params.eventType,
+    message: params.message,
+  });
 
   void enqueueWebhookEventsForLog(log).catch((error) => {
-    console.error('[WEBHOOK] Failed to enqueue events from log:', error);
+    runtimeLog('error', 'webhook.enqueue_from_log.failed', { agreementId: params.agreementId, eventType: params.eventType, error });
   });
 
   return log;

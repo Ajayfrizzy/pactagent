@@ -1,0 +1,66 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: pactagent-api
+          metrics_path: /metrics
+          authorization:
+            credentials: ${env:METRICS_BEARER_TOKEN}
+          static_configs:
+            - targets: [pactagent-api.pactagent.svc.cluster.local:4000]
+        - job_name: pactagent-workers
+          metrics_path: /metrics
+          authorization:
+            credentials: ${env:METRICS_BEARER_TOKEN}
+          static_configs:
+            - targets:
+                - pactagent-worker-settlement.pactagent.svc.cluster.local:4001
+                - pactagent-worker-webhook.pactagent.svc.cluster.local:4001
+                - pactagent-worker-ai.pactagent.svc.cluster.local:4001
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 384
+    spike_limit_mib: 96
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: ${env:DEPLOYMENT_ENVIRONMENT}
+        action: upsert
+      - key: service.version
+        value: ${env:BUILD_VERSION}
+        action: upsert
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+
+exporters:
+  prometheus:
+    endpoint: 0.0.0.0:9464
+    resource_to_telemetry_conversion:
+      enabled: true
+  otlphttp/traces:
+    endpoint: ${env:OTEL_TRACES_BACKEND_ENDPOINT}
+    headers:
+      Authorization: ${env:OTEL_TRACES_BACKEND_AUTHORIZATION}
+
+service:
+  telemetry:
+    logs:
+      level: info
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlphttp/traces]
+    metrics:
+      receivers: [prometheus, otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [prometheus]

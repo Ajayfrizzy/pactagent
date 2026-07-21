@@ -1,7 +1,8 @@
 import type { NextFunction, Request, Response } from 'express';
 import { authenticationError } from '../../common/errors/app-error';
-import { v1ApiKeyRateLimit } from '../../common/rate-limit/infrastructure-rate-limit';
+import { v1ApiKeyRateLimit, v1TenantRateLimit } from '../../common/rate-limit/infrastructure-rate-limit';
 import { authenticateApiKey } from './api-key.service';
+import { tenantContext } from '../../common/tenancy/tenant-context';
 
 function extractApiKey(req: Request) {
   const xApiKey = req.header('x-api-key')?.trim();
@@ -41,8 +42,12 @@ export async function requireApiKey(req: Request, res: Response, next: NextFunct
       scopes: apiKey.scopes,
     };
     req.currentApp = apiKey.app;
+    req.tenant = tenantContext(apiKey.appId);
 
-    v1ApiKeyRateLimit(req, res, next);
+    v1ApiKeyRateLimit(req, res, (error?: unknown) => {
+      if (error) return next(error);
+      return v1TenantRateLimit(req, res, next);
+    });
   } catch (error) {
     next(error);
   }

@@ -649,7 +649,6 @@ async function main() {
         create: [
           {
             id: ag1m1,
-            appId: sandboxApp.id,
             title: 'Wireframes and layout pass',
             description: 'Deliver homepage and key section wireframes.',
             amount: '20000000000',
@@ -658,7 +657,6 @@ async function main() {
           },
           {
             id: ag1m2,
-            appId: sandboxApp.id,
             title: 'Final responsive implementation',
             description: 'Deliver polished responsive version and animations.',
             amount: '30000000000',
@@ -714,7 +712,6 @@ async function main() {
         create: [
           {
             id: ag2m1,
-            appId: sandboxApp.id,
             title: 'Threat model and scope review',
             description: 'Document attack surfaces and confirm audit scope.',
             amount: '40000000000',
@@ -723,7 +720,6 @@ async function main() {
           },
           {
             id: ag2m2,
-            appId: sandboxApp.id,
             title: 'Final report and fixes review',
             description: 'Provide final report and verify remediation.',
             amount: '60000000000',
@@ -778,7 +774,6 @@ async function main() {
         create: [
           {
             id: ag3m1,
-            appId: sandboxApp.id,
             title: 'SDK authentication setup',
             description: 'Establish auth flow and shared client utilities.',
             amount: '10000000000',
@@ -787,7 +782,6 @@ async function main() {
           },
           {
             id: ag3m2,
-            appId: sandboxApp.id,
             title: 'Core payment endpoints',
             description: 'Implement core integration endpoints.',
             amount: '10000000000',
@@ -796,7 +790,6 @@ async function main() {
           },
           {
             id: ag3m3,
-            appId: sandboxApp.id,
             title: 'Webhooks and reconciliation',
             description: 'Finish callback handling and reconciliation logic.',
             amount: '10000000000',

@@ -3,7 +3,7 @@ import { sendList, sendSuccess } from '../../common/middleware/response';
 import * as eventService from './event.service';
 
 function currentAppId(req: Request) {
-  return req.apiKey!.appId;
+  return req.tenant!.appId;
 }
 
 export async function listEvents(req: Request, res: Response) {

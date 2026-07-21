@@ -65,12 +65,19 @@ async function consume(key: string, windowMs: number) {
   }
 }
 
+type Bucket = { count: number; resetAt: number };
+let consumeBucket: (key: string, windowMs: number) => Promise<Bucket> = consume;
+
+export function setRateLimitTestConsumer(consumer: ((key: string, windowMs: number) => Promise<Bucket>) | null) {
+  consumeBucket = consumer ?? consume;
+}
+
 export function createInfrastructureRateLimit(options: RateLimitOptions) {
   return async function infrastructureRateLimit(req: Request, res: Response, next: NextFunction) {
     const rawKey = options.key(req);
     if (!rawKey) return next();
     try {
-      const bucket = await consume(storageKey(options.namespace, rawKey), options.windowMs);
+      const bucket = await consumeBucket(storageKey(options.namespace, rawKey), options.windowMs);
       const limited = bucket.count > options.max;
       const remaining = Math.max(0, options.max - bucket.count);
       res.setHeader('RateLimit-Limit', String(options.max));
@@ -83,7 +90,7 @@ export function createInfrastructureRateLimit(options: RateLimitOptions) {
       return next();
     } catch (error) {
       log('error', 'rate_limit.unavailable', { namespace: options.namespace, error });
-      return next(config.rateLimitFailClosed ? rateLimitError() : error);
+      return next(config.rateLimitFailClosed ? rateLimitError() : undefined);
     }
   };
 }
@@ -104,4 +111,18 @@ export const v1ApiKeyRateLimit = createInfrastructureRateLimit({
   windowMs: config.v1ApiKeyRateLimitWindowMs,
   max: config.v1ApiKeyRateLimitMax,
   key: (req) => req.apiKey?.id,
+});
+
+export const v1TenantRateLimit = createInfrastructureRateLimit({
+  namespace: 'v1:tenant',
+  windowMs: config.v1ApiKeyRateLimitWindowMs,
+  max: config.v1TenantRateLimitMax,
+  key: (req) => req.apiKey?.appId,
+});
+
+export const v1HighRiskActionRateLimit = createInfrastructureRateLimit({
+  namespace: 'v1:high-risk-action',
+  windowMs: config.actionRateLimitWindowMs,
+  max: config.actionRateLimitMax,
+  key: (req) => req.apiKey?.id || req.auth?.address || req.ip,
 });
