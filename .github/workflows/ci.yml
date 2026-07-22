@@ -45,6 +45,7 @@ jobs:
       - run: npm run phase7:check
       - run: npm run licenses:test
       - run: npm run licenses:check
+      - run: npm run audit:test
       - run: npm run lint
       - run: npm run build
       - name: Verify build does not modify tracked files
@@ -129,7 +130,7 @@ jobs:
         with:
           name: server-sbom
           path: server/sbom.cdx.json
-      - run: npm audit --omit=dev --audit-level=high
+      - run: node ../scripts/audit-dependencies.mjs
 
   web:
     name: Web
@@ -146,7 +147,7 @@ jobs:
           cache-dependency-path: package-lock.json
       - run: npm ci
       - run: npm run build
-      - run: npm audit --omit=dev --audit-level=high
+      - run: node ../scripts/audit-dependencies.mjs
 
   contract:
     name: CKB contract

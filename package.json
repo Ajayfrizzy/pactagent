@@ -26,6 +26,8 @@
     "env:generate": "node scripts/generate-env-example.mjs --write",
     "licenses:check": "node scripts/check-licenses.mjs",
     "licenses:test": "node --test scripts/check-licenses.test.mjs",
+    "audit:dependencies": "node scripts/audit-dependencies.mjs",
+    "audit:test": "node --test scripts/audit-dependencies.test.mjs",
     "controls:check": "node scripts/validate-control-matrix.mjs",
     "deploy:check": "node scripts/validate-deployment-manifests.mjs && node --test scripts/deployment-smoke.test.mjs",
     "observability:check": "node scripts/validate-observability.mjs",
@@ -39,7 +41,6 @@
     "load:webhooks": "k6 run test/load/webhooks.js"
   },
   "overrides": {
-    "@hono/node-server": "^1.19.13",
     "axios": "^1.16.0",
     "follow-redirects": "^1.15.12",
     "form-data": "^4.0.6",

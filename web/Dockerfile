@@ -6,6 +6,8 @@ COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web ./
 RUN npm run build
+# Image optimization is disabled; exclude Sharp/libvips from the runtime trace.
+RUN rm -rf .next/standalone/web/node_modules/sharp .next/standalone/web/node_modules/@img
 
 FROM node:24-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS runtime
 ARG BUILD_VERSION=development
