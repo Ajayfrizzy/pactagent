@@ -808,7 +808,7 @@ Important architecture note:
 
 PactAgent now includes a real on-chain CKB escrow lock for milestone funding and settlement on CKB L1. Each milestone can be funded into its own escrow cell, and payout / refund resolution is enforced by the on-chain `pact_escrow_lock` script.
 
-At the same time, the broader agreement coordination layer is still off-chain. Agreement metadata, participant roles, proofs, disputes, review records, logs, and lifecycle orchestration are stored in PostgreSQL through Prisma and coordinated by the backend worker. In other words: escrow settlement on CKB is on-chain, while the surrounding agreement workflow remains application-managed.
+At the same time, the broader agreement coordination layer is still off-chain. Agreement metadata, participant roles, proofs, disputes, review records, logs, and lifecycle orchestration are stored in PostgreSQL through Prisma and coordinated by the backend worker. Agreement and milestone digests are committed to the on-chain lock arguments and milestone cell data, making funded terms tamper-evident without storing the full agreement on-chain. Funded agreement terms are also immutable at the service and database layers.
 
 ## User Flows
 
@@ -849,7 +849,10 @@ At the same time, the broader agreement coordination layer is still off-chain. A
 2. PactAgent runs a completeness check synchronously or through the worker loop.
 3. The proof is marked `CHECKING`, `ISSUES_FOUND`, `READY_FOR_HUMAN_REVIEW`, or `NEEDS_MORE_INFO`.
 4. Reviewers can draft and send AI-generated follow-up questions when evidence is incomplete.
-5. Approval stays blocked until the human reviewer confirms the decision and any open info requests are resolved.
+5. Manual review gives the client five calendar days from the start of review to approve, request information, send a message, or open a dispute.
+6. If the client takes none of those actions, the worker automatically approves the milestone and starts the normal payout path at the review deadline.
+
+Treasury Bridge payouts can then be submitted automatically by the settlement worker. The current `ONCHAIN_LOCK` contract still requires the client signature for a payout spend; timeout approval therefore prepares that milestone for settlement but cannot bypass the deployed lock's signer rule.
 
 ### Dispute Flow
 
@@ -871,7 +874,7 @@ The agent currently handles:
 - validating submitted proof presence and completeness
 - moving agreements into review only when the latest proof is ready
 - auto-approving milestones in `AUTO` mode
-- waiting for user confirmation in `HYBRID` and `MANUAL` paths
+- waiting for user confirmation in `HYBRID` mode and enforcing the five-day inactivity deadline in `MANUAL` mode
 - scheduling info-request follow-up and proof re-check work
 - generating dispute recommendations
 - initiating payout or refund settlement

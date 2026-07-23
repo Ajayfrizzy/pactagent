@@ -323,6 +323,8 @@ model Milestone {
   escrowCellData        String?
   refundTimeoutBlock    BigInt?
   dueDate               DateTime?
+  reviewStartedAt       DateTime?
+  reviewDeadlineAt      DateTime?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
@@ -343,6 +345,7 @@ model Milestone {
   @@unique([id, appId])
   @@index([appId, createdAt])
   @@index([agreementId, status])
+  @@index([status, reviewDeadlineAt])
 }
 
 model Event {

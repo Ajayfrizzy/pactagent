@@ -14,6 +14,10 @@ import {
   transitionStatus,
 } from '../services/agreementService';
 import {
+  getManualReviewDeadline,
+  shouldAutoApproveManualReview,
+} from '../services/manualReviewPolicy';
+import {
   evaluateRecommendationReadiness,
   generateRecommendation,
   saveRecommendation,
@@ -118,6 +122,13 @@ function buildProcessKey(agreement: any, now: Date) {
 
   if (agreement.status === 'DRAFT' || agreement.status === 'FUNDED') {
     parts.push(`deadlinePassed:${now > new Date(agreement.deadlineAt)}`);
+  }
+
+  if (agreement.status === 'UNDER_REVIEW') {
+    const currentMilestone = getCurrentMilestone(agreement);
+    parts.push(`reviewDeadlinePassed:${Boolean(
+      currentMilestone?.reviewDeadlineAt && now >= new Date(currentMilestone.reviewDeadlineAt)
+    )}`);
   }
 
   if (agreement.status === 'DISPUTED') {
@@ -246,6 +257,14 @@ async function scheduleSystemJobs() {
           OR: [
             { updatedAt: { gt: schedulerLastCompletedAt } },
             { deadlineAt: { lte: new Date(now.getTime() + 24 * 60 * 60 * 1000) } },
+            {
+              milestones: {
+                some: {
+                  status: 'UNDER_REVIEW',
+                  reviewDeadlineAt: { lte: new Date(now.getTime() + 24 * 60 * 60 * 1000) },
+                },
+              },
+            },
             { settlementStatus: { in: ['FUNDING_PENDING', 'PAYOUT_PENDING', 'REFUND_PENDING', 'SPLIT_PENDING', 'FAILED'] } },
           ],
         }] : []),
@@ -282,7 +301,7 @@ async function scheduleSystemJobs() {
     await enqueueAgreementJob({
       agreementId: agreement.id,
       kind: 'AGREEMENT_CONTINUE',
-      dedupeSuffix: `${agreement.status}:${agreement.updatedAt.toISOString()}`,
+      dedupeSuffix: buildProcessKey(agreement, now),
     });
 
     if (agreement.ckbTxHashFund && ['FUNDING_PENDING', 'FAILED'].includes(agreement.settlementStatus)) {
@@ -726,6 +745,82 @@ async function processAgreement(agreement: any): Promise<void> {
           eventType: 'RULE_CHECK_STARTED',
           message: 'HYBRID mode: milestone recommendation ready, awaiting user confirmation',
           metadata: { milestoneId: currentMilestone.id },
+        });
+      } else if (agreement.reviewerMode === 'MANUAL') {
+        const reviewStartedAt = currentMilestone.reviewStartedAt
+          ? new Date(currentMilestone.reviewStartedAt)
+          : new Date(currentMilestone.updatedAt);
+        const reviewDeadlineAt = currentMilestone.reviewDeadlineAt
+          ? new Date(currentMilestone.reviewDeadlineAt)
+          : getManualReviewDeadline(reviewStartedAt);
+
+        if (!currentMilestone.reviewStartedAt || !currentMilestone.reviewDeadlineAt) {
+          await prisma.milestone.update({
+            where: { id: currentMilestone.id },
+            data: { reviewStartedAt, reviewDeadlineAt },
+          });
+        }
+
+        if (now < reviewDeadlineAt) {
+          break;
+        }
+
+        const [clientMessage, clientInfoRequest] = await Promise.all([
+          prisma.agreementComment.findFirst({
+            where: {
+              agreementId: agreement.id,
+              authorAddress: agreement.clientAddress,
+              createdAt: { gte: reviewStartedAt },
+            },
+            select: { id: true },
+          }),
+          prisma.infoRequest.findFirst({
+            where: {
+              agreementId: agreement.id,
+              milestoneId: currentMilestone.id,
+              requestedBy: agreement.clientAddress,
+              createdAt: { gte: reviewStartedAt },
+            },
+            select: { id: true },
+          }),
+        ]);
+
+        const hasOpenDispute = currentMilestone.disputes.some((dispute: any) => !dispute.resolvedAt);
+        if (!shouldAutoApproveManualReview({
+          now,
+          reviewDeadlineAt,
+          hasOpenDispute,
+          hasClientMessage: Boolean(clientMessage),
+          hasClientInfoRequest: Boolean(clientInfoRequest),
+        })) {
+          await createLog({
+            agreementId: agreement.id,
+            level: 'INFO',
+            eventType: 'RULE_CHECK_PASSED',
+            message: 'Manual review timeout did not auto-approve because the client responded or a dispute exists',
+            metadata: {
+              milestoneId: currentMilestone.id,
+              reviewDeadlineAt: reviewDeadlineAt.toISOString(),
+              hasOpenDispute,
+              hasClientMessage: Boolean(clientMessage),
+              hasClientInfoRequest: Boolean(clientInfoRequest),
+            },
+          });
+          break;
+        }
+
+        await approveCurrentMilestone(agreement.id);
+        await createLog({
+          agreementId: agreement.id,
+          level: 'SUCCESS',
+          eventType: 'RULE_CHECK_PASSED',
+          message: `Milestone automatically approved after five calendar days without a client response: ${currentMilestone.title}`,
+          metadata: {
+            milestoneId: currentMilestone.id,
+            reviewStartedAt: reviewStartedAt.toISOString(),
+            reviewDeadlineAt: reviewDeadlineAt.toISOString(),
+            approvalReason: 'MANUAL_REVIEW_TIMEOUT',
+          },
         });
       }
       break;

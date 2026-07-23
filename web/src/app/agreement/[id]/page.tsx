@@ -3620,6 +3620,12 @@ export default function AgreementDetailPage() {
                             <span>Settlements: {milestone.settlements?.length || 0}</span>
                           </div>
 
+                          {agreement.reviewerMode === 'MANUAL' && milestone.status === 'UNDER_REVIEW' && milestone.reviewDeadlineAt ? (
+                            <div className="mb-3 border-l-2 border-amber-400 bg-amber-950/20 px-3 py-2 text-xs text-amber-200">
+                              Client response deadline: {new Date(milestone.reviewDeadlineAt).toLocaleString()}
+                            </div>
+                          ) : null}
+
                           {isUsdEquivalentGrant && milestone.targetUsd ? (
                             <div className="mb-3 rounded-lg border border-agent-border bg-agent-card/60 px-3 py-2 text-xs text-gray-300">
                               <div>Canonical USD target: ${milestone.targetUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}</div>

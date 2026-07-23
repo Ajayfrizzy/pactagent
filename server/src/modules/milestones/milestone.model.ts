@@ -10,6 +10,8 @@ type MilestoneRecord = {
   sortOrder: number;
   status: string;
   dueDate: Date | null;
+  reviewStartedAt: Date | null;
+  reviewDeadlineAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -27,6 +29,8 @@ export function serializeMilestone(milestone: MilestoneRecord) {
     order: milestone.sortOrder,
     status: milestone.status,
     dueDate: milestone.dueDate?.toISOString() ?? null,
+    reviewStartedAt: milestone.reviewStartedAt?.toISOString() ?? null,
+    reviewDeadlineAt: milestone.reviewDeadlineAt?.toISOString() ?? null,
     createdAt: milestone.createdAt.toISOString(),
     updatedAt: milestone.updatedAt.toISOString(),
   };

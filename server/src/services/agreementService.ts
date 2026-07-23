@@ -34,6 +34,7 @@ import { refreshReputationForAgreement } from './reputationService';
 import { convertUsdToCkb, fetchCkbPriceQuote, parseUsdAmount } from './marketPriceService';
 import { ensureLegacyApp } from './legacyTenantService';
 import { MAX_SHANNONS } from '../common/amounts/integer-amount';
+import { getManualReviewDeadline } from './manualReviewPolicy';
 
 const uuid = randomUUID;
 
@@ -1952,9 +1953,16 @@ export async function transitionMilestoneStatus(milestoneId: string, newStatus: 
     throw new Error(`Invalid milestone transition: ${milestone.status} -> ${newStatus}`);
   }
 
+  const reviewStartedAt = newStatus === 'UNDER_REVIEW' ? new Date() : null;
   return prisma.milestone.update({
     where: { id: milestoneId },
-    data: { status: newStatus },
+    data: {
+      status: newStatus,
+      ...(reviewStartedAt ? {
+        reviewStartedAt,
+        reviewDeadlineAt: getManualReviewDeadline(reviewStartedAt),
+      } : {}),
+    },
   });
 }
 
@@ -2010,6 +2018,9 @@ export async function updateDraftAgreement(agreementId: string, data: {
   const agreement = await ensureAgreementMilestones(await fetchAgreementOrThrow(agreementId));
   if (agreement.status !== 'DRAFT') {
     throw new Error('Only draft agreements can be edited.');
+  }
+  if (agreement.settlementStatus !== 'UNFUNDED' || agreement.ckbTxHashFund) {
+    throw new Error('Agreement terms are immutable once funding begins.');
   }
 
   if (!data.milestones.length) {
@@ -2196,6 +2207,9 @@ export async function proposeAgreementAmendment(
   if (agreement.status === 'DRAFT' || agreement.status === 'CANCELLED') {
     throw new Error('Use draft editing before funding instead of amendment proposals.');
   }
+  if (agreement.settlementStatus !== 'UNFUNDED' || agreement.ckbTxHashFund || agreement.fundingConfirmedAt) {
+    throw new Error('Funded agreement terms are immutable. Create a new agreement for different terms.');
+  }
 
   const amendment = await prisma.agreementAmendment.create({
     data: {
@@ -2238,6 +2252,14 @@ export async function respondToAgreementAmendment(
 
   if (amendment.status !== 'PROPOSED') {
     throw new Error('This amendment proposal has already been resolved.');
+  }
+
+  if (input.accept && (
+    agreement.settlementStatus !== 'UNFUNDED' ||
+    agreement.ckbTxHashFund ||
+    agreement.fundingConfirmedAt
+  )) {
+    throw new Error('This amendment cannot be accepted because agreement terms became immutable when funding began.');
   }
 
   const normalizedActor = normalizeAddress(actorAddress);

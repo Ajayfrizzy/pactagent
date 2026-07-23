@@ -45,6 +45,13 @@ export async function createMilestoneForAgreement(
       throw notFound('Agreement not found.', 'agreement_not_found');
     }
 
+    if (['funded', 'in_progress', 'proof_submitted', 'under_review', 'approved', 'release_pending', 'released', 'refunded', 'disputed'].includes(agreement.status)) {
+      throw invalidRequest(
+        'Funded agreement terms are immutable; milestones can no longer be added.',
+        'funded_agreement_immutable',
+      );
+    }
+
     const existingMilestones = await milestoneRepository.getMilestoneAmountSumForAgreement(tenantContext(appId), agreementId, tx);
     const existingTotal = sumIntegerAmounts(existingMilestones.map((item) => item.amount));
     const newAmount = parsePositiveIntegerAmount(input.amount, 'amount');
