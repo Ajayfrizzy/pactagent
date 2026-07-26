@@ -50,6 +50,6 @@ LABEL org.opencontainers.image.title="PactAgent migrations" \
 RUN groupadd --system --gid 1001 pactagent && useradd --system --uid 1001 --gid pactagent pactagent
 RUN corepack disable \
     && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
-    && rm -rf node_modules/@cyclonedx node_modules/.bin/cyclonedx-npm package.json package-lock.json
+    && rm -rf node_modules/@cyclonedx node_modules/.bin/cyclonedx-npm node_modules/brace-expansion package.json package-lock.json
 USER pactagent
 CMD ["sh", "-c", "node dist/scripts/auditTenantIntegrity.js && node node_modules/prisma/build/index.js migrate deploy"]

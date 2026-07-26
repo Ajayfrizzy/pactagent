@@ -101,9 +101,16 @@ async function seedAgreement(appId: string, params?: {
       releaseMode: 'PARTIAL',
       infrastructureReleaseMode: 'milestone',
       disputeMode: 'app_managed',
-      settlementStatus: 'FUNDED',
-      status: params?.status ?? 'approved',
+      settlementStatus: params?.status && params.status !== 'draft' ? 'FUNDED' : 'UNFUNDED',
+      status: params?.status ?? 'draft',
     },
+  });
+}
+
+async function markAgreementFunded(agreementId: string, status = 'approved') {
+  return prisma.agreement.update({
+    where: { id: agreementId },
+    data: { status, settlementStatus: 'FUNDED', fundingConfirmedAt: new Date() },
   });
 }
 
@@ -129,6 +136,15 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
       await prisma.proof.deleteMany({ where: { appId: { in: createdAppIds } } });
       await prisma.dispute.deleteMany({ where: { appId: { in: createdAppIds } } });
       await prisma.escrow.deleteMany({ where: { appId: { in: createdAppIds } } });
+      await prisma.agreement.updateMany({
+        where: { appId: { in: createdAppIds } },
+        data: {
+          status: 'draft',
+          settlementStatus: 'UNFUNDED',
+          ckbTxHashFund: null,
+          fundingConfirmedAt: null,
+        },
+      });
       await prisma.milestone.deleteMany({ where: { appId: { in: createdAppIds } } });
       await prisma.idempotencyKey.deleteMany({ where: { appId: { in: createdAppIds } } });
       await prisma.agentJob.deleteMany({ where: { agreement: { appId: { in: createdAppIds } } } });
@@ -515,6 +531,8 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
       amount: '1000', currency: 'CKB', rail: 'mock', network: 'sandbox', status: 'funded',
     } });
 
+    await markAgreementFunded(agreement.id);
+
     await assert.rejects(() => prisma.escrow.update({
       where: { id: escrow.id }, data: { status: 'invented_state' },
     }));
@@ -632,7 +650,7 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
 
   test('multi-milestone release leaves agreement open until all escrows release', async () => {
     const app = await createIntegrationApp('Milestone Release App');
-    const agreement = await seedAgreement(app.id, { status: 'approved', amount: '3000' });
+    const agreement = await seedAgreement(app.id, { amount: '3000' });
     const milestoneA = await prisma.milestone.create({
       data: {
         id: randomUUID(),
@@ -686,6 +704,8 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
       },
     });
 
+    await markAgreementFunded(agreement.id);
+
     await releaseEscrow(
       requestStub({ appId: app.id, body: {}, idempotencyKey: `release-${escrowA.id}` }),
       app.id,
@@ -705,7 +725,7 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
 
   test('duplicate release with same idempotency key replays without creating another transaction', async () => {
     const app = await createIntegrationApp('Release Replay App');
-    const agreement = await seedAgreement(app.id, { status: 'approved', amount: '1000' });
+    const agreement = await seedAgreement(app.id, { amount: '1000' });
     const milestone = await prisma.milestone.create({
       data: {
         id: randomUUID(),
@@ -732,6 +752,7 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
         status: 'funded',
       },
     });
+    await markAgreementFunded(agreement.id);
     const key = `release-replay-${escrow.id}`;
 
     const first = await releaseEscrow(
@@ -760,7 +781,7 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
 
   test('concurrent release with different idempotency keys only reserves one adapter operation', async () => {
     const app = await createIntegrationApp('Concurrent Release App');
-    const agreement = await seedAgreement(app.id, { status: 'approved', amount: '1000' });
+    const agreement = await seedAgreement(app.id, { amount: '1000' });
     const milestone = await prisma.milestone.create({
       data: {
         id: randomUUID(),
@@ -787,6 +808,8 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
         status: 'funded',
       },
     });
+
+    await markAgreementFunded(agreement.id);
 
     const attempts = await Promise.allSettled([
       releaseEscrow(
