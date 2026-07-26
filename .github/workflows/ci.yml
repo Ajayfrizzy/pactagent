@@ -96,7 +96,7 @@ jobs:
         run: psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U pactagent -d pactagent_test -f prisma/phase0-query-baseline.sql | tee /tmp/phase0-query-baseline.txt
       - name: Measure critical Phase 7 query plans
         run: psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U pactagent -d pactagent_test -f prisma/performance-query-plans.sql | tee /tmp/phase7-query-plans.json
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: phase0-query-baseline
           path: |
@@ -126,7 +126,7 @@ jobs:
           git show origin/${{ github.base_ref }}:server/docs/openapi/pactagent.v1.openapi.json > /tmp/pactagent-openapi-baseline.json
           npm run openapi:compat -- /tmp/pactagent-openapi-baseline.json
       - run: npm run sbom
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: server-sbom
           path: server/sbom.cdx.json
