@@ -29,6 +29,10 @@
     "SSPL-1.0"
   ],
   "exceptions": {
+    "elkjs@0.11.1": {
+      "reason": "Development-only transitive dependency of Prisma Studio under EPL-2.0; it is not included in PactAgent runtime distributions. Reassess when Prisma changes this dependency.",
+      "expires": "2027-01-20"
+    },
     "seq-queue@0.0.5": {
       "reason": "Package metadata omits the license field; the installed distribution includes an MIT license file. Revalidate when the package changes.",
       "expires": "2027-01-20"
