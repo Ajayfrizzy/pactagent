@@ -14,7 +14,7 @@ import {
   ShieldCheckIcon,
   WebhookIcon,
 } from './Icons';
-import { WalletConnect } from './WalletConnect';
+import { WalletConnect } from '@/features/wallet';
 import { useStore } from '@/lib/store';
 
 export function NavbarMenu({ children }: { children?: ReactNode }) {

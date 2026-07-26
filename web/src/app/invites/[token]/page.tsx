@@ -7,7 +7,7 @@ import { useStore } from '@/lib/store';
 import { acceptInvite, fetchInvitePreview } from '@/lib/api';
 import { ArrowLeftIcon, LinkIcon, RocketLaunchIcon } from '@/components/Icons';
 import { NavbarMenu } from '@/components/NavbarMenu';
-import { WalletOnboardingCard } from '@/components/WalletOnboardingCard';
+import { WalletOnboardingCard } from '@/features/wallet';
 import { BrandLogo } from '@/components/BrandLogo';
 import { shannonsToCKB } from '@/lib/ckb';
 

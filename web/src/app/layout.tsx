@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
-import { CccProvider } from '@/components/CccProvider';
+import { CccProvider } from '@/features/wallet';
 
 export const metadata: Metadata = {
   title: 'PactAgent — Autonomous Payment Agreements on CKB',

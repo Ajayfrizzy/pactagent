@@ -1,3 +1,3 @@
-export * from './enums';
-export * from './types';
-export * from './stateMachine';
+export * from './domain/enums';
+export * from './domain/agreement-state-machine';
+export * from './contracts/types';

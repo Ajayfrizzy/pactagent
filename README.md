@@ -8,6 +8,24 @@ The project combines:
 - an autonomous backend worker that enforces state transitions
 - live operational logs and agreement updates in the UI
 
+## Repository Guide
+
+| Path | Purpose |
+| --- | --- |
+| `server/` | Express API, background worker, database access, and server runbooks |
+| `web/` | Next.js application and browser integrations |
+| `shared/` | Cross-workspace domain values and API contracts |
+| `contracts/` | CKB smart contract source |
+| `docs/` | Architecture decisions and repository-wide documentation |
+| `deploy/` | Deployment manifests |
+| `observability/` | Dashboards, alerts, and telemetry configuration |
+| `scripts/` | Repository and operational automation |
+| `config/` | Machine-readable policies and controls |
+| `test/` | Cross-workspace and load tests |
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) before adding or moving code, and
+[`docs/README.md`](docs/README.md) for the documentation index.
+
 ## Why PactAgent Exists
 
 Milestone payments are still hard to manage in crypto-native work relationships.

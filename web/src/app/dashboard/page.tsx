@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { NavbarMenu } from '@/components/NavbarMenu';
 import { AgentLogPanel } from '@/components/AgentLogPanel';
 import { StatusBadge, NetworkBadge, getStatusMeta } from '@/components/StatusBadge';
-import { WalletOnboardingCard } from '@/components/WalletOnboardingCard';
+import { WalletOnboardingCard } from '@/features/wallet';
 import { BrandLogo } from '@/components/BrandLogo';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useStore } from '@/lib/store';

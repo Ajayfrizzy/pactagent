@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ccc } from '@ckb-ccc/connector-react';
 import { NavbarMenu } from '@/components/NavbarMenu';
-import { WalletOnboardingCard } from '@/components/WalletOnboardingCard';
+import { WalletOnboardingCard } from '@/features/wallet';
 import { BrandLogo } from '@/components/BrandLogo';
 import { useStore } from '@/lib/store';
 import { useWebSocket } from '@/hooks/useWebSocket';

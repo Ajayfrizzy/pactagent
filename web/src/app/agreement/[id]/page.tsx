@@ -3,7 +3,7 @@ import { ReactNode, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { ccc } from '@ckb-ccc/connector-react';
-import { WalletConnect } from '@/components/WalletConnect';
+import { WalletConnect } from '@/features/wallet';
 import { NavbarMenu } from '@/components/NavbarMenu';
 import { BrandLogo } from '@/components/BrandLogo';
 import { AgentLogPanel } from '@/components/AgentLogPanel';

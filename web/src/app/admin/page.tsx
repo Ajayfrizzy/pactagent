@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { WalletConnect } from '@/components/WalletConnect';
+import { WalletConnect } from '@/features/wallet';
 import { NavbarMenu } from '@/components/NavbarMenu';
 import { BrandLogo } from '@/components/BrandLogo';
 import { StatusBadge } from '@/components/StatusBadge';

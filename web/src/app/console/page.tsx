@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { BrandLogo } from '@/components/BrandLogo';
 import { NavbarMenu } from '@/components/NavbarMenu';
-import { WalletConnect } from '@/components/WalletConnect';
+import { WalletConnect } from '@/features/wallet';
 import { useStore } from '@/lib/store';
 import {
   INFRASTRUCTURE_API_KEY_SCOPES,

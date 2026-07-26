@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { WalletConnect } from '@/components/WalletConnect';
+import { WalletConnect } from '@/features/wallet';
 import { NavbarMenu } from '@/components/NavbarMenu';
 import { BrandLogo } from '@/components/BrandLogo';
 import { useStore } from '@/lib/store';
