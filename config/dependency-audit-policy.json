@@ -14,6 +14,13 @@
       "owner": "maintainers",
       "expires": "2026-08-05",
       "reason": "Next 16 currently requires sharp ^0.34.5 while the fixed line is 0.35.x; runtime image optimization is disabled so Sharp is not needed at runtime."
+    },
+    {
+      "id": "GHSA-r28c-9q8g-f849",
+      "packages": ["postcss"],
+      "owner": "maintainers",
+      "expires": "2026-08-05",
+      "reason": "Next declares PostCSS 8.5.10, so npm reports a meta-vulnerability even though the workspace override and lockfile install patched PostCSS 8.5.23. Remove after Next updates its declared dependency."
     }
   ]
 }

@@ -27,7 +27,12 @@ test('accepted advisories cover only their transitive vulnerability chains', () 
       range: '<0.35.0',
       via: [{ source: 2, url: 'https://github.com/advisories/GHSA-f88m-g3jw-g9cj' }],
     },
-    next: { severity: 'high', range: '*', via: ['sharp'] },
+    postcss: {
+      severity: 'high',
+      range: '<=8.5.17',
+      via: [{ source: 3, url: 'https://github.com/advisories/GHSA-r28c-9q8g-f849' }],
+    },
+    next: { severity: 'high', range: '*', via: ['sharp', 'postcss'] },
   });
 
   assert.equal(result.status, 0, result.stderr);
