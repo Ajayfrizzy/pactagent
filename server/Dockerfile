@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM node:24-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS build
+FROM node:26-bookworm-slim@sha256:2d49d876e96237d76de412761cf05dbfe5aee325cc4406a4d41d5824c5bb8beb AS build
 WORKDIR /app/server
 ENV CI=true
 COPY server/package.json server/package-lock.json ./
@@ -10,7 +10,7 @@ COPY server/src ./src
 COPY shared ../shared
 RUN DATABASE_URL=postgresql://build:build@localhost:5432/build npx prisma generate && npm run build
 
-FROM node:24-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS production-deps
+FROM node:26-bookworm-slim@sha256:2d49d876e96237d76de412761cf05dbfe5aee325cc4406a4d41d5824c5bb8beb AS production-deps
 WORKDIR /app/server
 ENV NODE_ENV=production
 COPY server/package.json server/package-lock.json ./
@@ -18,7 +18,7 @@ COPY server/prisma ./prisma
 COPY server/prisma.config.ts ./
 RUN npm ci --omit=dev && npm cache clean --force
 
-FROM node:24-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS runtime
+FROM node:26-bookworm-slim@sha256:2d49d876e96237d76de412761cf05dbfe5aee325cc4406a4d41d5824c5bb8beb AS runtime
 ARG BUILD_VERSION=development
 ARG BUILD_COMMIT=unknown
 WORKDIR /app/server
