@@ -24,7 +24,7 @@
     "lint": "tsc --noEmit",
     "openapi:check": "node --import tsx src/scripts/validateOpenApi.ts",
     "openapi:compat": "node --import tsx src/scripts/checkOpenApiCompatibility.ts",
-    "sbom": "cyclonedx-npm --package-lock-only --omit dev --output-file sbom.cdx.json",
+    "sbom": "cyclonedx-npm --package-lock-only --omit dev --ignore-npm-errors --output-file sbom.cdx.json",
     "retention:run": "node --import tsx src/scripts/applyRetention.ts",
     "audit:verify": "node --import tsx src/scripts/verifyAuditChain.ts"
   },
