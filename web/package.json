@@ -12,7 +12,7 @@
   "dependencies": {
     "@ckb-ccc/ccc": "^1.1.25",
     "@ckb-ccc/connector-react": "^1.0.34",
-    "lucide-react": "^0.577.0",
+    "lucide-react": "^1.27.0",
     "next": "16.3.0-preview.9",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
