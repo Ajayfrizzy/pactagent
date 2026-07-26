@@ -42,10 +42,13 @@
   },
   "overrides": {
     "axios": "^1.16.0",
+    "brace-expansion": "5.0.8",
     "follow-redirects": "^1.15.12",
     "form-data": "^4.0.6",
+    "gaxios": "7.3.0",
+    "gcp-metadata": "8.1.4",
     "path-to-regexp": "0.1.13",
-    "postcss": "^8.5.10",
+    "postcss": "8.5.23",
     "ws": "^8.21.0"
   }
 }

@@ -31,7 +31,7 @@
   "dependencies": {
     "@ckb-ccc/core": "1.12.5",
     "@opentelemetry/api": "^1.9.1",
-    "@opentelemetry/auto-instrumentations-node": "^0.78.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.79.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.220.0",
     "@opentelemetry/sdk-node": "^0.220.0",
     "@prisma/adapter-pg": "^7.8.0",
@@ -59,5 +59,10 @@
     "prisma": "^7.8.0",
     "tsx": "^4.11.0",
     "typescript": "^5.4.0"
+  },
+  "overrides": {
+    "brace-expansion": "5.0.8",
+    "gaxios": "7.3.0",
+    "gcp-metadata": "8.1.4"
   }
 }
