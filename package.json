@@ -41,6 +41,7 @@
     "load:webhooks": "k6 run test/load/webhooks.js"
   },
   "overrides": {
+    "@prisma/dev": "0.24.16",
     "axios": "^1.16.0",
     "brace-expansion": "5.0.8",
     "follow-redirects": "^1.15.12",
