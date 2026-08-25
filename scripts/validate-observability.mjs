@@ -18,7 +18,7 @@ for (const rule of rules) {
 }
 const dashboardDirectory = 'observability/dashboards';
 const dashboardFiles = fs.readdirSync(dashboardDirectory).filter((file) => file.endsWith('.json'));
-if (dashboardFiles.length !== 7) throw new Error(`Expected seven dashboards, found ${dashboardFiles.length}`);
+if (dashboardFiles.length !== 6) throw new Error(`Expected six dashboards, found ${dashboardFiles.length}`);
 const uids = new Set();
 for (const file of dashboardFiles) {
   const dashboard = JSON.parse(fs.readFileSync(path.join(dashboardDirectory, file), 'utf8'));

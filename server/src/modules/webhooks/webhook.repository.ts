@@ -69,19 +69,13 @@ export function createWebhookEndpoint(params: {
   return prisma.webhookEndpoint.create({
     data: {
       appId: params.tenant.appId,
-      ownerAddress: params.tenant.appId,
-      label: params.input.description ?? null,
-      targetUrl: params.normalizedUrl,
       url: params.normalizedUrl,
       description: params.input.description ?? null,
-      eventTypesJson: JSON.stringify(params.input.subscribedEvents),
       subscribedEvents: params.input.subscribedEvents,
-      signingSecret: params.secretHash,
       secretHash: params.secretHash,
       secretCiphertext: params.secretCiphertext,
       encryptionKeyVersion: getWebhookEncryptionKeyId(params.secretCiphertext),
       status: 'active',
-      isActive: true,
     },
   });
 }
@@ -122,22 +116,18 @@ export function updateWebhookEndpointForApp(
 
   if (input.normalizedUrl) {
     data.url = input.normalizedUrl;
-    data.targetUrl = input.normalizedUrl;
   }
 
   if ('description' in input) {
     data.description = input.description ?? null;
-    data.label = input.description ?? null;
   }
 
   if (input.subscribedEvents) {
     data.subscribedEvents = input.subscribedEvents;
-    data.eventTypesJson = JSON.stringify(input.subscribedEvents);
   }
 
   if (input.status) {
     data.status = input.status;
-    data.isActive = input.status === 'active';
   }
 
   return prisma.webhookEndpoint.update({
@@ -151,7 +141,6 @@ export function deleteWebhookEndpointForApp(tenant: TenantContext, endpointId: s
     where: { id_appId: { id: endpointId, appId: tenant.appId } },
     data: {
       status: 'disabled',
-      isActive: false,
       deletedAt: new Date(),
     },
   });
@@ -166,7 +155,6 @@ export async function createWebhookDeliveriesForEvent(
     where: {
       appId: event.appId,
       status: 'active',
-      isActive: true,
       deletedAt: null,
       subscribedEvents: { has: event.type },
     },
@@ -193,8 +181,10 @@ export async function createWebhookDeliveriesForEvent(
 
     await client.agentJob.create({
       data: {
+        appId: event.appId,
         agreementId: event.agreementId,
         kind: 'DELIVER_WEBHOOK',
+        queue: 'webhook',
         status: 'QUEUED',
         dedupeKey: `INFRA_WEBHOOK_DELIVERY:${deliveries[deliveries.length - 1].id}:0`,
         payloadJson: JSON.stringify({
@@ -269,7 +259,6 @@ export async function markWebhookDeliveryForRetry(
 export function listDueWebhookDeliveries(limit: number) {
   return prisma.webhookDelivery.findMany({
     where: {
-      appId: { not: null },
       status: { in: ['PENDING', 'RETRY'] },
       OR: [
         { nextRetryAt: null },

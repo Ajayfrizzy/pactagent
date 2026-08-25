@@ -62,16 +62,18 @@ function deliveryEndpointUrl(delivery: Awaited<ReturnType<typeof webhookReposito
     return null;
   }
 
-  return delivery.endpoint.url ?? delivery.endpoint.targetUrl;
+  return delivery.endpoint.url;
 }
 
 async function enqueueWebhookDeliveryJob(params: {
+  appId: string;
   deliveryId: string;
   agreementId: string | null;
   attemptKey: string;
   availableAt?: Date | null;
 }) {
   await enqueueJob({
+    appId: params.appId,
     agreementId: params.agreementId,
     kind: 'DELIVER_WEBHOOK',
     payload: {
@@ -235,6 +237,7 @@ export async function retryWebhookDeliveryForApp(req: Request, appId: string, de
   });
 
   await enqueueWebhookDeliveryJob({
+    appId,
     deliveryId: updated.id,
     agreementId: updated.agreementId,
     attemptKey: `manual:${Date.now()}`,
@@ -275,7 +278,7 @@ export async function deliverWebhookDelivery(deliveryId: string) {
   }
 
   const endpointUrl = deliveryEndpointUrl(delivery);
-  if (!delivery.endpoint.isActive || delivery.endpoint.status !== 'active' || !endpointUrl) {
+  if (delivery.endpoint.status !== 'active' || !endpointUrl) {
     const updated = await webhookRepository.updateWebhookDeliveryResult(delivery.id, {
       status: 'FAILED',
       lastError: 'Webhook endpoint is inactive.',
@@ -346,6 +349,7 @@ export async function deliverWebhookDelivery(deliveryId: string) {
       await recordFinalDeliveryFailure(delivery, message);
     } else {
       await enqueueWebhookDeliveryJob({
+        appId: delivery.appId,
         deliveryId: delivery.id,
         agreementId: delivery.agreementId,
         attemptKey: String(failedAttemptCount),

@@ -3,7 +3,7 @@ import { Counter, Gauge, Histogram } from 'prom-client';
 import { metricsRegistry } from '../observability/metrics';
 import { log } from '../observability/logger';
 
-export type ProviderName = 'ckb' | 'ai' | 'market_price' | 'forum' | 'webhook' | 'treasury_signer';
+export type ProviderName = 'ckb' | 'webhook';
 
 export class ProviderError extends Error {
   constructor(

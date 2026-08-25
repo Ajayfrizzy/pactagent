@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "lastReviewed": "2026-07-20",
+  "lastReviewed": "2026-08-22",
   "controls": [
     {
       "id": "INFRA-01",
@@ -68,8 +68,8 @@
       "phase": 5,
       "status": "partial",
       "evidence": [
-        "server/src/services/treasurySignerProvider.ts",
-        "server/docs/operations/secret-management.md"
+        "server/src/modules/escrows/adapters/escrow-adapter.interface.ts",
+        "docs/infrastructure-implementation-roadmap.md"
       ]
     },
     {
@@ -80,7 +80,7 @@
       "evidence": [
         "server/src/index.ts",
         "server/src/worker/index.ts",
-        "server/src/ws.ts"
+        "server/src/worker/healthServer.ts"
       ]
     },
     {
@@ -107,7 +107,7 @@
         "server/prisma/schema.prisma",
         "server/prisma/migrations/20260720000200_financial_and_lifecycle_integrity/migration.sql",
         "server/src/common/amounts/integer-amount.ts",
-        "server/src/services/marketPriceService.ts",
+        "server/prisma/migrations/20260720000200_financial_and_lifecycle_integrity/migration.sql",
         "docs/architecture/financial-rounding.md"
       ]
     },
@@ -162,12 +162,10 @@
       "id": "INFRA-15",
       "backlog": 15,
       "phase": 4,
-      "status": "implemented",
+      "status": "documented",
       "evidence": [
-        "server/src/ws.ts",
-        "server/src/ws.test.ts",
-        "server/src/common/websocket/websocket-bus.ts",
-        "server/docs/operations/resilience.md"
+        "server/src/app.ts",
+        "REPORT.md"
       ]
     },
     {
@@ -188,8 +186,8 @@
       "evidence": [
         "server/src/common/resilience/provider.ts",
         "server/src/common/resilience/provider.test.ts",
-        "server/src/services/discourseThreadService.ts",
-        "server/src/services/sourceSyncService.ts",
+        "server/src/modules/webhooks/webhook.service.ts",
+        "server/src/modules/health/health.service.ts",
         "server/docs/operations/provider-resilience.md"
       ]
     },

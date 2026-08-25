@@ -1,7 +1,6 @@
 import '../common/observability/tracing';
 import { config, validateProductionConfig } from '../config';
 import { runAgentCycle } from './agentLoop';
-import { createLog } from '../services/logService';
 import { requireDatabaseUrl } from '../db';
 import { prisma } from '../db';
 import { beginShutdown, isShuttingDown } from '../common/runtime/lifecycle';
@@ -28,7 +27,7 @@ async function executeCycle() {
   try {
     const succeeded = await runAgentCycle({
       workerId,
-      queues: config.workerQueues as Array<'settlement' | 'webhook' | 'ai'>,
+      queues: config.workerQueues as Array<'webhook'>,
       concurrency: config.workerConcurrency,
     });
     await recordWorkerCycle(workerId, Date.now() - startedAt, succeeded ? undefined : 'Agent cycle failed.');
@@ -56,8 +55,7 @@ async function main() {
   installConsoleBridge();
   await assertRequiredMigrationsApplied();
 
-  const heartbeatService = config.workerQueues.includes('settlement') ? 'agent' : config.workerQueues.join('+');
-  await registerWorker(workerId, heartbeatService);
+  await registerWorker(workerId, 'webhook');
   healthServer.listen(config.workerHealthPort, '0.0.0.0');
   heartbeatTimer = setInterval(() => {
     void touchWorker(workerId).catch((error) => log('error', 'worker.heartbeat.failed', { workerId, error }));
@@ -68,14 +66,6 @@ async function main() {
     healthPort: config.workerHealthPort,
     queues: config.workerQueues,
     concurrency: config.workerConcurrency,
-    aiEnabled: config.aiEnabled,
-  });
-
-  await createLog({
-    level: 'INFO',
-    eventType: 'AGREEMENT_CREATED',
-    message: 'PactAgent Worker started — observing agreements...',
-    metadata: { intervalMs: config.agentIntervalMs },
   });
 
   // Run first cycle immediately

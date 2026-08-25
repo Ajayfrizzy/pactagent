@@ -10,7 +10,6 @@ export function createDispute(appId: string, input: CreateDisputeInput, tx: Pris
       agreementId: input.agreementId,
       milestoneId: input.milestoneId,
       openedByExternalId: input.openedByExternalId,
-      openedBy: input.openedByExternalId,
       reason: input.reason,
       evidenceLinksJson: JSON.stringify(input.evidenceLinks),
       status: 'open',

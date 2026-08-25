@@ -115,6 +115,12 @@ jobs:
           test "$(psql -At -h 127.0.0.1 -U pactagent -d pactagent_upgrade -c "SELECT name FROM \"App\" WHERE id = '00000000-0000-4000-8000-000000000099'")" = "Upgrade Fixture"
           test "$(psql -At -h 127.0.0.1 -U pactagent -d pactagent_upgrade -c "SELECT title FROM \"Agreement\" WHERE id = '00000000-0000-4000-8000-000000000199'")" = "Existing agreement"
           test "$(psql -At -h 127.0.0.1 -U pactagent -d pactagent_upgrade -c "SELECT \"responseBodyJson\"->'data'->>'id' FROM \"IdempotencyKey\" WHERE id = '00000000-0000-4000-8000-000000000499'")" = "fixture"
+          test "$(psql -At -h 127.0.0.1 -U pactagent -d pactagent_upgrade -c "SELECT count(*) FROM legacy_product_archive.\"User\" WHERE id = '00000000-0000-4000-8000-000000000701'")" = "1"
+          test "$(psql -At -h 127.0.0.1 -U pactagent -d pactagent_upgrade -c "SELECT \"signingSecret\" FROM legacy_product_archive.\"LegacyWebhookEndpoint\" WHERE id = '00000000-0000-4000-8000-000000000706'")" = "[redacted]"
+          test "$(psql -At -h 127.0.0.1 -U pactagent -d pactagent_upgrade -c "SELECT count(*) FROM legacy_product_archive.\"LegacyAuditLog\" WHERE id = '00000000-0000-4000-8000-000000000707'")" = "1"
+          test "$(psql -At -h 127.0.0.1 -U pactagent -d pactagent_upgrade -c "SELECT count(*) FROM legacy_product_archive.\"LegacyAgentJob\" WHERE id = '00000000-0000-4000-8000-000000000708'")" = "1"
+          test "$(psql -At -h 127.0.0.1 -U pactagent -d pactagent_upgrade -c "SELECT count(*) FROM \"App\" WHERE id = '00000000-0000-4000-8000-000000000001'")" = "0"
+          test "$(psql -At -h 127.0.0.1 -U pactagent -d pactagent_upgrade -c "SELECT to_regclass('public.\"PublicProfile\"') IS NULL")" = "t"
       - run: npm test
       - run: npm run env:check --prefix ..
       - run: npm run test:integration

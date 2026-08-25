@@ -1,10 +1,10 @@
 import { prisma } from '../../db';
 import type { CreateAppInput, UpdateAppInput } from './app.validation';
 
-export function createApp(ownerUserId: string, input: CreateAppInput) {
+export function createApp(ownerId: string, input: CreateAppInput) {
   return prisma.app.create({
     data: {
-      ownerUserId,
+      ownerId,
       name: input.name,
       slug: input.slug,
       environment: input.environment,
@@ -14,20 +14,20 @@ export function createApp(ownerUserId: string, input: CreateAppInput) {
   });
 }
 
-export function listAppsForOwner(ownerUserId: string, params: { limit: number; cursor?: string }) {
+export function listAppsForOwner(ownerId: string, params: { limit: number; cursor?: string }) {
   return prisma.app.findMany({
-    where: { ownerUserId },
+    where: { ownerId },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: params.limit + 1,
     ...(params.cursor ? { cursor: { id: params.cursor }, skip: 1 } : {}),
   });
 }
 
-export function findAppForOwner(ownerUserId: string, appId: string) {
+export function findAppForOwner(ownerId: string, appId: string) {
   return prisma.app.findFirst({
     where: {
       id: appId,
-      ownerUserId,
+      ownerId,
     },
   });
 }
@@ -38,21 +38,21 @@ export function findAppById(appId: string) {
   });
 }
 
-export function updateAppForOwner(ownerUserId: string, appId: string, input: UpdateAppInput) {
+export function updateAppForOwner(ownerId: string, appId: string, input: UpdateAppInput) {
   return prisma.app.updateMany({
     where: {
       id: appId,
-      ownerUserId,
+      ownerId,
     },
     data: input,
   });
 }
 
-export function disableAppForOwner(ownerUserId: string, appId: string) {
+export function disableAppForOwner(ownerId: string, appId: string) {
   return prisma.app.updateMany({
     where: {
       id: appId,
-      ownerUserId,
+      ownerId,
     },
     data: {
       status: 'disabled',

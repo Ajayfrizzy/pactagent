@@ -35,3 +35,39 @@ test('endpoint payload limits reject oversized writes before authentication', as
   assert.equal(response.status, 413);
   assert.equal(body.error.code, 'payload_too_large');
 });
+
+test('/v1 auth boots and the removed /api product surface returns 410', async (t) => {
+  const server = http.createServer(createApp());
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+
+  const challengeResponse = await fetch(`http://127.0.0.1:${address.port}/v1/auth/challenge`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ address: 'ckt-test-operator' }),
+  });
+  const challengeBody = await challengeResponse.json() as {
+    data: { message: string; expiresAt: string };
+    requestId: string;
+  };
+  assert.equal(challengeResponse.status, 200);
+  assert.match(challengeBody.data.message, /PactAgent Authentication/);
+  assert.match(challengeBody.requestId, /^req_/);
+
+  const sessionResponse = await fetch(`http://127.0.0.1:${address.port}/v1/auth/me`);
+  const sessionBody = await sessionResponse.json() as {
+    error: { type: string; code: string; requestId: string };
+  };
+  assert.equal(sessionResponse.status, 401);
+  assert.equal(sessionBody.error.type, 'authentication_error');
+  assert.equal(sessionBody.error.code, 'authentication_required');
+  assert.match(sessionBody.error.requestId, /^req_/);
+
+  const legacyResponse = await fetch(`http://127.0.0.1:${address.port}/api/agreements`);
+  const legacyBody = await legacyResponse.json() as { success: boolean; error: string };
+  assert.equal(legacyResponse.status, 410);
+  assert.equal(legacyBody.success, false);
+  assert.match(legacyBody.error, /Use the app-scoped \/v1 infrastructure API/);
+});

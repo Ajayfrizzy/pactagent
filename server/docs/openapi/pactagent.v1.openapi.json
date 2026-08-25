@@ -3,151 +3,118 @@
   "info": {
     "title": "PactAgent Infrastructure API",
     "version": "1.0.0",
-    "description": "App-scoped infrastructure API for agreements, milestones, escrow, proof submission, reviews, disputes, lifecycle events, webhooks, audit logs, and admin monitoring."
+    "description": "App-scoped infrastructure API for agreements, milestones, escrow records, proof review, disputes, lifecycle events, webhooks, audit logs, and operator administration. Product-specific user experiences are intentionally outside this API."
   },
   "servers": [
-    {
-      "url": "http://localhost:4000",
-      "description": "Local development"
-    }
+    { "url": "http://localhost:4000", "description": "Local development" }
   ],
-  "security": [
-    {
-      "apiKey": []
-    }
+  "tags": [
+    { "name": "Operator Auth" },
+    { "name": "Apps" },
+    { "name": "API Keys" },
+    { "name": "Agreements" },
+    { "name": "Milestones" },
+    { "name": "Escrows" },
+    { "name": "Transactions" },
+    { "name": "Proofs" },
+    { "name": "Reviews" },
+    { "name": "Disputes" },
+    { "name": "Events" },
+    { "name": "Webhooks" },
+    { "name": "Audit" },
+    { "name": "Admin" }
   ],
+  "security": [{ "apiKey": [] }],
   "components": {
     "securitySchemes": {
       "apiKey": {
         "type": "apiKey",
         "in": "header",
         "name": "x-api-key",
-        "description": "App-scoped PactAgent API key. Bearer tokens with pa_test_/pa_live_ keys are also accepted."
+        "description": "App-scoped API key. PactAgent keys are returned once when created."
+      },
+      "operatorBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Operator session created by the CKB wallet challenge flow."
       }
     },
-    "headers": {
+    "parameters": {
+      "Id": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string", "format": "uuid" }
+      },
       "IdempotencyKey": {
-        "description": "Required for sensitive POST actions. Reuse the same key to safely retry the same request body.",
-        "schema": {
-          "type": "string",
-          "maxLength": 200
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "description": "A caller-generated key used to safely retry a sensitive mutation.",
+        "schema": { "type": "string", "minLength": 1, "maxLength": 200 }
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 }
+      },
+      "Cursor": {
+        "name": "cursor",
+        "in": "query",
+        "schema": { "type": "string" }
+      }
+    },
+    "responses": {
+      "Success": {
+        "description": "Successful response",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/DataEnvelope" }
+          }
+        }
+      },
+      "Created": {
+        "description": "Resource created",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/DataEnvelope" }
+          }
+        }
+      },
+      "List": {
+        "description": "Cursor-paginated list",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ListEnvelope" }
+          }
+        }
+      },
+      "Error": {
+        "description": "Authentication, authorization, validation, conflict, rate-limit, or server error",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorEnvelope" }
+          }
         }
       }
     },
     "schemas": {
-      "Error": {
+      "DataEnvelope": {
         "type": "object",
-        "required": ["error"],
+        "required": ["data"],
         "properties": {
-          "error": {
-            "type": "object",
-            "required": ["type", "code", "message", "requestId"],
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": ["authentication_error", "permission_error", "invalid_request_error", "not_found_error", "conflict_error", "rate_limit_error", "internal_error"]
-              },
-              "code": { "type": "string" },
-              "message": { "type": "string" },
-              "requestId": { "type": "string" }
-            }
-          }
+          "data": {},
+          "requestId": { "type": "string" }
         }
       },
-      "App": {
+      "ListEnvelope": {
         "type": "object",
-        "required": ["id", "name", "slug", "environment", "status", "createdAt", "updatedAt"],
+        "required": ["data", "pagination"],
         "properties": {
-          "id": { "type": "string" },
-          "name": { "type": "string" },
-          "slug": { "type": "string" },
-          "environment": { "type": "string", "enum": ["sandbox", "production"] },
-          "status": { "type": "string", "enum": ["active", "disabled", "suspended"] },
-          "defaultCurrency": { "type": "string" },
-          "defaultNetwork": { "type": "string" },
-          "createdAt": { "type": "string", "format": "date-time" },
-          "updatedAt": { "type": "string", "format": "date-time" }
-        }
-      },
-      "Agreement": {
-        "type": "object",
-        "required": ["id", "appId", "title", "status", "totalAmount", "currency", "createdAt", "updatedAt"],
-        "properties": {
-          "id": { "type": "string" },
-          "appId": { "type": "string" },
-          "externalReferenceId": { "type": ["string", "null"] },
-          "title": { "type": "string" },
-          "description": { "type": "string" },
-          "clientExternalId": { "type": ["string", "null"] },
-          "workerExternalId": { "type": ["string", "null"] },
-          "status": { "type": "string" },
-          "totalAmount": { "type": "string", "pattern": "^[1-9][0-9]*$" },
-          "currency": { "type": "string" },
-          "releaseMode": { "type": "string", "enum": ["manual", "milestone", "automatic"] },
-          "disputeMode": { "type": "string", "enum": ["app_managed", "pactagent_managed"] },
-          "metadata": { "type": "object", "additionalProperties": true },
-          "createdAt": { "type": "string", "format": "date-time" },
-          "updatedAt": { "type": "string", "format": "date-time" }
-        }
-      },
-      "Milestone": {
-        "type": "object",
-        "required": ["id", "appId", "agreementId", "title", "amount", "status"],
-        "properties": {
-          "id": { "type": "string" },
-          "appId": { "type": "string" },
-          "agreementId": { "type": "string" },
-          "externalReferenceId": { "type": ["string", "null"] },
-          "title": { "type": "string" },
-          "description": { "type": "string" },
-          "amount": { "type": "string" },
-          "currency": { "type": "string" },
-          "order": { "type": "integer" },
-          "status": { "type": "string" },
-          "dueDate": { "type": ["string", "null"], "format": "date-time" }
-        }
-      },
-      "Escrow": {
-        "type": "object",
-        "required": ["id", "appId", "agreementId", "amount", "currency", "rail", "network", "status"],
-        "properties": {
-          "id": { "type": "string" },
-          "appId": { "type": "string" },
-          "agreementId": { "type": "string" },
-          "milestoneId": { "type": ["string", "null"] },
-          "amount": { "type": "string" },
-          "currency": { "type": "string" },
-          "rail": { "type": "string", "enum": ["mock", "manual", "ckb", "future_fiat", "future_usdt"] },
-          "network": { "type": "string", "enum": ["sandbox", "testnet", "mainnet"] },
-          "status": { "type": "string" },
-          "lockAddress": { "type": ["string", "null"] },
-          "lockTxHash": { "type": ["string", "null"] },
-          "releaseTxHash": { "type": ["string", "null"] },
-          "refundTxHash": { "type": ["string", "null"] }
-        }
-      },
-      "Proof": {
-        "type": "object",
-        "properties": {
-          "id": { "type": "string" },
-          "appId": { "type": "string" },
-          "agreementId": { "type": "string" },
-          "milestoneId": { "type": "string" },
-          "submittedByExternalId": { "type": ["string", "null"] },
-          "type": { "type": "string", "enum": ["text", "url", "file", "github", "mixed"] },
-          "content": { "type": "string" },
-          "status": { "type": "string" }
-        }
-      },
-      "WebhookEndpoint": {
-        "type": "object",
-        "properties": {
-          "id": { "type": "string" },
-          "appId": { "type": "string" },
-          "url": { "type": "string", "format": "uri" },
-          "description": { "type": ["string", "null"] },
-          "subscribedEvents": { "type": "array", "items": { "type": "string" } },
-          "status": { "type": "string", "enum": ["active", "disabled"] }
+          "data": { "type": "array", "items": {} },
+          "pagination": { "$ref": "#/components/schemas/Pagination" },
+          "requestId": { "type": "string" }
         }
       },
       "Pagination": {
@@ -157,226 +124,342 @@
           "limit": { "type": "integer" },
           "cursor": { "type": ["string", "null"] }
         }
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["type", "code", "message"],
+            "properties": {
+              "type": { "type": "string" },
+              "code": { "type": "string" },
+              "message": { "type": "string" },
+              "requestId": { "type": "string" }
+            }
+          }
+        }
+      },
+      "AuthChallengeRequest": {
+        "type": "object",
+        "required": ["address"],
+        "properties": { "address": { "type": "string", "minLength": 1 } }
+      },
+      "AuthVerifyRequest": {
+        "type": "object",
+        "required": ["address", "message", "signature"],
+        "properties": {
+          "address": { "type": "string" },
+          "message": { "type": "string" },
+          "signature": {
+            "type": "object",
+            "required": ["signature", "identity", "signType"],
+            "properties": {
+              "signature": { "type": "string" },
+              "identity": { "type": "string" },
+              "signType": { "type": "string" }
+            }
+          }
+        }
+      },
+      "AppInput": {
+        "type": "object",
+        "required": ["name", "slug"],
+        "properties": {
+          "name": { "type": "string", "maxLength": 120 },
+          "slug": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+          "environment": { "type": "string", "enum": ["sandbox", "production"], "default": "sandbox" },
+          "defaultCurrency": { "type": "string", "default": "CKB" },
+          "defaultNetwork": { "type": "string", "default": "sandbox" }
+        }
+      },
+      "AppUpdate": {
+        "type": "object",
+        "minProperties": 1,
+        "properties": {
+          "name": { "type": "string", "maxLength": 120 },
+          "status": { "type": "string", "enum": ["active", "disabled", "suspended"] },
+          "defaultCurrency": { "type": "string" },
+          "defaultNetwork": { "type": "string" }
+        }
+      },
+      "ApiKeyInput": {
+        "type": "object",
+        "required": ["appId", "name", "scopes"],
+        "properties": {
+          "appId": { "type": "string", "format": "uuid" },
+          "name": { "type": "string", "maxLength": 120 },
+          "scopes": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+        }
+      },
+      "AgreementInput": {
+        "type": "object",
+        "required": ["title", "clientExternalId", "workerExternalId", "totalAmount"],
+        "properties": {
+          "externalReferenceId": { "type": "string", "maxLength": 160 },
+          "title": { "type": "string", "maxLength": 200 },
+          "description": { "type": "string", "maxLength": 5000 },
+          "clientExternalId": { "type": "string", "maxLength": 160 },
+          "workerExternalId": { "type": "string", "maxLength": 160 },
+          "totalAmount": { "type": "string", "pattern": "^[1-9][0-9]*$" },
+          "currency": { "type": "string", "default": "CKB" },
+          "releaseMode": { "type": "string", "enum": ["manual", "milestone", "automatic"], "default": "milestone" },
+          "disputeMode": { "type": "string", "enum": ["app_managed", "pactagent_managed"], "default": "app_managed" },
+          "sourceType": { "type": "string" },
+          "sourceUrl": { "type": "string", "format": "uri" },
+          "metadata": { "type": "object", "additionalProperties": true }
+        }
+      },
+      "MilestoneInput": {
+        "type": "object",
+        "required": ["title", "amount"],
+        "properties": {
+          "externalReferenceId": { "type": "string" },
+          "title": { "type": "string", "maxLength": 160 },
+          "description": { "type": "string", "maxLength": 3000 },
+          "amount": { "type": "string", "pattern": "^[1-9][0-9]*$" },
+          "currency": { "type": "string" },
+          "order": { "type": "integer", "minimum": 1 },
+          "dueDate": { "type": "string", "format": "date-time" }
+        }
+      },
+      "EscrowInput": {
+        "type": "object",
+        "required": ["agreementId", "amount"],
+        "properties": {
+          "agreementId": { "type": "string", "format": "uuid" },
+          "milestoneId": { "type": "string", "format": "uuid" },
+          "amount": { "type": "string", "pattern": "^[1-9][0-9]*$" },
+          "currency": { "type": "string", "default": "CKB" },
+          "rail": { "type": "string", "enum": ["mock", "manual", "ckb"], "default": "mock" },
+          "network": { "type": "string", "enum": ["sandbox", "testnet", "mainnet"], "default": "sandbox" }
+        }
+      },
+      "ProofInput": {
+        "type": "object",
+        "required": ["agreementId", "milestoneId", "submittedByExternalId", "type", "content"],
+        "properties": {
+          "agreementId": { "type": "string", "format": "uuid" },
+          "milestoneId": { "type": "string", "format": "uuid" },
+          "submittedByExternalId": { "type": "string" },
+          "type": { "type": "string", "enum": ["text", "url", "file", "github", "mixed"] },
+          "content": { "type": "string", "maxLength": 20000 },
+          "links": { "type": "array", "maxItems": 10, "items": { "type": "string", "format": "uri" } },
+          "fileRefs": { "type": "array", "maxItems": 20, "items": { "type": "string" } }
+        }
+      },
+      "ProofReviewInput": {
+        "type": "object",
+        "required": ["reviewerExternalId", "decision"],
+        "properties": {
+          "reviewerExternalId": { "type": "string" },
+          "decision": { "type": "string", "enum": ["approved", "rejected", "needs_changes"] },
+          "note": { "type": "string", "maxLength": 5000 }
+        }
+      },
+      "DisputeInput": {
+        "type": "object",
+        "required": ["agreementId", "milestoneId", "openedByExternalId", "reason"],
+        "properties": {
+          "agreementId": { "type": "string", "format": "uuid" },
+          "milestoneId": { "type": "string", "format": "uuid" },
+          "openedByExternalId": { "type": "string" },
+          "reason": { "type": "string", "maxLength": 5000 },
+          "evidenceLinks": { "type": "array", "maxItems": 20, "items": { "type": "string", "format": "uri" } }
+        }
+      },
+      "DisputeResolutionInput": {
+        "type": "object",
+        "required": ["resolutionType"],
+        "properties": {
+          "resolutionType": { "type": "string", "enum": ["release", "refund", "split"] },
+          "resolutionNote": { "type": "string", "maxLength": 5000 },
+          "workerAmount": { "type": "string", "pattern": "^[1-9][0-9]*$" },
+          "clientAmount": { "type": "string", "pattern": "^[1-9][0-9]*$" }
+        }
+      },
+      "WebhookInput": {
+        "type": "object",
+        "required": ["url", "subscribedEvents"],
+        "properties": {
+          "url": { "type": "string", "format": "uri", "maxLength": 2048 },
+          "description": { "type": "string", "maxLength": 240 },
+          "subscribedEvents": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "type": "string" } }
+        }
+      },
+      "WebhookUpdate": {
+        "type": "object",
+        "minProperties": 1,
+        "properties": {
+          "url": { "type": "string", "format": "uri", "maxLength": 2048 },
+          "description": { "type": ["string", "null"], "maxLength": 240 },
+          "subscribedEvents": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "type": "string" } },
+          "status": { "type": "string", "enum": ["active", "disabled"] }
+        }
       }
     }
   },
   "paths": {
-    "/v1/apps/current": {
-      "get": {
-        "summary": "Get the app for the current API key",
-        "security": [{ "apiKey": [] }],
-        "responses": {
-          "200": { "description": "Current app", "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/App" }, "requestId": { "type": "string" } } } } } },
-          "401": { "description": "Authentication error", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
-        }
+    "/v1/auth/challenge": {
+      "post": {
+        "tags": ["Operator Auth"], "summary": "Create a wallet sign-in challenge", "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AuthChallengeRequest" } } } },
+        "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } }
       }
+    },
+    "/v1/auth/verify": {
+      "post": {
+        "tags": ["Operator Auth"], "summary": "Verify a signed wallet challenge", "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AuthVerifyRequest" } } } },
+        "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } }
+      }
+    },
+    "/v1/auth/me": {
+      "get": { "tags": ["Operator Auth"], "summary": "Get the current operator session", "security": [{ "operatorBearer": [] }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/apps/current": {
+      "get": { "tags": ["Apps"], "summary": "Get the app resolved from the current API key", "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/apps": {
+      "post": { "tags": ["Apps"], "summary": "Create an app", "security": [{ "operatorBearer": [] }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AppInput" } } } }, "responses": { "201": { "$ref": "#/components/responses/Created" }, "default": { "$ref": "#/components/responses/Error" } } },
+      "get": { "tags": ["Apps"], "summary": "List operator-owned apps", "security": [{ "operatorBearer": [] }], "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/apps/{id}": {
+      "get": { "tags": ["Apps"], "summary": "Get an operator-owned app", "security": [{ "operatorBearer": [] }], "parameters": [{ "$ref": "#/components/parameters/Id" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } },
+      "patch": { "tags": ["Apps"], "summary": "Update an operator-owned app", "security": [{ "operatorBearer": [] }], "parameters": [{ "$ref": "#/components/parameters/Id" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AppUpdate" } } } }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/apps/{id}/disable": {
+      "post": { "tags": ["Apps"], "summary": "Disable an operator-owned app", "security": [{ "operatorBearer": [] }], "parameters": [{ "$ref": "#/components/parameters/Id" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/api-keys": {
+      "post": { "tags": ["API Keys"], "summary": "Create an app API key", "security": [{ "operatorBearer": [] }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiKeyInput" } } } }, "responses": { "201": { "$ref": "#/components/responses/Created" }, "default": { "$ref": "#/components/responses/Error" } } },
+      "get": { "tags": ["API Keys"], "summary": "List operator-managed API keys", "security": [{ "operatorBearer": [] }], "parameters": [{ "name": "appId", "in": "query", "schema": { "type": "string", "format": "uuid" } }, { "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/api-keys/{id}": {
+      "delete": { "tags": ["API Keys"], "summary": "Revoke an API key", "security": [{ "operatorBearer": [] }], "parameters": [{ "$ref": "#/components/parameters/Id" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/agreements": {
-      "post": {
-        "summary": "Create an app-scoped agreement",
-        "security": [{ "apiKey": [] }],
-        "parameters": [{ "name": "Idempotency-Key", "in": "header", "required": true, "schema": { "type": "string" } }],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["title", "clientExternalId", "workerExternalId", "totalAmount"],
-                "properties": {
-                  "externalReferenceId": { "type": "string" },
-                  "title": { "type": "string" },
-                  "description": { "type": "string" },
-                  "clientExternalId": { "type": "string" },
-                  "workerExternalId": { "type": "string" },
-                  "totalAmount": { "type": "string", "pattern": "^[1-9][0-9]*$" },
-                  "currency": { "type": "string", "default": "CKB" },
-                  "releaseMode": { "type": "string", "enum": ["manual", "milestone", "automatic"], "default": "milestone" },
-                  "disputeMode": { "type": "string", "enum": ["app_managed", "pactagent_managed"], "default": "app_managed" },
-                  "metadata": { "type": "object", "additionalProperties": true }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": { "description": "Agreement created", "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/Agreement" }, "requestId": { "type": "string" } } } } } },
-          "409": { "description": "Idempotency conflict", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
-        }
-      },
-      "get": {
-        "summary": "List app-scoped agreements",
-        "security": [{ "apiKey": [] }],
-        "parameters": [
-          { "name": "status", "in": "query", "schema": { "type": "string" } },
-          { "name": "externalReferenceId", "in": "query", "schema": { "type": "string" } },
-          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20 } },
-          { "name": "cursor", "in": "query", "schema": { "type": "string" } }
-        ],
-        "responses": {
-          "200": { "description": "Agreement list", "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "type": "array", "items": { "$ref": "#/components/schemas/Agreement" } }, "pagination": { "$ref": "#/components/schemas/Pagination" }, "requestId": { "type": "string" } } } } } }
-        }
-      }
+      "post": { "tags": ["Agreements"], "summary": "Create an app-scoped agreement", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AgreementInput" } } } }, "responses": { "201": { "$ref": "#/components/responses/Created" }, "default": { "$ref": "#/components/responses/Error" } } },
+      "get": { "tags": ["Agreements"], "summary": "List app-scoped agreements", "parameters": [{ "name": "status", "in": "query", "schema": { "type": "string" } }, { "name": "externalReferenceId", "in": "query", "schema": { "type": "string" } }, { "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/agreements/{id}": {
+      "get": { "tags": ["Agreements"], "summary": "Get an app-scoped agreement", "parameters": [{ "$ref": "#/components/parameters/Id" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/agreements/{id}/accept": {
+      "post": { "tags": ["Agreements"], "summary": "Accept an agreement", "parameters": [{ "$ref": "#/components/parameters/Id" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/agreements/{id}/funding-required": {
+      "post": { "tags": ["Agreements"], "summary": "Move an accepted agreement to funding required", "parameters": [{ "$ref": "#/components/parameters/Id" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/agreements/{id}/cancel": {
+      "post": { "tags": ["Agreements"], "summary": "Cancel an agreement", "parameters": [{ "$ref": "#/components/parameters/Id" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/agreements/{id}/milestones": {
-      "post": {
-        "summary": "Create a milestone under an app-scoped agreement",
-        "security": [{ "apiKey": [] }],
-        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["title", "amount"],
-                "properties": {
-                  "externalReferenceId": { "type": "string" },
-                  "title": { "type": "string" },
-                  "description": { "type": "string" },
-                  "amount": { "type": "string" },
-                  "currency": { "type": "string" },
-                  "dueDate": { "type": "string", "format": "date-time" }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": { "description": "Milestone created", "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/Milestone" }, "requestId": { "type": "string" } } } } } }
-        }
-      }
+      "post": { "tags": ["Milestones"], "summary": "Create a milestone under an agreement", "parameters": [{ "$ref": "#/components/parameters/Id" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MilestoneInput" } } } }, "responses": { "201": { "$ref": "#/components/responses/Created" }, "default": { "$ref": "#/components/responses/Error" } } },
+      "get": { "tags": ["Milestones"], "summary": "List milestones under an agreement", "parameters": [{ "$ref": "#/components/parameters/Id" }, { "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/milestones": {
+      "get": { "tags": ["Milestones"], "summary": "List app-scoped milestones", "parameters": [{ "name": "agreementId", "in": "query", "schema": { "type": "string", "format": "uuid" } }, { "name": "status", "in": "query", "schema": { "type": "string" } }, { "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/milestones/{id}": {
+      "get": { "tags": ["Milestones"], "summary": "Get an app-scoped milestone", "parameters": [{ "$ref": "#/components/parameters/Id" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/escrows": {
-      "post": {
-        "summary": "Create a sandbox/mock, manual, or future escrow record",
-        "security": [{ "apiKey": [] }],
-        "parameters": [{ "name": "Idempotency-Key", "in": "header", "required": true, "schema": { "type": "string" } }],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["agreementId", "amount"],
-                "properties": {
-                  "agreementId": { "type": "string" },
-                  "milestoneId": { "type": "string" },
-                  "amount": { "type": "string" },
-                  "currency": { "type": "string", "default": "CKB" },
-                  "rail": { "type": "string", "enum": ["mock", "manual", "ckb", "future_fiat", "future_usdt"], "default": "mock" },
-                  "network": { "type": "string", "enum": ["sandbox", "testnet", "mainnet"], "default": "sandbox" }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": { "description": "Escrow created", "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/Escrow" }, "requestId": { "type": "string" } } } } } }
-        }
-      }
+      "post": { "tags": ["Escrows"], "summary": "Create a mock, manual, or CKB escrow record", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EscrowInput" } } } }, "responses": { "201": { "$ref": "#/components/responses/Created" }, "default": { "$ref": "#/components/responses/Error" } } },
+      "get": { "tags": ["Escrows"], "summary": "List app-scoped escrows", "parameters": [{ "name": "agreementId", "in": "query", "schema": { "type": "string", "format": "uuid" } }, { "name": "status", "in": "query", "schema": { "type": "string" } }, { "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/escrows/{id}": {
+      "get": { "tags": ["Escrows"], "summary": "Get an app-scoped escrow", "parameters": [{ "$ref": "#/components/parameters/Id" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/escrows/{id}/mark-funded": {
+      "post": { "tags": ["Escrows"], "summary": "Mark a mock or manual escrow funded", "parameters": [{ "$ref": "#/components/parameters/Id" }], "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "txHash": { "type": "string", "maxLength": 200 } } } } } }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/escrows/{id}/release": {
-      "post": {
-        "summary": "Release funded escrow after approval or dispute resolution",
-        "security": [{ "apiKey": [] }],
-        "parameters": [
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "Idempotency-Key", "in": "header", "required": true, "schema": { "type": "string" } }
-        ],
-        "responses": {
-          "200": { "description": "Escrow released", "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/Escrow" }, "requestId": { "type": "string" } } } } } }
-        }
-      }
+      "post": { "tags": ["Escrows"], "summary": "Release a funded escrow", "parameters": [{ "$ref": "#/components/parameters/Id" }, { "$ref": "#/components/parameters/IdempotencyKey" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/escrows/{id}/refund": {
+      "post": { "tags": ["Escrows"], "summary": "Refund a funded escrow", "parameters": [{ "$ref": "#/components/parameters/Id" }, { "$ref": "#/components/parameters/IdempotencyKey" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/transactions": {
+      "get": { "tags": ["Transactions"], "summary": "List app-scoped transaction records", "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/proofs": {
-      "post": {
-        "summary": "Submit proof for an agreement/milestone",
-        "security": [{ "apiKey": [] }],
-        "parameters": [{ "name": "Idempotency-Key", "in": "header", "required": true, "schema": { "type": "string" } }],
-        "responses": {
-          "201": { "description": "Proof submitted", "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/Proof" }, "requestId": { "type": "string" } } } } } }
-        }
-      }
+      "post": { "tags": ["Proofs"], "summary": "Submit proof for a milestone", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProofInput" } } } }, "responses": { "201": { "$ref": "#/components/responses/Created" }, "default": { "$ref": "#/components/responses/Error" } } },
+      "get": { "tags": ["Proofs"], "summary": "List app-scoped proof submissions", "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/proofs/{id}": {
+      "get": { "tags": ["Proofs"], "summary": "Get a proof submission", "parameters": [{ "$ref": "#/components/parameters/Id" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/proofs/{id}/review": {
-      "post": {
-        "summary": "Approve, reject, or request changes for submitted proof",
-        "security": [{ "apiKey": [] }],
-        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["reviewerExternalId", "decision"],
-                "properties": {
-                  "reviewerExternalId": { "type": "string" },
-                  "decision": { "type": "string", "enum": ["approved", "rejected", "needs_changes"] },
-                  "note": { "type": "string" }
-                }
-              }
-            }
-          }
-        },
-        "responses": { "200": { "description": "Review recorded" } }
-      }
+      "post": { "tags": ["Proofs"], "summary": "Record a proof review decision", "parameters": [{ "$ref": "#/components/parameters/Id" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProofReviewInput" } } } }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/reviews": {
+      "get": { "tags": ["Reviews"], "summary": "List app-scoped proof reviews", "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/disputes": {
+      "post": { "tags": ["Disputes"], "summary": "Open a dispute", "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DisputeInput" } } } }, "responses": { "201": { "$ref": "#/components/responses/Created" }, "default": { "$ref": "#/components/responses/Error" } } },
+      "get": { "tags": ["Disputes"], "summary": "List app-scoped disputes", "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/disputes/{id}": {
+      "get": { "tags": ["Disputes"], "summary": "Get a dispute", "parameters": [{ "$ref": "#/components/parameters/Id" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/disputes/{id}/resolve": {
+      "post": { "tags": ["Disputes"], "summary": "Resolve a dispute", "parameters": [{ "$ref": "#/components/parameters/Id" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DisputeResolutionInput" } } } }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/events": {
-      "get": {
-        "summary": "List lifecycle events for the current app",
-        "security": [{ "apiKey": [] }],
-        "responses": { "200": { "description": "Event list" } }
-      }
+      "get": { "tags": ["Events"], "summary": "List app-scoped lifecycle events", "parameters": [{ "name": "type", "in": "query", "schema": { "type": "string" } }, { "name": "agreementId", "in": "query", "schema": { "type": "string", "format": "uuid" } }, { "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/events/{id}": {
+      "get": { "tags": ["Events"], "summary": "Get a lifecycle event", "parameters": [{ "$ref": "#/components/parameters/Id" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/webhook-endpoints": {
-      "post": {
-        "summary": "Create an app-scoped webhook endpoint",
-        "security": [{ "apiKey": [] }],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["url", "subscribedEvents"],
-                "properties": {
-                  "url": { "type": "string", "format": "uri" },
-                  "description": { "type": "string" },
-                  "subscribedEvents": { "type": "array", "items": { "type": "string" } }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Endpoint created. The raw webhook secret is returned only once.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "allOf": [
-                        { "$ref": "#/components/schemas/WebhookEndpoint" },
-                        { "type": "object", "properties": { "secret": { "type": "string" } } }
-                      ]
-                    },
-                    "requestId": { "type": "string" }
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "get": {
-        "summary": "List webhook endpoints for the current app",
-        "security": [{ "apiKey": [] }],
-        "responses": { "200": { "description": "Webhook endpoint list" } }
-      }
+      "post": { "tags": ["Webhooks"], "summary": "Create a signed webhook endpoint", "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WebhookInput" } } } }, "responses": { "201": { "$ref": "#/components/responses/Created" }, "default": { "$ref": "#/components/responses/Error" } } },
+      "get": { "tags": ["Webhooks"], "summary": "List app-scoped webhook endpoints", "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/webhook-endpoints/{id}": {
+      "get": { "tags": ["Webhooks"], "summary": "Get a webhook endpoint", "parameters": [{ "$ref": "#/components/parameters/Id" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } },
+      "patch": { "tags": ["Webhooks"], "summary": "Update a webhook endpoint", "parameters": [{ "$ref": "#/components/parameters/Id" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WebhookUpdate" } } } }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } },
+      "delete": { "tags": ["Webhooks"], "summary": "Delete a webhook endpoint", "parameters": [{ "$ref": "#/components/parameters/Id" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/webhook-deliveries": {
+      "get": { "tags": ["Webhooks"], "summary": "List app-scoped webhook deliveries", "parameters": [{ "name": "endpointId", "in": "query", "schema": { "type": "string", "format": "uuid" } }, { "name": "eventId", "in": "query", "schema": { "type": "string", "format": "uuid" } }, { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["pending", "delivered", "failed"] } }, { "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/webhook-deliveries/{id}": {
+      "get": { "tags": ["Webhooks"], "summary": "Get a webhook delivery", "parameters": [{ "$ref": "#/components/parameters/Id" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/webhook-deliveries/{id}/retry": {
+      "post": { "tags": ["Webhooks"], "summary": "Retry a failed webhook delivery", "parameters": [{ "$ref": "#/components/parameters/Id" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/audit-logs": {
+      "get": { "tags": ["Audit"], "summary": "List app-scoped audit records", "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/admin/system-health": {
+      "get": { "tags": ["Admin"], "summary": "Get infrastructure system health", "security": [{ "operatorBearer": [] }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/admin/apps": {
+      "get": { "tags": ["Admin"], "summary": "List apps across tenants", "security": [{ "operatorBearer": [] }], "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/admin/agreements": {
+      "get": { "tags": ["Admin"], "summary": "List agreements across tenants", "security": [{ "operatorBearer": [] }], "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/admin/escrows": {
+      "get": { "tags": ["Admin"], "summary": "List escrows across tenants", "security": [{ "operatorBearer": [] }], "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/admin/events": {
+      "get": { "tags": ["Admin"], "summary": "List events across tenants", "security": [{ "operatorBearer": [] }], "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/admin/webhook-deliveries": {
+      "get": { "tags": ["Admin"], "summary": "List webhook deliveries across tenants", "security": [{ "operatorBearer": [] }], "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/admin/audit-logs": {
+      "get": { "tags": ["Admin"], "summary": "List audit records across tenants", "security": [{ "operatorBearer": [] }], "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/admin/jobs": {
+      "get": { "tags": ["Admin"], "summary": "List durable jobs across tenants", "security": [{ "operatorBearer": [] }], "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/v1/admin/jobs/{id}/replay": {
+      "post": { "tags": ["Admin"], "summary": "Replay a completed or dead-lettered job", "security": [{ "operatorBearer": [] }], "parameters": [{ "$ref": "#/components/parameters/Id" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
     }
   }
 }

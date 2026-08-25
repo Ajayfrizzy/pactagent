@@ -99,17 +99,6 @@ export function proofStatusForReviewDecision(decision: ReviewDecision): ProofSta
   }
 }
 
-export function reviewStatusForDecision(decision: ReviewDecision) {
-  switch (decision) {
-    case 'approved':
-      return 'READY_FOR_HUMAN_REVIEW';
-    case 'rejected':
-      return 'ISSUES_FOUND';
-    case 'needs_changes':
-      return 'NEEDS_MORE_INFO';
-  }
-}
-
 export function agreementPathForReviewDecision(
   status: InfrastructureAgreementStatus,
   decision: ReviewDecision,

@@ -1,7 +1,7 @@
 BEGIN;
 
 DELETE FROM "App" WHERE id = '00000000-0000-4000-8000-000000000001';
-INSERT INTO "App" (id, "ownerUserId", name, slug, environment, status, "defaultCurrency", "defaultNetwork", "createdAt", "updatedAt")
+INSERT INTO "App" (id, "ownerId", name, slug, environment, status, "defaultCurrency", "defaultNetwork", "createdAt", "updatedAt")
 VALUES (
   '00000000-0000-4000-8000-000000000001',
   'fixture-owner',

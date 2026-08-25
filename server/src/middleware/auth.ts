@@ -1,4 +1,5 @@
 import { NextFunction, Request, Response } from 'express';
+import { authenticationError } from '../common/errors/app-error';
 import { verifyAuthToken } from '../services/authService';
 
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
@@ -6,7 +7,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
   const token = header?.startsWith('Bearer ') ? header.slice(7) : undefined;
 
   if (!token) {
-    return res.status(401).json({ success: false, error: 'Authentication required' });
+    return next(authenticationError());
   }
 
   try {
@@ -14,6 +15,6 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
     next();
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Invalid authentication token';
-    return res.status(401).json({ success: false, error: message });
+    return next(authenticationError(message));
   }
 }

@@ -13,7 +13,7 @@ export function createApiKey(data: {
   });
 }
 
-export function listApiKeysForOwner(ownerUserId: string, params: {
+export function listApiKeysForOwner(ownerId: string, params: {
   appId?: string;
   limit: number;
   cursor?: string;
@@ -22,7 +22,7 @@ export function listApiKeysForOwner(ownerUserId: string, params: {
     where: {
       ...(params.appId ? { appId: params.appId } : {}),
       app: {
-        ownerUserId,
+        ownerId,
       },
     },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -31,12 +31,12 @@ export function listApiKeysForOwner(ownerUserId: string, params: {
   });
 }
 
-export function findApiKeyForOwner(ownerUserId: string, apiKeyId: string) {
+export function findApiKeyForOwner(ownerId: string, apiKeyId: string) {
   return prisma.apiKey.findFirst({
     where: {
       id: apiKeyId,
       app: {
-        ownerUserId,
+        ownerId,
       },
     },
   });
@@ -57,12 +57,12 @@ export function findActiveApiKeyByHash(keyHash: string) {
   });
 }
 
-export function revokeApiKeyForOwner(ownerUserId: string, apiKeyId: string) {
+export function revokeApiKeyForOwner(ownerId: string, apiKeyId: string) {
   return prisma.apiKey.updateMany({
     where: {
       id: apiKeyId,
       app: {
-        ownerUserId,
+        ownerId,
       },
       status: 'active',
     },

@@ -74,7 +74,5 @@ export async function listJobs(query: AdminListQuery) {
 }
 
 export async function replayDeadLetterJob(jobId: string) {
-  const job = await prisma.agentJob.findUnique({ where: { id: jobId } });
-  if (!job?.agreementId) throw new Error('Dead-letter job with agreement not found.');
-  return replayJob(jobId, job.agreementId);
+  return replayJob(jobId);
 }

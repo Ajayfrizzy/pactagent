@@ -5,13 +5,13 @@ import { classifyProviderFailure, executeProviderRequest, ProviderError, retryab
 test('provider requests retry retryable failures with a bound', async () => {
   let attempts = 0;
   const result = await executeProviderRequest({
-    provider: 'market_price',
+    provider: 'webhook',
     operation: 'retry-test',
     timeoutMs: 1_000,
     maxAttempts: 3,
     run: async ({ requestId }) => {
       attempts += 1;
-      if (attempts < 3) throw new ProviderError('temporary', 'market_price', true, requestId, 503);
+      if (attempts < 3) throw new ProviderError('temporary', 'webhook', true, requestId, 503);
       return 'ok';
     },
   });
@@ -26,21 +26,21 @@ test('provider failure classification is consistent for HTTP, timeout, network, 
   assert.equal(retryableStatus(400), false);
   assert.equal(classifyProviderFailure(new TypeError('fetch failed')).retryable, true);
   assert.equal(classifyProviderFailure(Object.assign(new Error('reset'), { code: 'ECONNRESET' })).retryable, true);
-  assert.equal(classifyProviderFailure(new ProviderError('invalid', 'forum', false, 'request', 422)).retryable, false);
+  assert.equal(classifyProviderFailure(new ProviderError('invalid', 'webhook', false, 'request', 422)).retryable, false);
   assert.equal(classifyProviderFailure(new Error('application bug')).retryable, false);
 });
 
 test('provider requests do not retry permanent failures', async () => {
   let attempts = 0;
   await assert.rejects(() => executeProviderRequest({
-    provider: 'forum',
+    provider: 'webhook',
     operation: 'permanent-test',
     timeoutMs: 1_000,
     maxAttempts: 3,
     failureThreshold: 100,
     run: async ({ requestId }) => {
       attempts += 1;
-      throw new ProviderError('invalid request', 'forum', false, requestId, 400);
+      throw new ProviderError('invalid request', 'webhook', false, requestId, 400);
     },
   }), ProviderError);
   assert.equal(attempts, 1);
@@ -50,7 +50,7 @@ test('provider concurrency is bounded deterministically', async () => {
   let active = 0;
   let maximum = 0;
   await Promise.all(Array.from({ length: 6 }, () => executeProviderRequest({
-    provider: 'market_price', operation: 'concurrency-test', timeoutMs: 1_000,
+    provider: 'webhook', operation: 'concurrency-test', timeoutMs: 1_000,
     maxAttempts: 1, concurrency: 2, failureThreshold: 100,
     run: async () => {
       active += 1;
@@ -65,12 +65,12 @@ test('provider concurrency is bounded deterministically', async () => {
 
 test('provider circuit opens after the configured deterministic failure threshold', async () => {
   await assert.rejects(() => executeProviderRequest({
-    provider: 'treasury_signer', operation: 'circuit-test', timeoutMs: 100,
+    provider: 'ckb', operation: 'circuit-test', timeoutMs: 100,
     maxAttempts: 1, failureThreshold: 1, circuitResetMs: 60_000,
-    run: async ({ requestId }) => { throw new ProviderError('unavailable', 'treasury_signer', true, requestId, 503); },
+    run: async ({ requestId }) => { throw new ProviderError('unavailable', 'ckb', true, requestId, 503); },
   }), ProviderError);
   await assert.rejects(() => executeProviderRequest({
-    provider: 'treasury_signer', operation: 'circuit-test', timeoutMs: 100,
+    provider: 'ckb', operation: 'circuit-test', timeoutMs: 100,
     run: async () => 'must-not-run',
   }), /circuit is open/);
 });

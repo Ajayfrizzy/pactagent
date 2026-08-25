@@ -5,17 +5,16 @@
   "license": "MIT",
   "workspaces": [
     "server",
-    "shared",
     "web"
   ],
   "engines": {
     "node": "24.x"
   },
   "scripts": {
-    "build": "npm exec -- tsc -p shared/tsconfig.json && npm run build --workspace @pact-agent/server && npm run build --workspace @pact-agent/web",
+    "build": "npm run build --workspace @pact-agent/server && npm run build --workspace @pact-agent/web",
     "test": "npm run test --workspace @pact-agent/server",
     "test:integration": "npm run test:integration --workspace @pact-agent/server",
-    "lint": "npm exec -- tsc -p shared/tsconfig.json --noEmit && npm run lint --workspace @pact-agent/server && npm run lint --workspace @pact-agent/web",
+    "lint": "npm run lint --workspace @pact-agent/server && npm run lint --workspace @pact-agent/web",
     "dev": "docker compose -f compose.dev.yaml up -d && npm run dev --workspace @pact-agent/server",
     "dev:web": "npm run dev --workspace @pact-agent/web",
     "dev:worker": "npm run worker --workspace @pact-agent/server",
@@ -44,6 +43,7 @@
     "@prisma/dev": "0.24.16",
     "axios": "^1.16.0",
     "brace-expansion": "5.0.8",
+    "fast-uri": "3.1.5",
     "follow-redirects": "^1.15.12",
     "form-data": "^4.0.6",
     "gaxios": "7.3.0",
@@ -51,8 +51,8 @@
     "next": {
       "postcss": "8.5.23"
     },
+    "nanoid": "3.3.18",
     "path-to-regexp": "0.1.13",
-    "postcss": "8.5.23",
-    "ws": "^8.21.0"
+    "postcss": "8.5.23"
   }
 }

@@ -1,6 +1,6 @@
 # PactAgent documentation
 
-Start with the root `README.md` for setup and product behavior, and
+Start with the root `README.md` for setup and platform behavior, and
 `CONTRIBUTING.md` for source-code placement rules.
 
 ## Documentation map

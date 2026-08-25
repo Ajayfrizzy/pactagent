@@ -4,8 +4,6 @@ import { getJobRetryDelayMs, queueForJobKind } from './jobQueueService';
 
 test('job kinds route to isolated worker queues', () => {
   assert.equal(queueForJobKind('DELIVER_WEBHOOK'), 'webhook');
-  assert.equal(queueForJobKind('DISPUTE_RECOMMENDATION'), 'ai');
-  assert.equal(queueForJobKind('RECONCILE_SETTLEMENT'), 'settlement');
 });
 
 test('job retry delay is exponential, bounded, and jittered', () => {

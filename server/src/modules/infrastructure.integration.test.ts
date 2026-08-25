@@ -3,13 +3,12 @@ import { randomUUID } from 'crypto';
 import test, { after, before, describe } from 'node:test';
 import type { Request } from 'express';
 import { prisma } from '../db';
-import { Prisma } from '@prisma/client';
 import { AppError } from '../common/errors/app-error';
 import { createAgreementForApp, getAgreementForApp } from './agreements/agreement.service';
 import { releaseEscrow, refundEscrow } from './escrows/escrow.service';
 import { assertWebhookUrlAllowed, fetchWebhookUrl, resetWebhookSecurityTestHooks, setWebhookSecurityTestHooks } from './webhooks/webhook.security';
 import { createInfrastructureAuditLog } from './audit-logs/audit-log.repository';
-import { claimAvailableJobs, completeJob, enqueueAgreementJob, releaseStaleLocks, renewJobLease } from '../services/jobQueueService';
+import { claimAvailableJobs, completeJob, enqueueJob, releaseStaleLocks, renewJobLease } from '../services/jobQueueService';
 import { getAppEvent, listAppEvents } from './events/event.service';
 import { listAppTransactions } from './transactions/transaction.service';
 import http from 'node:http';
@@ -17,7 +16,7 @@ import { createApp } from '../app';
 import { getApiKeyPrefix, hashApiKey } from '../common/crypto/api-keys';
 
 const shouldRun = process.env.RUN_DB_INTEGRATION_TESTS === 'true';
-const ownerUserId = `integration-${randomUUID()}`;
+const ownerId = `integration-${randomUUID()}`;
 const createdAppIds: string[] = [];
 const createdWorkerIds: string[] = [];
 
@@ -68,7 +67,7 @@ async function createIntegrationApp(name: string) {
   const app = await prisma.app.create({
     data: {
       id: randomUUID(),
-      ownerUserId,
+      ownerId,
       name,
       slug: `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${randomUUID().slice(0, 8)}`,
       environment: 'sandbox',
@@ -91,15 +90,12 @@ async function seedAgreement(appId: string, params?: {
       appId,
       title: `Integration Agreement ${randomUUID()}`,
       description: 'Integration test agreement',
-      clientAddress: 'client_external',
-      workerAddress: 'worker_external',
+      clientExternalId: 'client_external',
+      workerExternalId: 'worker_external',
       amount: params?.amount ?? '1000',
       currency: 'CKB',
       deadlineAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      proofType: 'URL',
-      reviewerMode: 'MANUAL',
-      releaseMode: 'PARTIAL',
-      infrastructureReleaseMode: 'milestone',
+      releaseMode: 'milestone',
       disputeMode: 'app_managed',
       settlementStatus: params?.status && params.status !== 'draft' ? 'FUNDED' : 'UNFUNDED',
       status: params?.status ?? 'draft',
@@ -141,13 +137,12 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
         data: {
           status: 'draft',
           settlementStatus: 'UNFUNDED',
-          ckbTxHashFund: null,
           fundingConfirmedAt: null,
         },
       });
       await prisma.milestone.deleteMany({ where: { appId: { in: createdAppIds } } });
       await prisma.idempotencyKey.deleteMany({ where: { appId: { in: createdAppIds } } });
-      await prisma.agentJob.deleteMany({ where: { agreement: { appId: { in: createdAppIds } } } });
+      await prisma.agentJob.deleteMany({ where: { appId: { in: createdAppIds } } });
       await prisma.agreement.deleteMany({ where: { appId: { in: createdAppIds } } });
       await prisma.apiKey.deleteMany({ where: { appId: { in: createdAppIds } } });
       await prisma.app.deleteMany({
@@ -273,7 +268,7 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
     const dispute = await prisma.dispute.create({
       data: {
         id: randomUUID(), appId: appB.id, agreementId: agreement.id, milestoneId: milestone.id,
-        openedBy: 'tenant-b', reason: 'constraint fixture',
+        openedByExternalId: 'tenant-b', reason: 'constraint fixture',
       },
     });
 
@@ -296,7 +291,7 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
       } }),
       () => prisma.dispute.create({ data: {
         id: randomUUID(), appId: appA.id, agreementId: agreement.id, milestoneId: milestone.id,
-        openedBy: 'tenant-a', reason: 'invalid tenant',
+        openedByExternalId: 'tenant-a', reason: 'invalid tenant',
       } }),
       () => prisma.event.create({ data: {
         id: randomUUID(), appId: appA.id, agreementId: agreement.id, milestoneId: milestone.id,
@@ -343,11 +338,11 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
     } });
     const dispute = await prisma.dispute.create({ data: {
       id: randomUUID(), appId: appB.id, agreementId: agreement.id, milestoneId: milestone.id,
-      openedBy: 'tenant-b', reason: 'private dispute',
+      openedByExternalId: 'tenant-b', reason: 'private dispute',
     } });
     const endpoint = await prisma.webhookEndpoint.create({ data: {
-      id: randomUUID(), appId: appB.id, ownerAddress: appB.id, targetUrl: 'https://example.com/hook',
-      eventTypesJson: '[]', signingSecret: 'hash', status: 'active',
+      id: randomUUID(), appId: appB.id, url: 'https://example.com/hook',
+      subscribedEvents: [], secretHash: 'hash', status: 'active',
     } });
     const delivery = await prisma.webhookDelivery.create({ data: {
       id: randomUUID(), appId: appB.id, endpointId: endpoint.id, eventId: event.id,
@@ -424,7 +419,12 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
   test('a stale job lock from a crashed worker is released and reclaimed once', async () => {
     const app = await createIntegrationApp('Worker Recovery App');
     const agreement = await seedAgreement(app.id);
-    const job = await enqueueAgreementJob({ agreementId: agreement.id, kind: 'AGREEMENT_CONTINUE' });
+    const job = await enqueueJob({
+      appId: app.id,
+      agreementId: agreement.id,
+      kind: 'DELIVER_WEBHOOK',
+      payload: { deliveryId: randomUUID() },
+    });
     await prisma.agentJob.update({
       where: { id: job.id },
       data: {
@@ -436,8 +436,8 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
 
     assert.equal((await releaseStaleLocks(5 * 60_000)).count, 1);
     const [first, second] = await Promise.all([
-      claimAvailableJobs('replacement-a', ['settlement'], 10, 60_000),
-      claimAvailableJobs('replacement-b', ['settlement'], 10, 60_000),
+      claimAvailableJobs('replacement-a', ['webhook'], 10, 60_000),
+      claimAvailableJobs('replacement-b', ['webhook'], 10, 60_000),
     ]);
     assert.equal(first.length + second.length, 1);
     const recovered = [...first, ...second][0];
@@ -448,15 +448,17 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
   test('atomic SKIP LOCKED claims partition jobs across concurrent workers', async () => {
     const app = await createIntegrationApp('Concurrent Claim App');
     const agreement = await seedAgreement(app.id);
-    const jobs = await Promise.all(Array.from({ length: 12 }, (_, index) => enqueueAgreementJob({
+    const jobs = await Promise.all(Array.from({ length: 12 }, (_, index) => enqueueJob({
+      appId: app.id,
       agreementId: agreement.id,
-      kind: 'AGREEMENT_CONTINUE',
-      dedupeSuffix: `concurrent-${index}`,
+      kind: 'DELIVER_WEBHOOK',
+      payload: { deliveryId: randomUUID() },
+      dedupeKey: `concurrent-${index}-${randomUUID()}`,
       availableAt: new Date(0),
     })));
     const claims = await Promise.all([
-      claimAvailableJobs('claim-worker-a', ['settlement'], 6, 60_000),
-      claimAvailableJobs('claim-worker-b', ['settlement'], 6, 60_000),
+      claimAvailableJobs('claim-worker-a', ['webhook'], 6, 60_000),
+      claimAvailableJobs('claim-worker-b', ['webhook'], 6, 60_000),
     ]);
     const claimed = claims.flat().filter((job) => jobs.some((created) => created.id === job.id));
     assert.equal(claimed.length, 12);
@@ -467,10 +469,15 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
   test('only the lease owner can renew or complete a claimed job', async () => {
     const app = await createIntegrationApp('Lease Ownership App');
     const agreement = await seedAgreement(app.id);
-    const queued = await enqueueAgreementJob({
-      agreementId: agreement.id, kind: 'VERIFY_FUNDING', dedupeSuffix: randomUUID(), availableAt: new Date(0),
+    const queued = await enqueueJob({
+      appId: app.id,
+      agreementId: agreement.id,
+      kind: 'DELIVER_WEBHOOK',
+      payload: { deliveryId: randomUUID() },
+      dedupeKey: randomUUID(),
+      availableAt: new Date(0),
     });
-    const [claimed] = await claimAvailableJobs('lease-owner', ['settlement'], 1, 60_000);
+    const [claimed] = await claimAvailableJobs('lease-owner', ['webhook'], 1, 60_000);
     assert.equal(claimed.id, queued.id);
     await assert.rejects(() => renewJobLease(claimed.id, 'other-worker', 60_000));
     await assert.rejects(() => completeJob(claimed.id, 'other-worker'));
@@ -498,27 +505,6 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
     }));
   });
 
-  test('financial decimal values round-trip without binary floating-point loss', async () => {
-    const app = await createIntegrationApp('Decimal App');
-    const agreement = await seedAgreement(app.id);
-    const value = new Prisma.Decimal('123456789.123456789012');
-    const milestone = await prisma.milestone.create({
-      data: {
-        id: randomUUID(),
-        appId: app.id,
-        agreementId: agreement.id,
-        title: 'Exact decimal',
-        description: 'Precision integration test',
-        amount: '1000',
-        currency: 'CKB',
-        sortOrder: 1,
-        status: 'pending',
-        targetUsd: value,
-      },
-    });
-    assert.equal(milestone.targetUsd?.toFixed(12), '123456789.123456789012');
-  });
-
   test('financial and lifecycle constraints reject invalid persisted state', async () => {
     const app = await createIntegrationApp('Financial Constraints App');
     const agreement = await seedAgreement(app.id);
@@ -540,7 +526,7 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
       where: { id: agreement.id }, data: { amount: '18446744073709551616' },
     }));
     await assert.rejects(() => prisma.milestone.update({
-      where: { id: milestone.id }, data: { releaseQuoteUsdPerCkb: new Prisma.Decimal('0.001') },
+      where: { id: milestone.id }, data: { description: 'Funded terms cannot change' },
     }));
 
     const transactionData = {

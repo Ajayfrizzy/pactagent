@@ -613,8 +613,8 @@ export default function InfrastructureConsolePage() {
           <BrandLogo />
           <NavbarMenu>
             <Link href="/console" className="app-nav-link-accent">Console</Link>
-            <Link href="/dashboard" className="app-nav-link">Legacy</Link>
             <Link href="/docs" className="app-nav-link">Docs</Link>
+            <Link href="/openapi.json" className="app-nav-link">OpenAPI</Link>
           </NavbarMenu>
         </div>
       </nav>
@@ -1017,7 +1017,7 @@ export default function InfrastructureConsolePage() {
 
         <div className="flex items-center gap-2 text-xs text-gray-600">
           <Check className="h-3 w-3" />
-          Console uses `/v1` app-scoped APIs. Legacy DAO, bounty, profile, and reputation workflows remain outside this surface.
+          Console uses `/v1` app-scoped APIs. Product experiences belong to integrating applications.
         </div>
       </main>
     </div>

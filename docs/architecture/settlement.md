@@ -1,22 +1,21 @@
-# Settlement guarantees and failure modes
+# Settlement boundary
 
-PactAgent guarantees application-level idempotency and durable recording of settlement intent. It does not guarantee third-party RPC uptime, instant chain inclusion, stable fees, or irreversible finality before the configured chain considers a transaction committed.
+Phase 1 exposes a rail-neutral escrow lifecycle and durable transaction records. It does not claim automated on-chain settlement.
 
 ```mermaid
 stateDiagram-v2
-  [*] --> UNFUNDED
-  UNFUNDED --> FUNDING_PENDING
-  FUNDING_PENDING --> FUNDED: chain confirmation
-  FUNDED --> PAYOUT_PENDING: approved release
-  FUNDED --> REFUND_PENDING: approved refund
-  PAYOUT_PENDING --> PAYOUT_CONFIRMED: chain confirmation
-  REFUND_PENDING --> REFUND_CONFIRMED: chain confirmation
-  FUNDING_PENDING --> FAILED: terminal validation/provider error
-  PAYOUT_PENDING --> FAILED: terminal validation/provider error
-  REFUND_PENDING --> FAILED: terminal validation/provider error
-  FAILED --> FUNDING_PENDING: operator/reconciler retry
-  FAILED --> PAYOUT_PENDING: operator/reconciler retry
-  FAILED --> REFUND_PENDING: operator/reconciler retry
+  [*] --> not_created
+  not_created --> funding_pending
+  funding_pending --> funded
+  funded --> release_pending
+  funded --> refund_pending
+  release_pending --> released
+  refund_pending --> refunded
+  funding_pending --> failed
+  release_pending --> failed
+  refund_pending --> failed
 ```
 
-Timeouts and connection loss after submission are ambiguous: reconciliation checks the persisted transaction before retrying. Insufficient capacity, invalid scripts, signer rejection, and malformed transactions are terminal until configuration or data changes. CKB RPC unavailability can block `/ready` through `REQUIRE_SETTLEMENT_READY=true`; production defaults to this policy. Manual database edits do not constitute settlement and are prohibited.
+The `mock` adapter performs deterministic sandbox transitions. The `manual` adapter records state coordinated by an external operator. The `ckb` adapter is an explicit placeholder that rejects operations with `escrow_adapter_not_ready` until Phase 2 supplies construction, signing, confirmation, and reconciliation behavior.
+
+The API records intent and idempotent application transitions; a database status is never evidence of chain finality. Full CKB settlement must preserve this separation and reconcile ambiguous RPC outcomes before retrying.

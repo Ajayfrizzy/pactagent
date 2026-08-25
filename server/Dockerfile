@@ -7,7 +7,6 @@ RUN npm ci
 COPY server/prisma ./prisma
 COPY server/prisma.config.ts server/tsconfig.json ./
 COPY server/src ./src
-COPY shared ../shared
 RUN DATABASE_URL=postgresql://build:build@localhost:5432/build npx prisma generate && npm run build
 
 FROM node:24-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS production-deps

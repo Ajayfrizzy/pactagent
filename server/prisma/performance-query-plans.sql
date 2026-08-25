@@ -1,5 +1,5 @@
 EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
-SELECT id FROM "AgentJob" WHERE queue = 'settlement' AND status IN ('QUEUED','RETRY') AND "availableAt" <= now()
+SELECT id FROM "AgentJob" WHERE queue = 'webhook' AND status IN ('QUEUED','RETRY') AND "availableAt" <= now()
 ORDER BY "availableAt", "createdAt" LIMIT 100;
 
 EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)

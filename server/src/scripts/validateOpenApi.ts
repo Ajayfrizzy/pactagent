@@ -18,8 +18,12 @@ async function main() {
     for (const method of endpoint.methods) implemented.add(`${method.toUpperCase()} ${endpoint.path}`);
   }
 
-  const missing = [...documented].filter((operation) => !implemented.has(operation));
-  if (missing.length) throw new Error(`OpenAPI operations without an Express route:\n${missing.join('\n')}`);
+  const missingRoutes = [...documented].filter((operation) => !implemented.has(operation));
+  if (missingRoutes.length) throw new Error(`OpenAPI operations without an Express route:\n${missingRoutes.join('\n')}`);
+  const undocumentedRoutes = [...implemented]
+    .filter((operation) => operation.includes(' /v1/'))
+    .filter((operation) => !documented.has(operation));
+  if (undocumentedRoutes.length) throw new Error(`Express /v1 routes missing from OpenAPI:\n${undocumentedRoutes.join('\n')}`);
   console.log(`Validated ${documented.size} OpenAPI operations against the Express route table.`);
 }
 void main();

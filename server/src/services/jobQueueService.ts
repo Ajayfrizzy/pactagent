@@ -2,37 +2,21 @@ import { AgentJob, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { prisma } from '../db';
 
-export type AgentJobKind =
-  | 'AGREEMENT_CONTINUE'
-  | 'VERIFY_FUNDING'
-  | 'RECONCILE_SETTLEMENT'
-  | 'DISPUTE_RECOMMENDATION'
-  | 'REMINDER_DEADLINE'
-  | 'REMINDER_DISPUTE_RESPONSE'
-  | 'DELIVER_WEBHOOK'
-  | 'SYNC_SOURCE_THREAD';
+export type AgentJobKind = 'DELIVER_WEBHOOK';
 
 export type AgentJobPayload = {
   agreementId?: string;
-  milestoneId?: string;
-  disputeId?: string;
   deliveryId?: string;
-  forumThreadUrl?: string;
-  manualSummary?: string;
-  sourceSyncMode?: 'MANUAL' | 'SCHEDULED';
-  note?: string;
 };
 
 const DEFAULT_MAX_ATTEMPTS = 5;
 const RETRY_BASE_MS = 5_000;
 const RETRY_MAX_MS = 15 * 60_000;
 
-export type WorkerQueue = 'settlement' | 'webhook' | 'ai';
+export type WorkerQueue = 'webhook';
 
-export function queueForJobKind(kind: AgentJobKind): WorkerQueue {
-  if (kind === 'DELIVER_WEBHOOK') return 'webhook';
-  if (kind === 'DISPUTE_RECOMMENDATION') return 'ai';
-  return 'settlement';
+export function queueForJobKind(_kind: AgentJobKind): WorkerQueue {
+  return 'webhook';
 }
 
 export function getJobRetryDelayMs(attempt: number, random = Math.random) {
@@ -45,6 +29,7 @@ function serializePayload(payload?: AgentJobPayload) {
 }
 
 export async function enqueueJob(params: {
+  appId: string;
   agreementId?: string | null;
   kind: AgentJobKind;
   payload?: AgentJobPayload;
@@ -71,6 +56,7 @@ export async function enqueueJob(params: {
     return await prisma.agentJob.create({
       data: {
         id: randomUUID(),
+        appId: params.appId,
         agreementId: params.agreementId ?? null,
         kind: params.kind,
         queue: queueForJobKind(params.kind),
@@ -100,6 +86,7 @@ export async function enqueueJob(params: {
         return prisma.agentJob.create({
           data: {
             id: randomUUID(),
+            appId: params.appId,
             agreementId: params.agreementId ?? null,
             kind: params.kind,
             queue: queueForJobKind(params.kind),
@@ -115,25 +102,6 @@ export async function enqueueJob(params: {
 
     throw error;
   }
-}
-
-export async function enqueueAgreementJob(params: {
-  agreementId: string;
-  kind: AgentJobKind;
-  payload?: AgentJobPayload;
-  dedupeSuffix?: string;
-  availableAt?: Date;
-}) {
-  return enqueueJob({
-    agreementId: params.agreementId,
-    kind: params.kind,
-    payload: {
-      agreementId: params.agreementId,
-      ...(params.payload || {}),
-    },
-    availableAt: params.availableAt,
-    dedupeKey: `${params.kind}:${params.agreementId}:${params.dedupeSuffix || 'default'}`,
-  });
 }
 
 export async function claimAvailableJobs(
@@ -242,17 +210,9 @@ export async function renewJobLease(jobId: string, workerId: string, leaseMs: nu
   return leaseExpiresAt;
 }
 
-export async function listAgreementJobs(agreementId: string, limit = 100) {
-  return prisma.agentJob.findMany({
-    where: { agreementId },
-    orderBy: { createdAt: 'desc' },
-    take: Math.min(Math.max(limit, 1), 100),
-  });
-}
-
-export async function replayJob(jobId: string, agreementId: string) {
+export async function replayJob(jobId: string) {
   const job = await prisma.agentJob.findUnique({ where: { id: jobId } });
-  if (!job || job.agreementId !== agreementId) {
+  if (!job) {
     throw new Error(`Job ${jobId} not found`);
   }
   if (!['COMPLETED', 'DEAD_LETTER'].includes(job.status)) {
@@ -262,6 +222,7 @@ export async function replayJob(jobId: string, agreementId: string) {
   return prisma.agentJob.create({
     data: {
       id: randomUUID(),
+      appId: job.appId,
       agreementId: job.agreementId,
       kind: job.kind,
       status: 'QUEUED',

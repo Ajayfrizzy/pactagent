@@ -10,11 +10,7 @@
     "outDir": "dist",
     "rootDir": "src",
     "resolveJsonModule": true,
-    "declaration": true,
-    "paths": {
-      "@shared/*": ["../shared/src/*"]
-    }
+    "declaration": true
   },
-  "include": ["src"],
-  "references": [{ "path": "../shared" }]
+  "include": ["src"]
 }

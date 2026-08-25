@@ -22,8 +22,8 @@ export async function getSystemCounts() {
     prisma.agreement.count({ where: { status: { in: ['draft', 'pending_acceptance', 'accepted', 'funding_required', 'funded', 'in_progress', 'proof_submitted', 'under_review', 'approved', 'release_pending', 'released', 'rejected', 'disputed', 'cancelled', 'refunded', 'expired'] } } }),
     prisma.escrow.count(),
     prisma.escrow.count({ where: { status: 'funded' } }),
-    prisma.webhookDelivery.count({ where: { appId: { not: null }, status: { in: ['PENDING', 'RETRY'] } } }),
-    prisma.webhookDelivery.count({ where: { appId: { not: null }, status: 'FAILED' } }),
+    prisma.webhookDelivery.count({ where: { status: { in: ['PENDING', 'RETRY'] } } }),
+    prisma.webhookDelivery.count({ where: { status: 'FAILED' } }),
     prisma.event.count(),
     prisma.auditLog.count({ where: { appId: { not: null } } }),
   ]);
@@ -102,7 +102,6 @@ export function listEvents(params: AdminListQuery) {
 export function listWebhookDeliveries(params: AdminListQuery) {
   return prisma.webhookDelivery.findMany({
     where: {
-      appId: { not: null },
       ...(params.appId ? { appId: params.appId } : {}),
       ...(params.status ? { status: params.status } : {}),
     },
@@ -130,7 +129,7 @@ export function listJobs(params: AdminListQuery) {
     where: {
       ...(params.status ? { status: params.status } : {}),
       ...(params.type ? { queue: params.type } : {}),
-      ...(params.appId ? { agreement: { appId: params.appId } } : {}),
+      ...(params.appId ? { appId: params.appId } : {}),
     },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: params.limit + 1,

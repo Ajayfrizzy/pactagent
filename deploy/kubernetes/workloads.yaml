@@ -76,56 +76,6 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: pactagent-worker-settlement
-  namespace: pactagent
-spec:
-  replicas: 2
-  revisionHistoryLimit: 5
-  strategy: { type: RollingUpdate, rollingUpdate: { maxUnavailable: 0, maxSurge: 1 } }
-  selector:
-    matchLabels: { app.kubernetes.io/name: pactagent-worker-settlement }
-  template:
-    metadata:
-      labels: { app.kubernetes.io/name: pactagent-worker-settlement }
-    spec:
-      terminationGracePeriodSeconds: 45
-      automountServiceAccountToken: false
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1001
-        runAsGroup: 1001
-        fsGroup: 1001
-        seccompProfile: { type: RuntimeDefault }
-      containers:
-        - name: worker
-          image: IMAGE_SERVER
-          imagePullPolicy: IfNotPresent
-          command: ["node", "dist/worker/index.js"]
-          ports: [{ name: health, containerPort: 4001 }]
-          envFrom:
-            - configMapRef: { name: pactagent-config }
-            - secretRef: { name: pactagent-secrets }
-          env:
-            - { name: SERVICE_ROLE, value: worker }
-            - { name: WORKER_QUEUES, value: settlement }
-            - { name: OTEL_SERVICE_NAME, value: pactagent-worker-settlement }
-            - name: WORKER_ID
-              valueFrom: { fieldRef: { fieldPath: metadata.name } }
-          readinessProbe: { httpGet: { path: /ready, port: health }, periodSeconds: 10, timeoutSeconds: 5, failureThreshold: 6 }
-          livenessProbe: { httpGet: { path: /health, port: health }, periodSeconds: 20, timeoutSeconds: 5, failureThreshold: 3 }
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities: { drop: ["ALL"] }
-            readOnlyRootFilesystem: true
-          resources:
-            requests: { cpu: 200m, memory: 256Mi }
-            limits: { cpu: "1", memory: 1Gi }
-          volumeMounts: [{ name: tmp, mountPath: /tmp }]
-      volumes: [{ name: tmp, emptyDir: {} }]
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
   name: pactagent-worker-webhook
   namespace: pactagent
 spec:
@@ -170,56 +120,6 @@ spec:
           resources:
             requests: { cpu: 100m, memory: 192Mi }
             limits: { cpu: 500m, memory: 512Mi }
-          volumeMounts: [{ name: tmp, mountPath: /tmp }]
-      volumes: [{ name: tmp, emptyDir: {} }]
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: pactagent-worker-ai
-  namespace: pactagent
-spec:
-  replicas: 1
-  revisionHistoryLimit: 5
-  strategy: { type: RollingUpdate, rollingUpdate: { maxUnavailable: 0, maxSurge: 1 } }
-  selector:
-    matchLabels: { app.kubernetes.io/name: pactagent-worker-ai }
-  template:
-    metadata:
-      labels: { app.kubernetes.io/name: pactagent-worker-ai }
-    spec:
-      terminationGracePeriodSeconds: 45
-      automountServiceAccountToken: false
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1001
-        runAsGroup: 1001
-        fsGroup: 1001
-        seccompProfile: { type: RuntimeDefault }
-      containers:
-        - name: worker
-          image: IMAGE_SERVER
-          imagePullPolicy: IfNotPresent
-          command: ["node", "dist/worker/index.js"]
-          ports: [{ name: health, containerPort: 4001 }]
-          envFrom:
-            - configMapRef: { name: pactagent-config }
-            - secretRef: { name: pactagent-secrets }
-          env:
-            - { name: SERVICE_ROLE, value: worker }
-            - { name: WORKER_QUEUES, value: ai }
-            - { name: OTEL_SERVICE_NAME, value: pactagent-worker-ai }
-            - name: WORKER_ID
-              valueFrom: { fieldRef: { fieldPath: metadata.name } }
-          readinessProbe: { httpGet: { path: /ready, port: health }, periodSeconds: 10, timeoutSeconds: 5, failureThreshold: 6 }
-          livenessProbe: { httpGet: { path: /health, port: health }, periodSeconds: 20, timeoutSeconds: 5, failureThreshold: 3 }
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities: { drop: ["ALL"] }
-            readOnlyRootFilesystem: true
-          resources:
-            requests: { cpu: 200m, memory: 256Mi }
-            limits: { cpu: "1", memory: 1Gi }
           volumeMounts: [{ name: tmp, mountPath: /tmp }]
       volumes: [{ name: tmp, emptyDir: {} }]
 ---

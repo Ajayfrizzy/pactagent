@@ -11,7 +11,7 @@ type AgreementRecord = {
   status: string;
   amount: string;
   currency: string;
-  infrastructureReleaseMode: string | null;
+  releaseMode: string;
   disputeMode: string | null;
   sourceType: string | null;
   sourceUrl: string | null;
@@ -53,7 +53,7 @@ export function serializeAgreement(agreement: AgreementRecord) {
     status: normalizeStatus(agreement.status),
     totalAmount: agreement.amount,
     currency: agreement.currency,
-    releaseMode: agreement.infrastructureReleaseMode ?? 'milestone',
+    releaseMode: agreement.releaseMode,
     disputeMode: agreement.disputeMode ?? 'app_managed',
     sourceType: agreement.sourceType,
     sourceUrl: agreement.sourceUrl,

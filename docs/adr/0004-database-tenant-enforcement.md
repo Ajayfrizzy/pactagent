@@ -7,7 +7,7 @@
 
 Infrastructure resources duplicate `appId` so tenant filtering is efficient, but a single-column parent foreign key does not prove that the child and parent belong to the same app. API-key authentication also needs to establish one mandatory tenant context before repository access.
 
-PostgreSQL row-level security was considered as an additional defense. PactAgent currently uses one application database role for API, worker, migrations, administrative operations, and legacy product code. Enabling RLS with that role structure would either break trusted worker operations or require broad bypass privileges that substantially reduce the value of the policies.
+PostgreSQL row-level security was considered as an additional defense. PactAgent currently uses one application database role for API, worker, migrations, and administrative operations. Enabling RLS with that role structure would either break trusted worker operations or require broad bypass privileges that substantially reduce the value of the policies.
 
 ## Decision
 
@@ -19,6 +19,6 @@ Do not enable RLS in this phase. Reconsider it when API, worker, migration, and 
 
 - PostgreSQL rejects cross-app references even if application validation is bypassed.
 - Repository call sites cannot pass an arbitrary resource ID without deliberately constructing tenant context.
-- Legacy nullable webhook rows remain supported; compound foreign keys enforce ownership whenever `appId` is present.
+- Webhook endpoints, deliveries, and durable jobs require `appId`; compound foreign keys enforce ownership across their references.
 - RLS remains a future defense-in-depth control, not a claimed production guarantee.
 - The read-only tenant-integrity audit must pass before constraint migrations are deployed.
