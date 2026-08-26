@@ -5,12 +5,15 @@ on:
     workflows: [CI]
     branches: [main]
     types: [completed]
+
   workflow_dispatch:
     inputs:
       environment:
         description: Deployment environment
         type: choice
-        options: [staging, production]
+        options:
+          - staging
+          - production
         default: staging
 
 concurrency:
@@ -23,37 +26,69 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  SERVER_IMAGE: ghcr.io/${{ github.repository_owner }}/pactagent-server
-  MIGRATE_IMAGE: ghcr.io/${{ github.repository_owner }}/pactagent-migrate
-  WEB_IMAGE: ghcr.io/${{ github.repository_owner }}/pactagent-web
   RELEASE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
 
 jobs:
   publish:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
     runs-on: ubuntu-24.04
+
     outputs:
       server: ${{ steps.refs.outputs.server }}
       migrate: ${{ steps.refs.outputs.migrate }}
       web: ${{ steps.refs.outputs.web }}
+
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      # This IS your checkout step
+      - name: Checkout release commit
+        uses: actions/checkout@v6
         with:
           ref: ${{ env.RELEASE_SHA }}
+
+      # GHCR requires repository/image paths to be lowercase.
+      - name: Configure image names
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          OWNER="${GITHUB_REPOSITORY_OWNER,,}"
+
+          echo "SERVER_IMAGE=${REGISTRY}/${OWNER}/pactagent-server" >> "$GITHUB_ENV"
+          echo "MIGRATE_IMAGE=${REGISTRY}/${OWNER}/pactagent-migrate" >> "$GITHUB_ENV"
+          echo "WEB_IMAGE=${REGISTRY}/${OWNER}/pactagent-web" >> "$GITHUB_ENV"
+
+      - name: Verify release configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Release SHA: ${RELEASE_SHA}"
+          echo "Server image: ${SERVER_IMAGE}"
+          echo "Migrate image: ${MIGRATE_IMAGE}"
+          echo "Web image: ${WEB_IMAGE}"
+
       - id: buildx
         name: Set up Docker Buildx
         continue-on-error: true
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+        uses: docker/setup-buildx-action@v4
+
       - name: Retry Docker Buildx setup
         if: steps.buildx.outcome == 'failure'
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
-      - uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
       - id: server
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        name: Build and publish server image
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: server/Dockerfile
@@ -62,9 +97,11 @@ jobs:
           tags: ${{ env.SERVER_IMAGE }}:sha-${{ env.RELEASE_SHA }}
           build-args: |
             BUILD_COMMIT=${{ env.RELEASE_SHA }}
-            BUILD_VERSION=${{ github.ref_name }}
+            BUILD_VERSION=${{ env.RELEASE_SHA }}
+
       - id: migrate
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        name: Build and publish migration image
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: server/Dockerfile
@@ -73,9 +110,11 @@ jobs:
           tags: ${{ env.MIGRATE_IMAGE }}:sha-${{ env.RELEASE_SHA }}
           build-args: |
             BUILD_COMMIT=${{ env.RELEASE_SHA }}
-            BUILD_VERSION=${{ github.ref_name }}
+            BUILD_VERSION=${{ env.RELEASE_SHA }}
+
       - id: web
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        name: Build and publish web image
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: web/Dockerfile
@@ -84,13 +123,33 @@ jobs:
           tags: ${{ env.WEB_IMAGE }}:sha-${{ env.RELEASE_SHA }}
           build-args: |
             BUILD_COMMIT=${{ env.RELEASE_SHA }}
-            BUILD_VERSION=${{ github.ref_name }}
+            BUILD_VERSION=${{ env.RELEASE_SHA }}
+
       - id: refs
+        name: Record immutable image references
+        shell: bash
         env:
           SERVER_DIGEST: ${{ steps.server.outputs.digest }}
           MIGRATE_DIGEST: ${{ steps.migrate.outputs.digest }}
           WEB_DIGEST: ${{ steps.web.outputs.digest }}
         run: |
+          set -euo pipefail
+
+          if [ -z "$SERVER_DIGEST" ]; then
+            echo "Server image digest is missing."
+            exit 1
+          fi
+
+          if [ -z "$MIGRATE_DIGEST" ]; then
+            echo "Migration image digest is missing."
+            exit 1
+          fi
+
+          if [ -z "$WEB_DIGEST" ]; then
+            echo "Web image digest is missing."
+            exit 1
+          fi
+
           echo "server=${SERVER_IMAGE}@${SERVER_DIGEST}" >> "$GITHUB_OUTPUT"
           echo "migrate=${MIGRATE_IMAGE}@${MIGRATE_DIGEST}" >> "$GITHUB_OUTPUT"
           echo "web=${WEB_IMAGE}@${WEB_DIGEST}" >> "$GITHUB_OUTPUT"
@@ -98,40 +157,118 @@ jobs:
   deploy:
     needs: publish
     runs-on: ubuntu-24.04
+
     environment: ${{ inputs.environment || 'staging' }}
+
     env:
       NAMESPACE: pactagent
       SERVER_REF: ${{ needs.publish.outputs.server }}
       MIGRATE_REF: ${{ needs.publish.outputs.migrate }}
       WEB_REF: ${{ needs.publish.outputs.web }}
+
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      # Second checkout step
+      - name: Checkout release commit
+        uses: actions/checkout@v6
         with:
           ref: ${{ env.RELEASE_SHA }}
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
         with:
-          node-version: 24.18.1
+          node-version: 24
           cache: npm
           cache-dependency-path: package-lock.json
-      - run: npm ci --ignore-scripts
-      - run: npm run deploy:check
-      - name: Configure cluster access
+
+      - name: Install deployment dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Validate deployment configuration
+        run: npm run deploy:check
+
+      - name: Validate Kubernetes secret
+        shell: bash
         env:
           KUBECONFIG_B64: ${{ secrets.KUBECONFIG_B64 }}
         run: |
+          set -euo pipefail
+
+          if [ -z "$KUBECONFIG_B64" ]; then
+            echo "KUBECONFIG_B64 is not configured for this environment."
+            exit 1
+          fi
+
+      - name: Configure cluster access
+        shell: bash
+        env:
+          KUBECONFIG_B64: ${{ secrets.KUBECONFIG_B64 }}
+        run: |
+          set -euo pipefail
+
           mkdir -p "$HOME/.kube"
-          echo "$KUBECONFIG_B64" | base64 --decode > "$HOME/.kube/config"
+
+          echo "$KUBECONFIG_B64" |
+            base64 --decode > "$HOME/.kube/config"
+
           chmod 600 "$HOME/.kube/config"
+
+      - name: Verify cluster access
+        run: |
+          kubectl cluster-info
+          kubectl get namespace "$NAMESPACE"
+
       - name: Apply configuration and services
-        run: kubectl apply -f deploy/kubernetes/platform.yaml -f deploy/kubernetes/services.yaml
+        run: |
+          kubectl apply \
+            -f deploy/kubernetes/platform.yaml \
+            -f deploy/kubernetes/services.yaml
+
       - name: Run migrations once
+        shell: bash
         run: |
-          kubectl -n "$NAMESPACE" delete job pactagent-migrate --ignore-not-found
-          sed "s|IMAGE_MIGRATE|${MIGRATE_REF}|g" deploy/kubernetes/migration-job.yaml | kubectl apply -f -
-          kubectl -n "$NAMESPACE" wait --for=condition=complete job/pactagent-migrate --timeout=10m
+          set -euo pipefail
+
+          kubectl \
+            -n "$NAMESPACE" \
+            delete job pactagent-migrate \
+            --ignore-not-found
+
+          sed \
+            "s|IMAGE_MIGRATE|${MIGRATE_REF}|g" \
+            deploy/kubernetes/migration-job.yaml |
+            kubectl apply -f -
+
+          if ! kubectl \
+            -n "$NAMESPACE" \
+            wait \
+            --for=condition=complete \
+            job/pactagent-migrate \
+            --timeout=10m
+          then
+            echo "Migration job failed or timed out."
+
+            kubectl \
+              -n "$NAMESPACE" \
+              describe job pactagent-migrate || true
+
+            kubectl \
+              -n "$NAMESPACE" \
+              logs job/pactagent-migrate || true
+
+            exit 1
+          fi
+
       - name: Apply application workloads
+        shell: bash
         run: |
-          sed -e "s|IMAGE_SERVER|${SERVER_REF}|g" -e "s|IMAGE_WEB|${WEB_REF}|g" deploy/kubernetes/workloads.yaml | kubectl apply -f -
+          set -euo pipefail
+
+          sed \
+            -e "s|IMAGE_SERVER|${SERVER_REF}|g" \
+            -e "s|IMAGE_WEB|${WEB_REF}|g" \
+            deploy/kubernetes/workloads.yaml |
+            kubectl apply -f -
+
       - name: Health-gated rollout and smoke checks
         id: promote
         env:
@@ -140,32 +277,92 @@ jobs:
           SMOKE_METRICS_TOKEN: ${{ secrets.SMOKE_METRICS_TOKEN }}
           EXPECTED_COMMIT: ${{ env.RELEASE_SHA }}
         run: |
-          set -e
-          for deployment in pactagent-api pactagent-worker-webhook pactagent-web; do
-            kubectl -n "$NAMESPACE" rollout status "deployment/$deployment" --timeout=8m
+          set -euo pipefail
+
+          for deployment in \
+            pactagent-api \
+            pactagent-worker-webhook \
+            pactagent-web
+          do
+            kubectl \
+              -n "$NAMESPACE" \
+              rollout status \
+              "deployment/$deployment" \
+              --timeout=8m
           done
+
           node scripts/deployment-smoke.mjs
+
       - name: Validate staging performance thresholds
         id: load
-        if: inputs.environment != 'production'
+        if: ${{ (inputs.environment || 'staging') == 'staging' }}
         env:
           BASE_URL: ${{ vars.SMOKE_API_URL }}
           API_KEY: ${{ secrets.SMOKE_API_KEY }}
+        shell: bash
         run: |
-          for profile in api queue webhooks; do
-            docker run --rm -i -e BASE_URL -e API_KEY grafana/k6:0.54.0 run - < "test/load/${profile}.js"
+          set -euo pipefail
+
+          if [ -z "$BASE_URL" ]; then
+            echo "SMOKE_API_URL is not configured."
+            exit 1
+          fi
+
+          if [ -z "$API_KEY" ]; then
+            echo "SMOKE_API_KEY is not configured."
+            exit 1
+          fi
+
+          for profile in api queue webhooks
+          do
+            echo "Running load profile: $profile"
+
+            docker run \
+              --rm \
+              -i \
+              -e BASE_URL \
+              -e API_KEY \
+              grafana/k6:0.54.0 \
+              run - < "test/load/${profile}.js"
           done
+
       - name: Roll back application workloads on failed promotion
-        if: failure() && (steps.promote.outcome == 'failure' || steps.load.outcome == 'failure')
+        if: >
+          failure() &&
+          (
+            steps.promote.outcome == 'failure' ||
+            steps.load.outcome == 'failure'
+          )
+        shell: bash
         run: |
-          for deployment in pactagent-api pactagent-worker-webhook pactagent-web; do
-            kubectl -n "$NAMESPACE" rollout undo "deployment/$deployment"
-            kubectl -n "$NAMESPACE" rollout status "deployment/$deployment" --timeout=8m || true
+          for deployment in \
+            pactagent-api \
+            pactagent-worker-webhook \
+            pactagent-web
+          do
+            kubectl \
+              -n "$NAMESPACE" \
+              rollout undo \
+              "deployment/$deployment" || true
+
+            kubectl \
+              -n "$NAMESPACE" \
+              rollout status \
+              "deployment/$deployment" \
+              --timeout=8m || true
           done
+
       - name: Record immutable release
         if: success()
+        shell: bash
         run: |
-          kubectl -n "$NAMESPACE" annotate deployments --all --overwrite \
+          set -euo pipefail
+
+          kubectl \
+            -n "$NAMESPACE" \
+            annotate deployments \
+            --all \
+            --overwrite \
             pactagent.dev/release-commit="$RELEASE_SHA" \
             pactagent.dev/server-image="$SERVER_REF" \
             pactagent.dev/web-image="$WEB_REF"
