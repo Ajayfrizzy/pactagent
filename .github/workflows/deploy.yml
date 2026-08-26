@@ -167,6 +167,41 @@ jobs:
       WEB_REF: ${{ needs.publish.outputs.web }}
 
     steps:
+      - name: Validate deployment environment
+        shell: bash
+        env:
+          DEPLOYMENT_ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+          KUBECONFIG_B64: ${{ secrets.KUBECONFIG_B64 }}
+          SMOKE_API_KEY: ${{ secrets.SMOKE_API_KEY }}
+          SMOKE_API_URL: ${{ vars.SMOKE_API_URL }}
+          SMOKE_WEB_URL: ${{ vars.SMOKE_WEB_URL }}
+        run: |
+          set -euo pipefail
+
+          missing=0
+
+          require_setting() {
+            local name="$1"
+            local value="$2"
+
+            if [ -z "$value" ]; then
+              echo "::error title=Missing deployment setting::Add ${name} to the '${DEPLOYMENT_ENVIRONMENT}' GitHub environment at ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/settings/environments."
+              missing=1
+            fi
+          }
+
+          require_setting KUBECONFIG_B64 "$KUBECONFIG_B64"
+          require_setting SMOKE_API_URL "$SMOKE_API_URL"
+          require_setting SMOKE_WEB_URL "$SMOKE_WEB_URL"
+
+          if [ "$DEPLOYMENT_ENVIRONMENT" = staging ]; then
+            require_setting SMOKE_API_KEY "$SMOKE_API_KEY"
+          fi
+
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
       # Second checkout step
       - name: Checkout release commit
         uses: actions/checkout@v6
@@ -186,18 +221,6 @@ jobs:
       - name: Validate deployment configuration
         run: npm run deploy:check
 
-      - name: Validate Kubernetes secret
-        shell: bash
-        env:
-          KUBECONFIG_B64: ${{ secrets.KUBECONFIG_B64 }}
-        run: |
-          set -euo pipefail
-
-          if [ -z "$KUBECONFIG_B64" ]; then
-            echo "KUBECONFIG_B64 is not configured for this environment."
-            exit 1
-          fi
-
       - name: Configure cluster access
         shell: bash
         env:
@@ -207,10 +230,20 @@ jobs:
 
           mkdir -p "$HOME/.kube"
 
-          echo "$KUBECONFIG_B64" |
+          if ! printf '%s' "$KUBECONFIG_B64" |
             base64 --decode > "$HOME/.kube/config"
+          then
+            echo "::error title=Invalid deployment secret::KUBECONFIG_B64 is not valid base64."
+            exit 1
+          fi
 
           chmod 600 "$HOME/.kube/config"
+
+          if ! kubectl config view --kubeconfig "$HOME/.kube/config" > /dev/null
+          then
+            echo "::error title=Invalid deployment secret::KUBECONFIG_B64 does not decode to a valid kubeconfig."
+            exit 1
+          fi
 
       - name: Verify cluster access
         run: |

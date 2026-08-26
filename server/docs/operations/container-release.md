@@ -4,7 +4,20 @@
 
 The deployment workflow builds server, migration, and web images in GitHub Actions and publishes both a `sha-<commit>` tag and the registry digest returned by the build. Kubernetes receives only digest references. Production hosts do not check out source, install dependencies, generate Prisma clients, or compile code.
 
-The `staging` and `production` GitHub environments must provide `KUBECONFIG_B64`, `SMOKE_API_URL`, and `SMOKE_WEB_URL`. Before the first release, create `pactagent-secrets` in the `pactagent` namespace with the required production environment values, including separate `DATABASE_URL` and `DIRECT_URL`, `REDIS_URL`, `WEBHOOK_EGRESS_PROXY_URL`, keyrings, metrics token, admin addresses, CORS origins, signer configuration, and provider credentials. Keep that Secret under the deployment platform's secret manager rather than Git.
+The `staging` and `production` GitHub environments must provide the `KUBECONFIG_B64` environment secret and the `SMOKE_API_URL` and `SMOKE_WEB_URL` environment variables. Staging also requires the `SMOKE_API_KEY` environment secret for its load checks. A missing GitHub secret resolves to an empty string, so repository variables with the same names do not satisfy this contract. Provision each environment before its first deployment; GitHub can automatically create a referenced environment, but the new environment will not contain secrets or variables.
+
+Before the first deployment to an environment, encode a minimal, environment-specific kubeconfig and store it as that environment's `KUBECONFIG_B64` secret. With GitHub CLI authenticated for the repository, the following command streams the current context directly to the staging secret without printing it:
+
+```bash
+kubectl config view --raw --minify --flatten |
+  base64 |
+  tr -d '\n' |
+  gh secret set --env staging KUBECONFIG_B64
+```
+
+Repeat with `--env production` only when production is ready. The kubeconfig's API server must be reachable from a GitHub-hosted runner, and its identity should have only the permissions needed to deploy into the `pactagent` namespace. Configure the remaining secrets under **Settings > Environments > staging** and add the smoke URLs as environment variables, not secrets.
+
+Before the first release, create `pactagent-secrets` in the `pactagent` namespace with the required production environment values, including separate `DATABASE_URL` and `DIRECT_URL`, `REDIS_URL`, `WEBHOOK_EGRESS_PROXY_URL`, keyrings, metrics token, admin addresses, CORS origins, signer configuration, and provider credentials. Keep that Secret under the deployment platform's secret manager rather than Git.
 
 ## Promotion order
 
