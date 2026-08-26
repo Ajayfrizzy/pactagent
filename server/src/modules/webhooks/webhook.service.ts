@@ -145,6 +145,16 @@ export async function updateWebhookEndpointForApp(
     throw notFound('Webhook endpoint not found.', 'webhook_endpoint_not_found');
   }
 
+  if (
+    input.status === 'active'
+    && (!before.secretHash || !before.secretCiphertext || !before.encryptionKeyVersion)
+  ) {
+    throw invalidRequest(
+      'This migrated webhook endpoint has no usable signing secret. Delete and recreate it before enabling delivery.',
+      'webhook_secret_rotation_required',
+    );
+  }
+
   const normalizedUrl = input.url ? await assertWebhookUrlAllowed(input.url, app.environment) : undefined;
   const updated = await webhookRepository.updateWebhookEndpointForApp(tenantContext(app.id), endpointId, {
     ...input,

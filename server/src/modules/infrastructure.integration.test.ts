@@ -14,6 +14,11 @@ import { listAppTransactions } from './transactions/transaction.service';
 import http from 'node:http';
 import { createApp } from '../app';
 import { getApiKeyPrefix, hashApiKey } from '../common/crypto/api-keys';
+import { config } from '../config';
+import {
+  createWebhookEndpointForApp,
+  updateWebhookEndpointForApp,
+} from './webhooks/webhook.service';
 
 const shouldRun = process.env.RUN_DB_INTEGRATION_TESTS === 'true';
 const ownerId = `integration-${randomUUID()}`;
@@ -168,6 +173,62 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
     const fetched = await getAgreementForApp(appB.id, agreement.id);
     assert.equal(fetched.id, agreement.id);
     assert.equal(fetched.appId, appB.id);
+  });
+
+  test('current webhook creation stores complete signing material and incomplete endpoints cannot be activated', async (t) => {
+    const app = await createIntegrationApp('Webhook Secret Migration Safety');
+    const originalEncryptionKey = config.webhookSecretEncryptionKey;
+    config.webhookSecretEncryptionKey = 'integration-webhook-encryption-key';
+    t.after(() => {
+      resetWebhookSecurityTestHooks();
+      config.webhookSecretEncryptionKey = originalEncryptionKey;
+    });
+    setWebhookSecurityTestHooks({
+      lookupAll: async () => [{ address: '203.0.113.10' }],
+    });
+
+    const created = await createWebhookEndpointForApp(
+      requestStub({ appId: app.id }),
+      app,
+      {
+        url: 'https://webhooks.example.com/pactagent',
+        description: 'Post-migration endpoint',
+        subscribedEvents: ['agreement.created'],
+      },
+    );
+
+    assert.equal(created.status, 'active');
+    assert.equal(created.requiresSecretRotation, false);
+    assert.match(created.secret, /^whsec_/);
+
+    const stored = await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: created.id } });
+    assert.ok(stored.secretHash);
+    assert.ok(stored.secretCiphertext);
+    assert.ok(stored.encryptionKeyVersion);
+
+    const migrated = await prisma.webhookEndpoint.create({
+      data: {
+        id: randomUUID(),
+        appId: app.id,
+        url: 'https://webhooks.example.com/migrated',
+        subscribedEvents: ['agreement.created'],
+        status: 'disabled',
+      },
+    });
+
+    await assert.rejects(
+      () => updateWebhookEndpointForApp(
+        requestStub({ appId: app.id }),
+        app,
+        migrated.id,
+        { status: 'active' },
+      ),
+      (error) => error instanceof AppError && error.code === 'webhook_secret_rotation_required',
+    );
+    await assert.rejects(() => prisma.webhookEndpoint.update({
+      where: { id: migrated.id },
+      data: { status: 'active' },
+    }));
   });
 
   test('database constraints reject a cross-app milestone relationship', async () => {
@@ -342,7 +403,7 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
     } });
     const endpoint = await prisma.webhookEndpoint.create({ data: {
       id: randomUUID(), appId: appB.id, url: 'https://example.com/hook',
-      subscribedEvents: [], secretHash: 'hash', status: 'active',
+      subscribedEvents: [], status: 'disabled',
     } });
     const delivery = await prisma.webhookDelivery.create({ data: {
       id: randomUUID(), appId: appB.id, endpointId: endpoint.id, eventId: event.id,

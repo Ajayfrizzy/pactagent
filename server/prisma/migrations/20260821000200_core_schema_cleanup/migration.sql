@@ -83,18 +83,37 @@ ALTER TABLE public."WorkerHeartbeat" ALTER COLUMN service SET DEFAULT 'webhook';
 UPDATE public."WebhookEndpoint"
 SET
   url = COALESCE(url, "targetUrl"),
-  "secretHash" = COALESCE("secretHash", "signingSecret"),
-  status = CASE WHEN "isActive" THEN COALESCE(NULLIF(status, ''), 'active') ELSE 'disabled' END;
+  "encryptionKeyVersion" = CASE
+    WHEN "secretCiphertext" IS NULL THEN NULL
+    ELSE "encryptionKeyVersion"
+  END,
+  status = CASE
+    WHEN "isActive"
+      AND "secretHash" IS NOT NULL
+      AND "secretCiphertext" IS NOT NULL
+      AND "encryptionKeyVersion" IS NOT NULL
+      THEN COALESCE(NULLIF(status, ''), 'active')
+    ELSE 'disabled'
+  END;
 ALTER TABLE public."WebhookEndpoint"
   ALTER COLUMN "appId" SET NOT NULL,
   ALTER COLUMN url SET NOT NULL,
-  ALTER COLUMN "secretHash" SET NOT NULL,
   DROP COLUMN "ownerAddress",
   DROP COLUMN label,
   DROP COLUMN "targetUrl",
   DROP COLUMN "eventTypesJson",
   DROP COLUMN "signingSecret",
   DROP COLUMN "isActive";
+ALTER TABLE public."WebhookEndpoint"
+  ADD CONSTRAINT "WebhookEndpoint_active_secret_material_check"
+  CHECK (
+    status <> 'active'
+    OR (
+      "secretHash" IS NOT NULL
+      AND "secretCiphertext" IS NOT NULL
+      AND "encryptionKeyVersion" IS NOT NULL
+    )
+  );
 ALTER TABLE public."WebhookDelivery" ALTER COLUMN "appId" SET NOT NULL;
 
 -- Existing v1 fields become the only agreement policy fields.

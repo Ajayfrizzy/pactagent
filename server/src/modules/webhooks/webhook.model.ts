@@ -4,6 +4,9 @@ type WebhookEndpointRecord = {
   url: string;
   description: string | null;
   subscribedEvents: string[];
+  secretHash: string | null;
+  secretCiphertext: string | null;
+  encryptionKeyVersion: string | null;
   status: string;
   createdAt: Date;
   updatedAt: Date;
@@ -28,6 +31,12 @@ type WebhookDeliveryRecord = {
 };
 
 export function serializeWebhookEndpoint(endpoint: WebhookEndpointRecord) {
+  const requiresSecretRotation = !(
+    endpoint.secretHash
+    && endpoint.secretCiphertext
+    && endpoint.encryptionKeyVersion
+  );
+
   return {
     id: endpoint.id,
     appId: endpoint.appId,
@@ -35,6 +44,7 @@ export function serializeWebhookEndpoint(endpoint: WebhookEndpointRecord) {
     description: endpoint.description,
     subscribedEvents: endpoint.subscribedEvents,
     status: endpoint.status,
+    requiresSecretRotation,
     createdAt: endpoint.createdAt.toISOString(),
     updatedAt: endpoint.updatedAt.toISOString(),
   };

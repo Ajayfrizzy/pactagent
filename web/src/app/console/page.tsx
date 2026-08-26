@@ -899,14 +899,23 @@ export default function InfrastructureConsolePage() {
 
               <Section title="Endpoints">
                 <DataTable
-                  columns={['URL', 'Events', 'Status', 'Action']}
+                  columns={['URL', 'Events', 'Status', 'Secret', 'Action']}
                   empty="No webhook endpoints."
                   rows={webhookEndpoints.map((endpoint) => [
                     <span key="url" className="inline-block max-w-[280px] truncate">{endpoint.url}</span>,
                     endpoint.subscribedEvents?.length || 0,
                     <Badge key="status" status={endpoint.status}>{endpoint.status}</Badge>,
+                    <Badge key="secret" status={endpoint.requiresSecretRotation ? 'failed' : 'active'}>
+                      {endpoint.requiresSecretRotation ? 'Recreate required' : 'Ready'}
+                    </Badge>,
                     <div key="actions" className="flex gap-2">
-                      <button type="button" className="ui-button-secondary-sm px-3 py-1.5 text-xs" onClick={() => void runAction(async () => { await updateInfrastructureWebhookEndpoint(endpoint.id, { status: endpoint.status === 'active' ? 'disabled' : 'active' }); await loadAppScopedData(); }, 'Webhook endpoint updated.')}>
+                      <button
+                        type="button"
+                        className="ui-button-secondary-sm px-3 py-1.5 text-xs"
+                        disabled={endpoint.status !== 'active' && endpoint.requiresSecretRotation}
+                        title={endpoint.requiresSecretRotation ? 'Delete and recreate this migrated endpoint to generate a current signing secret.' : undefined}
+                        onClick={() => void runAction(async () => { await updateInfrastructureWebhookEndpoint(endpoint.id, { status: endpoint.status === 'active' ? 'disabled' : 'active' }); await loadAppScopedData(); }, 'Webhook endpoint updated.')}
+                      >
                         {endpoint.status === 'active' ? 'Disable' : 'Enable'}
                       </button>
                       <button type="button" className="ui-button-ghost-danger px-3 py-1.5 text-xs" onClick={() => void runAction(async () => { await deleteInfrastructureWebhookEndpoint(endpoint.id); await loadAppScopedData(); }, 'Webhook endpoint disabled.')}>Delete</button>

@@ -40,13 +40,14 @@ offckb deploy \
   --output ./deployed
 ```
 
-Then set:
+Phase 1 does not consume contract deployment configuration because the `/v1`
+CKB adapter remains an intentionally rejecting stub. To make the standalone
+testnet smoke check verify a deployed contract transaction, run:
 
-```env
-ONCHAIN_ESCROW_ENABLED=true
-ONCHAIN_LOCK_CODE_HASH=0x...
-ONCHAIN_LOCK_HASH_TYPE=type
-ONCHAIN_LOCK_TX_HASH=0x...
-ONCHAIN_LOCK_INDEX=0x0
-ONCHAIN_LOCK_DEP_TYPE=code
+```bash
+CKB_CONTRACT_DEPLOYMENT_TX_HASH=0x... npm run test:testnet
 ```
+
+Phase 2 must define reviewed adapter configuration for the deployed code cell,
+signer, fee policy, confirmation policy, and reconciliation before enabling the
+CKB rail.

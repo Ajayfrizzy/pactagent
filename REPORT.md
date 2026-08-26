@@ -2,6 +2,108 @@
 
 Date: 2026-08-22
 
+## Phase 1 correction pass (2026-08-26)
+
+### Webhook migration correction
+
+The cleanup migration previously populated `secretHash` with
+`COALESCE(secretHash, signingSecret)`. That could store a legacy plaintext
+secret in a hash field and leave an active endpoint without decryptable
+`secretCiphertext`.
+
+The corrected migration never copies `signingSecret` into `secretHash`.
+Endpoints remain active only when `secretHash`, `secretCiphertext`, and
+`encryptionKeyVersion` are all present. Any endpoint missing current secret
+material is migrated with `status = 'disabled'`; a missing ciphertext also
+clears `encryptionKeyVersion`, and `secretHash` remains null when no real hash
+already exists. A database check prevents incomplete endpoints from becoming
+active. Archived webhook metadata retains the existing endpoint fields but
+stores `[redacted]` instead of plaintext and removes hash/ciphertext material
+from the retired compatibility-tenant copy.
+
+The `/v1` API reports `requiresSecretRotation` and rejects attempts to enable
+an incomplete migrated endpoint with `webhook_secret_rotation_required`. The
+developer console labels that state as `Recreate required` and does not offer
+an enable action. Phase 1 has no endpoint-secret rotation API, so an operator
+must delete and recreate such an endpoint to receive a new secret before
+delivery can resume.
+
+### CKB primitive review
+
+The deleted `ckbService.ts` and `onchainEscrowService.ts` implementations were
+reviewed against the retained Rust contract and the `/v1` rail boundary.
+Three deterministic, configuration-free primitives were preserved under
+`server/src/rails/ckb/`:
+
+- RPC/CCC script normalization and comparison
+- Contract-compatible 96-byte lock-args and 88-byte escrow cell-data codecs
+- Occupied-capacity calculation from injected scripts and output data
+
+Raw JSON-RPC calls, transaction/outpoint inspection, address derivation, cell
+dep configuration, treasury transfers, signer behavior, and old agreement
+orchestration remain deleted. The old RPC inspection mixed node and indexer
+assumptions, while the other functions depended on retired product/config
+boundaries. Phase 2 should design those pieces around the implemented adapter,
+explicit node/indexer clients, signer isolation, and reconciliation. The CKB
+adapter remains unchanged as an intentional `escrow_adapter_not_ready` stub.
+
+### Files changed in the correction pass
+
+- Webhook migration/schema/API/UI:
+  `server/prisma/migrations/20260821000200_core_schema_cleanup/migration.sql`,
+  `server/prisma/schema.prisma`, webhook model/service and infrastructure
+  integration test files, and `web/src/app/console/page.tsx`
+- Migration rehearsal:
+  `server/prisma/fixtures/migration-upgrade.sql`, new
+  `migration-upgrade-verify.sql`, and `.github/workflows/ci.yml`
+- CKB primitives: new `server/src/rails/ckb/` codec, script, capacity, and test
+  files
+- Stale-reference cleanup: `.github/workflows/deploy.yml`,
+  `scripts/ckb-testnet-smoke.mjs`, and `contracts/README.md`
+- Report: `REPORT.md`
+
+### Correction verification results
+
+- `npm ci`: pass, 888 packages installed; this host runs Node 25.9.0 while the
+  repository requires Node 24.x, so npm emitted the expected engine warning
+- Prisma format check, validate, and generate: pass
+- PostgreSQL 16 clean install: pass, all 17 migrations applied and current
+- Historical baseline upgrade with populated App, API key, Agreement,
+  Milestone, Proof, Review, Dispute, Escrow, Transaction, Event, webhook,
+  delivery, AuditLog, AgentJob, idempotency, and legacy product fixtures: pass,
+  all 17 migrations current
+- Upgrade assertions: pass for complete-current webhook preservation,
+  plaintext-only endpoint disablement, plaintext removal, archive redaction,
+  delivery/job tenancy, core record survival, legacy archival/removal, active
+  endpoint secret constraints, and archive PUBLIC-access revocation
+- Server unit/E2E tests: pass, 81 tests; includes the `/api/*` 410 boundary and
+  six focused CKB primitive tests
+- Real-PostgreSQL integration tests: pass, 22 tests; includes current webhook
+  creation and API/database rejection of incomplete endpoint activation
+- Server and web production build: pass; the sandboxed Turbopack attempt could
+  not bind its helper port, and the same build passed with local binding allowed
+- Lint: pass for server and web
+- OpenAPI validation: pass, 58 operations match the Express `/v1` route table
+- Deployment validation: pass, 10 Kubernetes resources and 2 smoke tests
+- Environment validation: pass, all 73 referenced variables covered
+- Controls, observability, and Phase 7 validation: pass
+- License tests/check: pass, 888 installed packages covered
+- Dependency audit tests/check: pass, no unexcepted high-or-higher records
+- Rust contract tests: pass, 6 tests
+
+### Remaining Phase 2 work and merge readiness
+
+The full CKB adapter, signer infrastructure, typed node/indexer RPC access,
+transaction construction, fee policy, confirmation/reconciliation behavior,
+and deployment cell-dep configuration remain Phase 2 work. A first-class
+webhook signing-secret rotation operation may also be added there; Phase 1
+requires endpoint recreation instead.
+
+No concurrency hardening, aggregate financial locking, uniqueness overhaul,
+new chain/fiat rails, AI, marketplace, or social functionality was added. With
+the checks above passing, this Phase 1 branch is ready to merge; CI should run
+the same committed migration assertions before merge.
+
 ## 1. Cleanup summary
 
 PactAgent now presents one supported product boundary: app-scoped infrastructure under `/v1`, with a developer console as the first-party UI.
@@ -105,7 +207,9 @@ The canonical infrastructure `infrastructureReleaseMode` column is migrated to `
 - Milestone quote, released-value, and legacy on-chain output fields removed
 - Dispute wallet opener, evidence notes, and AI summary/recommendation/confidence/rationale removed; `openedByExternalId` remains
 - Proof automation `reviewStatus` and `lastCheckedAt` removed; proof lifecycle status and `Review` decisions remain
-- Webhook duplicate product columns removed; `appId`, `url`, and `secretHash` are required
+- Webhook duplicate product columns removed; `appId` and `url` are required,
+  while `secretHash` may be null only for disabled migrated endpoints that need
+  recreation
 - Webhook delivery `appId` is required
 - `App.ownerUserId` renamed to `ownerId`; it stores the infrastructure operator identity
 - `AgentJob.appId` is required and compound agreement tenancy is enforced

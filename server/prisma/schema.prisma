@@ -112,7 +112,7 @@ model WebhookEndpoint {
   url                  String
   description          String?
   subscribedEvents     String[]  @default([])
-  secretHash           String
+  secretHash           String?
   secretCiphertext     String?
   encryptionKeyVersion String?
   status               String    @default("active") // active | disabled

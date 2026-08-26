@@ -141,7 +141,7 @@ jobs:
           EXPECTED_COMMIT: ${{ env.RELEASE_SHA }}
         run: |
           set -e
-          for deployment in pactagent-api pactagent-worker-settlement pactagent-worker-webhook pactagent-worker-ai pactagent-web; do
+          for deployment in pactagent-api pactagent-worker-webhook pactagent-web; do
             kubectl -n "$NAMESPACE" rollout status "deployment/$deployment" --timeout=8m
           done
           node scripts/deployment-smoke.mjs
@@ -158,7 +158,7 @@ jobs:
       - name: Roll back application workloads on failed promotion
         if: failure() && (steps.promote.outcome == 'failure' || steps.load.outcome == 'failure')
         run: |
-          for deployment in pactagent-api pactagent-worker-settlement pactagent-worker-webhook pactagent-worker-ai pactagent-web; do
+          for deployment in pactagent-api pactagent-worker-webhook pactagent-web; do
             kubectl -n "$NAMESPACE" rollout undo "deployment/$deployment"
             kubectl -n "$NAMESPACE" rollout status "deployment/$deployment" --timeout=8m || true
           done
