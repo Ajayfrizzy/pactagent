@@ -207,7 +207,7 @@ No fiat, USDT, multi-chain, AI proof verification, marketplace, chat, reputation
 - The archive schema needs an externally approved retention/export/deletion policy and restricted production role grants.
 - Some historical operations/ADR documents describe guarantees from earlier phases; active entry-point documents are corrected, but a later documentation governance pass should mark historical decisions as superseded where appropriate.
 - Existing Prisma models still use string lifecycle values; database checks exist for several critical fields, while a complete enum strategy is deferred.
-- Prisma 7.9.1 still brings `deepmerge-ts@7.1.5` into development/migration tooling. Its exact high-severity advisory exception expires on 2026-09-22; it must be removed when Prisma adopts the patched major line or explicitly reviewed before renewal.
+- The standalone migration image forces patched `deepmerge-ts`, `fast-uri`, `js-yaml`, and `valibot` transitive versions. Prisma's root development-workspace pin to `deepmerge-ts@7.1.5` retains a narrow exception through 2026-09-22, but the affected version is no longer shipped in the migration image.
 
 ## 9. Recommended next step
 

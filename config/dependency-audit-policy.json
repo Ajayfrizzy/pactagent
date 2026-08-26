@@ -6,7 +6,7 @@
       "packages": ["deepmerge-ts"],
       "owner": "maintainers",
       "expires": "2026-09-22",
-      "reason": "Prisma 7.9.1 migration tooling still pins deepmerge-ts 7.1.5. Prisma is development-only, receives repository-authored acyclic configuration, and is absent from runtime images; remove this exception when Prisma adopts deepmerge-ts 8."
+      "reason": "Prisma 7.9.x migration tooling still pins deepmerge-ts 7.1.5 in the root development workspace. The standalone migration image forces deepmerge-ts 8.0.0 and does not ship the affected version; remove this exception when Prisma adopts deepmerge-ts 8."
     }
   ]
 }

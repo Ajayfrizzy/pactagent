@@ -43,11 +43,12 @@
     "@prisma/dev": "0.24.16",
     "axios": "^1.16.0",
     "brace-expansion": "5.0.8",
-    "fast-uri": "3.1.5",
+    "fast-uri": "3.1.6",
     "follow-redirects": "^1.15.12",
     "form-data": "^4.0.6",
     "gaxios": "7.3.0",
     "gcp-metadata": "8.1.4",
+    "js-yaml": "4.3.1",
     "next": {
       "postcss": "8.5.23"
     },
