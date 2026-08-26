@@ -23,7 +23,7 @@ declare module 'express-serve-static-core' {
       id: string;
       name: string;
       slug: string;
-      ownerUserId: string;
+      ownerId: string;
       environment: string;
       status: string;
       defaultCurrency: string;

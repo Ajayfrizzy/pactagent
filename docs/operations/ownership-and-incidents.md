@@ -3,7 +3,7 @@
 | Area | Primary owner | Responsibilities |
 | --- | --- | --- |
 | API and authentication | API owner (`@oluwaseun`) | Routes, auth, rate limits, compatibility |
-| Worker and settlement | Settlement owner (`@oluwaseun`) | Jobs, signer, CKB reconciliation |
+| Webhook worker and settlement boundary | Settlement owner (`@oluwaseun`) | Webhook jobs, CKB readiness, and Phase 2 rail ownership |
 | PostgreSQL and migrations | Data owner (`@oluwaseun`) | Schema, backups, restore tests, query plans |
 | Security and secrets | Security owner (`@oluwaseun`) | Threat model, key rotation, incident response |
 | Web application | Web owner (`@oluwaseun`) | User flows and API integration |

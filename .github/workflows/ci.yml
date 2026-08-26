@@ -32,7 +32,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: 24
+          node-version: 24.18.1
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci
@@ -82,7 +82,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: 24
+          node-version: 24.18.1
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci
@@ -112,9 +112,7 @@ jobs:
           DATABASE_URL=postgresql://pactagent:pactagent@127.0.0.1:5432/pactagent_upgrade DIRECT_URL=postgresql://pactagent:pactagent@127.0.0.1:5432/pactagent_upgrade npx prisma migrate resolve --applied 20260715000100_baseline
           DATABASE_URL=postgresql://pactagent:pactagent@127.0.0.1:5432/pactagent_upgrade DIRECT_URL=postgresql://pactagent:pactagent@127.0.0.1:5432/pactagent_upgrade npm run db:migrate:deploy
           DATABASE_URL=postgresql://pactagent:pactagent@127.0.0.1:5432/pactagent_upgrade DIRECT_URL=postgresql://pactagent:pactagent@127.0.0.1:5432/pactagent_upgrade npm run db:migrate:status
-          test "$(psql -At -h 127.0.0.1 -U pactagent -d pactagent_upgrade -c "SELECT name FROM \"App\" WHERE id = '00000000-0000-4000-8000-000000000099'")" = "Upgrade Fixture"
-          test "$(psql -At -h 127.0.0.1 -U pactagent -d pactagent_upgrade -c "SELECT title FROM \"Agreement\" WHERE id = '00000000-0000-4000-8000-000000000199'")" = "Existing agreement"
-          test "$(psql -At -h 127.0.0.1 -U pactagent -d pactagent_upgrade -c "SELECT \"responseBodyJson\"->'data'->>'id' FROM \"IdempotencyKey\" WHERE id = '00000000-0000-4000-8000-000000000499'")" = "fixture"
+          psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U pactagent -d pactagent_upgrade -f prisma/fixtures/migration-upgrade-verify.sql
       - run: npm test
       - run: npm run env:check --prefix ..
       - run: npm run test:integration
@@ -142,7 +140,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: 24
+          node-version: 24.18.1
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci

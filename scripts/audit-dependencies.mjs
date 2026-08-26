@@ -43,6 +43,7 @@ const vulnerabilities = report.vulnerabilities || {};
 const blocking = Object.entries(vulnerabilities).filter(([, vulnerability]) => (
   (severityRank[vulnerability.severity] ?? 0) >= threshold
 ));
+const blockingPackages = new Set(blocking.map(([packageName]) => packageName));
 
 function exceptionFor(packageName, advisory) {
   if (typeof advisory !== 'object' || advisory === null) return null;
@@ -60,7 +61,9 @@ while (changed) {
   for (const [packageName, vulnerability] of blocking) {
     if (acceptedPackages.has(packageName)) continue;
     const accepted = (vulnerability.via || []).every((advisory) => {
-      if (typeof advisory === 'string') return acceptedPackages.has(advisory);
+      if (typeof advisory === 'string') {
+        return !blockingPackages.has(advisory) || acceptedPackages.has(advisory);
+      }
       const exception = exceptionFor(packageName, advisory);
       if (exception) acceptedExceptions.add(exception.id);
       return Boolean(exception);

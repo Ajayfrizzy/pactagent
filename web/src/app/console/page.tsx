@@ -613,8 +613,8 @@ export default function InfrastructureConsolePage() {
           <BrandLogo />
           <NavbarMenu>
             <Link href="/console" className="app-nav-link-accent">Console</Link>
-            <Link href="/dashboard" className="app-nav-link">Legacy</Link>
             <Link href="/docs" className="app-nav-link">Docs</Link>
+            <Link href="/openapi.json" className="app-nav-link">OpenAPI</Link>
           </NavbarMenu>
         </div>
       </nav>
@@ -899,14 +899,23 @@ export default function InfrastructureConsolePage() {
 
               <Section title="Endpoints">
                 <DataTable
-                  columns={['URL', 'Events', 'Status', 'Action']}
+                  columns={['URL', 'Events', 'Status', 'Secret', 'Action']}
                   empty="No webhook endpoints."
                   rows={webhookEndpoints.map((endpoint) => [
                     <span key="url" className="inline-block max-w-[280px] truncate">{endpoint.url}</span>,
                     endpoint.subscribedEvents?.length || 0,
                     <Badge key="status" status={endpoint.status}>{endpoint.status}</Badge>,
+                    <Badge key="secret" status={endpoint.requiresSecretRotation ? 'failed' : 'active'}>
+                      {endpoint.requiresSecretRotation ? 'Recreate required' : 'Ready'}
+                    </Badge>,
                     <div key="actions" className="flex gap-2">
-                      <button type="button" className="ui-button-secondary-sm px-3 py-1.5 text-xs" onClick={() => void runAction(async () => { await updateInfrastructureWebhookEndpoint(endpoint.id, { status: endpoint.status === 'active' ? 'disabled' : 'active' }); await loadAppScopedData(); }, 'Webhook endpoint updated.')}>
+                      <button
+                        type="button"
+                        className="ui-button-secondary-sm px-3 py-1.5 text-xs"
+                        disabled={endpoint.status !== 'active' && endpoint.requiresSecretRotation}
+                        title={endpoint.requiresSecretRotation ? 'Delete and recreate this migrated endpoint to generate a current signing secret.' : undefined}
+                        onClick={() => void runAction(async () => { await updateInfrastructureWebhookEndpoint(endpoint.id, { status: endpoint.status === 'active' ? 'disabled' : 'active' }); await loadAppScopedData(); }, 'Webhook endpoint updated.')}
+                      >
                         {endpoint.status === 'active' ? 'Disable' : 'Enable'}
                       </button>
                       <button type="button" className="ui-button-ghost-danger px-3 py-1.5 text-xs" onClick={() => void runAction(async () => { await deleteInfrastructureWebhookEndpoint(endpoint.id); await loadAppScopedData(); }, 'Webhook endpoint disabled.')}>Delete</button>
@@ -1017,7 +1026,7 @@ export default function InfrastructureConsolePage() {
 
         <div className="flex items-center gap-2 text-xs text-gray-600">
           <Check className="h-3 w-3" />
-          Console uses `/v1` app-scoped APIs. Legacy DAO, bounty, profile, and reputation workflows remain outside this surface.
+          Console uses `/v1` app-scoped APIs. Product experiences belong to integrating applications.
         </div>
       </main>
     </div>

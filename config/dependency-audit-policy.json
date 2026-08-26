@@ -2,25 +2,11 @@
   "minimumSeverity": "high",
   "exceptions": [
     {
-      "id": "GHSA-848j-6mx2-7j84",
-      "packages": ["elliptic"],
+      "id": "GHSA-ggr8-5vv4-36mx",
+      "packages": ["deepmerge-ts"],
       "owner": "maintainers",
-      "expires": "2026-08-05",
-      "reason": "Transitive through the CKB CCC JoyID integration; npm offers only an incompatible downgrade and upstream has no patched release."
-    },
-    {
-      "id": "GHSA-f88m-g3jw-g9cj",
-      "packages": ["sharp"],
-      "owner": "maintainers",
-      "expires": "2026-08-05",
-      "reason": "Next 16 currently requires sharp ^0.34.5 while the fixed line is 0.35.x; runtime image optimization is disabled so Sharp is not needed at runtime."
-    },
-    {
-      "id": "GHSA-r28c-9q8g-f849",
-      "packages": ["postcss"],
-      "owner": "maintainers",
-      "expires": "2026-08-05",
-      "reason": "Next declares PostCSS 8.5.10, so npm reports a meta-vulnerability even though the workspace override and lockfile install patched PostCSS 8.5.23. Remove after Next updates its declared dependency."
+      "expires": "2026-09-22",
+      "reason": "Prisma 7.9.x migration tooling still pins deepmerge-ts 7.1.5 in the root development workspace. The standalone migration image forces deepmerge-ts 8.0.0 and does not ship the affected version; remove this exception when Prisma adopts deepmerge-ts 8."
     }
   ]
 }

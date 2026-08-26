@@ -8,8 +8,8 @@ import { serializeApiKey, serializeCreatedApiKey } from './api-key.model';
 import * as apiKeyRepository from './api-key.repository';
 import type { ApiKeyListQuery, CreateApiKeyInput } from './api-key.validation';
 
-export async function createApiKeyForOwner(req: Request, ownerUserId: string, input: CreateApiKeyInput) {
-  const app = await findAppForOwner(ownerUserId, input.appId);
+export async function createApiKeyForOwner(req: Request, ownerId: string, input: CreateApiKeyInput) {
+  const app = await findAppForOwner(ownerId, input.appId);
   if (!app) {
     throw notFound('App not found.', 'app_not_found');
   }
@@ -31,7 +31,7 @@ export async function createApiKeyForOwner(req: Request, ownerUserId: string, in
     await createAuditLogForRequest(req, {
       appId: app.id,
       actorType: 'user',
-      actorAddress: ownerUserId,
+      actorAddress: ownerId,
       action: 'api_key.created',
       targetType: 'api_key',
       targetId: apiKey.id,
@@ -48,15 +48,15 @@ export async function createApiKeyForOwner(req: Request, ownerUserId: string, in
   }
 }
 
-export async function listApiKeysForOwner(ownerUserId: string, query: ApiKeyListQuery) {
+export async function listApiKeysForOwner(ownerId: string, query: ApiKeyListQuery) {
   if (query.appId) {
-    const app = await findAppForOwner(ownerUserId, query.appId);
+    const app = await findAppForOwner(ownerId, query.appId);
     if (!app) {
       throw notFound('App not found.', 'app_not_found');
     }
   }
 
-  const apiKeys = await apiKeyRepository.listApiKeysForOwner(ownerUserId, query);
+  const apiKeys = await apiKeyRepository.listApiKeysForOwner(ownerId, query);
   const hasMore = apiKeys.length > query.limit;
   const data = apiKeys.slice(0, query.limit);
 
@@ -69,14 +69,14 @@ export async function listApiKeysForOwner(ownerUserId: string, query: ApiKeyList
   };
 }
 
-export async function revokeApiKeyForOwner(req: Request, ownerUserId: string, apiKeyId: string) {
-  const before = await apiKeyRepository.findApiKeyForOwner(ownerUserId, apiKeyId);
+export async function revokeApiKeyForOwner(req: Request, ownerId: string, apiKeyId: string) {
+  const before = await apiKeyRepository.findApiKeyForOwner(ownerId, apiKeyId);
   if (!before) {
     throw notFound('API key not found.', 'api_key_not_found');
   }
 
-  await apiKeyRepository.revokeApiKeyForOwner(ownerUserId, apiKeyId);
-  const after = await apiKeyRepository.findApiKeyForOwner(ownerUserId, apiKeyId);
+  await apiKeyRepository.revokeApiKeyForOwner(ownerId, apiKeyId);
+  const after = await apiKeyRepository.findApiKeyForOwner(ownerId, apiKeyId);
   if (!after) {
     throw notFound('API key not found.', 'api_key_not_found');
   }
@@ -84,7 +84,7 @@ export async function revokeApiKeyForOwner(req: Request, ownerUserId: string, ap
   await createAuditLogForRequest(req, {
     appId: after.appId,
     actorType: 'user',
-    actorAddress: ownerUserId,
+    actorAddress: ownerId,
     action: 'api_key.revoked',
     targetType: 'api_key',
     targetId: apiKeyId,

@@ -2,7 +2,7 @@
 
 ## Process lifecycle
 
-The API and worker handle `SIGTERM` and `SIGINT`. Readiness changes before drain, the API closes WebSockets and HTTP connections, and the worker stops polling before waiting for its current cycle. Both disconnect Prisma before exit. `SHUTDOWN_TIMEOUT_MS` bounds the drain.
+The API and worker handle `SIGTERM` and `SIGINT`. Readiness changes before drain, the API closes HTTP connections, and the worker stops polling before waiting for its current cycle. Both disconnect Prisma before exit. `SHUTDOWN_TIMEOUT_MS` bounds the drain.
 
 Set the container termination grace period higher than `SHUTDOWN_TIMEOUT_MS` (for example, 45 seconds for a 30-second application timeout). Do not send `SIGKILL` unless the bounded shutdown has failed.
 
@@ -38,10 +38,7 @@ Important series include:
 - `pactagent_job_execution_duration_seconds`
 - `pactagent_job_lease_renewals_total`
 - `pactagent_job_retries_total`
-- `pactagent_settlement_reconciliations_total`
 - `pactagent_provider_request_duration_seconds`
-- `pactagent_websocket_connections`
-- `pactagent_websocket_pressure_total`
 
 Recommended initial alerts:
 
@@ -78,4 +75,4 @@ Set `SERVICE_ROLE=api` on API replicas and `SERVICE_ROLE=worker` on workers. Pro
 
 ## Financial precision
 
-USD targets, CKB/USD quotes, and realized USD values use PostgreSQL `DECIMAL(30,12)`. API consumers should treat serialized decimal values as decimal strings when exact arithmetic is required; never convert settlement amounts through binary floating point. CKB/shannon amounts remain integer strings.
+Agreement, milestone, escrow, dispute-split, and transaction amounts are positive integer strings. CKB values are denominated in shannon. API consumers must use integer arithmetic and must not convert settlement amounts through binary floating point.

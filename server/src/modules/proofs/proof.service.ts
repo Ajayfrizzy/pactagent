@@ -25,7 +25,6 @@ import {
   milestonePathForProofSubmission,
   milestonePathForReviewDecision,
   proofStatusForReviewDecision,
-  reviewStatusForDecision,
 } from './proof.lifecycle';
 import { serializeProof } from './proof.model';
 import * as proofRepository from './proof.repository';
@@ -230,7 +229,6 @@ export async function reviewProofForApp(req: Request, appId: string, proofId: st
     if (agreementPath[0] === 'under_review' || milestonePath[0] === 'under_review') {
       await proofRepository.updateProofStatus(tenantContext(appId), proof.id, {
         status: 'under_review',
-        reviewStatus: 'READY_FOR_HUMAN_REVIEW',
       }, tx);
 
       await createEvent(tenantContext(appId), {type: PROOF_EVENTS.underReview,
@@ -246,7 +244,6 @@ export async function reviewProofForApp(req: Request, appId: string, proofId: st
 
     const reviewedProof = await proofRepository.updateProofStatus(tenantContext(appId), proof.id, {
       status: proofStatusForReviewDecision(input.decision),
-      reviewStatus: reviewStatusForDecision(input.decision),
     }, tx);
     const review = await reviewRepository.createReview(tenantContext(appId), {
       ...input,

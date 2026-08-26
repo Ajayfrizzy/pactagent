@@ -551,7 +551,7 @@ export function WalletConnect({ compact = false }: { compact?: boolean }) {
         <span className="ui-chip-muted px-2 py-0.5 normal-case tracking-normal">3. Start using PactAgent</span>
       </div>
       <span className={`max-w-full break-words text-[11px] ${authError ? 'text-red-300' : 'text-gray-500'}`}>
-        {authError || 'Connect your wallet, then approve the sign-in request to unlock agreements, invites, webhooks, and profile settings.'}
+        {authError || 'Connect your wallet, then approve the sign-in request to manage apps, API keys, and infrastructure operations.'}
       </span>
     </div>
   );

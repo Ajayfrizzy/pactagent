@@ -62,16 +62,6 @@ export const jobLeaseRenewals = new Counter({
 export const jobRetries = new Counter({
   name: 'pactagent_job_retries_total', help: 'Job retry and dead-letter transitions by queue.', labelNames: ['queue', 'outcome'] as const, registers: [metricsRegistry],
 });
-export const settlementReconciliations = new Counter({
-  name: 'pactagent_settlement_reconciliations_total', help: 'Settlement reconciliation jobs by outcome.', labelNames: ['outcome'] as const, registers: [metricsRegistry],
-});
-export const websocketConnections = new Gauge({
-  name: 'pactagent_websocket_connections', help: 'Current WebSocket connections by visibility mode.', labelNames: ['mode'] as const, registers: [metricsRegistry],
-});
-export const websocketPressure = new Counter({
-  name: 'pactagent_websocket_pressure_total', help: 'WebSocket resource-pressure actions.', labelNames: ['reason'] as const, registers: [metricsRegistry],
-});
-
 const FORBIDDEN_METRIC_LABELS = new Set([
   'appId', 'agreementId', 'milestoneId', 'transactionId', 'deliveryId', 'jobId',
   'requestId', 'providerRequestId', 'traceId', 'spanId', 'address', 'url',

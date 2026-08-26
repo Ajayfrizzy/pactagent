@@ -24,7 +24,7 @@ export function getHealthStatus() {
 export async function getWorkerAndQueueStatus() {
   const now = Date.now();
   const [heartbeat, queued, deadLetters, oldest] = await Promise.all([
-    prisma.workerHeartbeat.findFirst({ where: { service: 'agent' }, orderBy: { lastHeartbeatAt: 'desc' } }),
+    prisma.workerHeartbeat.findFirst({ where: { service: 'webhook' }, orderBy: { lastHeartbeatAt: 'desc' } }),
     prisma.agentJob.count({ where: { status: { in: ['QUEUED', 'RETRY'] } } }),
     prisma.agentJob.count({ where: { status: 'DEAD_LETTER' } }),
     prisma.agentJob.findFirst({

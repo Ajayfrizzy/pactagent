@@ -5,14 +5,6 @@ import { config } from './config';
 import { errorHandler } from './common/middleware/error-handler';
 import { requestContext } from './common/middleware/request-context';
 import { v1IpRateLimit } from './common/rate-limit/infrastructure-rate-limit';
-import agreementRoutes from './routes/agreements';
-import authRoutes from './routes/auth';
-import inviteRoutes from './routes/invites';
-import integrationRoutes from './routes/integrations';
-import logRoutes from './routes/logs';
-import meRoutes from './routes/me';
-import profileRoutes from './routes/profiles';
-import webhookRoutes from './routes/webhooks';
 import appRoutes from './modules/apps/app.routes';
 import apiKeyRoutes from './modules/api-keys/api-key.routes';
 import auditLogRoutes from './modules/audit-logs/audit-log.routes';
@@ -28,7 +20,7 @@ import webhookEndpointRoutes, { webhookDeliveryRoutes } from './modules/webhooks
 import adminRoutes from './modules/admin/admin.routes';
 import healthRoutes from './modules/health/health.routes';
 import docsRoutes from './modules/docs/docs.routes';
-import { isOnchainEscrowReady } from './services/onchainEscrowService';
+import authRoutes from './modules/auth/auth.routes';
 import { metricsMiddleware } from './common/observability/metrics';
 import { requestLogger } from './common/observability/request-logger';
 import { payloadLimit } from './common/middleware/payload-limit';
@@ -82,6 +74,7 @@ export function createApp() {
   app.use('/v1', v1IpRateLimit);
 
   app.use('/v1/apps', payloadLimit(64 * 1024));
+  app.use('/v1/auth', payloadLimit(16 * 1024));
   app.use('/v1/api-keys', payloadLimit(64 * 1024));
   app.use('/v1/agreements', payloadLimit(256 * 1024));
   app.use('/v1/milestones', payloadLimit(128 * 1024));
@@ -93,6 +86,7 @@ export function createApp() {
   app.use('/v1/admin', payloadLimit(64 * 1024));
   app.use('/v1', payloadLimit(256 * 1024));
 
+  app.use('/v1/auth', authRoutes);
   app.use('/v1/apps', appRoutes);
   app.use('/v1/api-keys', apiKeyRoutes);
   app.use('/v1/agreements', infrastructureAgreementRoutes);
@@ -110,52 +104,12 @@ export function createApp() {
   app.use(healthRoutes);
   app.use(docsRoutes);
 
-  app.get('/api/config', async (_req, res, next) => {
-    try {
-      const onchainEscrowReady = isOnchainEscrowReady();
-
-      res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
-      res.json({
-        success: true,
-        data: {
-          ckbNetwork: config.ckbNetwork,
-          aiEnabled: config.aiEnabled,
-          onchainEscrowEnabled: config.onchainEscrowEnabled,
-          onchainEscrowReady,
-          supportedEscrowModels: onchainEscrowReady
-            ? ['TREASURY_BRIDGE', 'ONCHAIN_LOCK']
-            : ['TREASURY_BRIDGE'],
-        },
-      });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  if (config.enableLegacyProductApi) {
-    app.use('/api/auth', payloadLimit(16 * 1024));
-    app.use('/api/profiles', payloadLimit(128 * 1024));
-    app.use('/api/invites', payloadLimit(64 * 1024));
-    app.use('/api/integrations', payloadLimit(64 * 1024));
-    app.use('/api/webhooks', payloadLimit(64 * 1024));
-    app.use('/api/agreements', payloadLimit(1024 * 1024));
-    app.use('/api', payloadLimit(1024 * 1024));
-    app.use('/api/auth', authRoutes);
-    app.use('/api/me', meRoutes);
-    app.use('/api/profiles', profileRoutes);
-    app.use('/api/invites', inviteRoutes);
-    app.use('/api/integrations', integrationRoutes);
-    app.use('/api/webhooks', webhookRoutes);
-    app.use('/api/agreements', agreementRoutes);
-    app.use('/api/logs', logRoutes);
-  } else {
-    app.use('/api', (_req, res) => {
-      res.status(410).json({
-        success: false,
-        error: 'Legacy product API routes are disabled. Use the app-scoped /v1 infrastructure API.',
-      });
+  app.use('/api', (_req, res) => {
+    res.status(410).json({
+      success: false,
+      error: 'Legacy product API routes were removed. Use the app-scoped /v1 infrastructure API.',
     });
-  }
+  });
 
   app.use(errorHandler);
 

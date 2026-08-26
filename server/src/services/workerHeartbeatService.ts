@@ -2,7 +2,7 @@ import os from 'os';
 import { prisma } from '../db';
 import { config } from '../config';
 
-export function registerWorker(workerId: string, service = 'agent') {
+export function registerWorker(workerId: string, service = 'webhook') {
   const now = new Date();
   return prisma.workerHeartbeat.upsert({
     where: { id: workerId },

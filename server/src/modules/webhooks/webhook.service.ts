@@ -62,16 +62,18 @@ function deliveryEndpointUrl(delivery: Awaited<ReturnType<typeof webhookReposito
     return null;
   }
 
-  return delivery.endpoint.url ?? delivery.endpoint.targetUrl;
+  return delivery.endpoint.url;
 }
 
 async function enqueueWebhookDeliveryJob(params: {
+  appId: string;
   deliveryId: string;
   agreementId: string | null;
   attemptKey: string;
   availableAt?: Date | null;
 }) {
   await enqueueJob({
+    appId: params.appId,
     agreementId: params.agreementId,
     kind: 'DELIVER_WEBHOOK',
     payload: {
@@ -141,6 +143,16 @@ export async function updateWebhookEndpointForApp(
   const before = await webhookRepository.findWebhookEndpointForApp(tenantContext(app.id), endpointId);
   if (!before) {
     throw notFound('Webhook endpoint not found.', 'webhook_endpoint_not_found');
+  }
+
+  if (
+    input.status === 'active'
+    && (!before.secretHash || !before.secretCiphertext || !before.encryptionKeyVersion)
+  ) {
+    throw invalidRequest(
+      'This migrated webhook endpoint has no usable signing secret. Delete and recreate it before enabling delivery.',
+      'webhook_secret_rotation_required',
+    );
   }
 
   const normalizedUrl = input.url ? await assertWebhookUrlAllowed(input.url, app.environment) : undefined;
@@ -235,6 +247,7 @@ export async function retryWebhookDeliveryForApp(req: Request, appId: string, de
   });
 
   await enqueueWebhookDeliveryJob({
+    appId,
     deliveryId: updated.id,
     agreementId: updated.agreementId,
     attemptKey: `manual:${Date.now()}`,
@@ -275,7 +288,7 @@ export async function deliverWebhookDelivery(deliveryId: string) {
   }
 
   const endpointUrl = deliveryEndpointUrl(delivery);
-  if (!delivery.endpoint.isActive || delivery.endpoint.status !== 'active' || !endpointUrl) {
+  if (delivery.endpoint.status !== 'active' || !endpointUrl) {
     const updated = await webhookRepository.updateWebhookDeliveryResult(delivery.id, {
       status: 'FAILED',
       lastError: 'Webhook endpoint is inactive.',
@@ -346,6 +359,7 @@ export async function deliverWebhookDelivery(deliveryId: string) {
       await recordFinalDeliveryFailure(delivery, message);
     } else {
       await enqueueWebhookDeliveryJob({
+        appId: delivery.appId,
         deliveryId: delivery.id,
         agreementId: delivery.agreementId,
         attemptKey: String(failedAttemptCount),

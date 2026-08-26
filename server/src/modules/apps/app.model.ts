@@ -5,7 +5,7 @@ export type AppRecord = {
   id: string;
   name: string;
   slug: string;
-  ownerUserId: string;
+  ownerId: string;
   environment: string;
   status: string;
   defaultCurrency: string;
@@ -19,7 +19,6 @@ export function serializeApp(app: AppRecord) {
     id: app.id,
     name: app.name,
     slug: app.slug,
-    ownerUserId: app.ownerUserId,
     environment: app.environment,
     status: app.status,
     defaultCurrency: app.defaultCurrency,

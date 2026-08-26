@@ -15,7 +15,7 @@ const documents = files.flatMap((file) => YAML.parseAllDocuments(fs.readFileSync
 })).filter((entry) => entry.value);
 
 const workloads = documents.filter(({ value }) => ['Deployment', 'Job'].includes(value.kind));
-if (workloads.length !== 6) throw new Error(`Expected five Deployments and one Job, found ${workloads.length}`);
+if (workloads.length !== 4) throw new Error(`Expected three Deployments and one Job, found ${workloads.length}`);
 for (const { file, value } of workloads) {
   const spec = value.kind === 'Job' ? value.spec.template.spec : value.spec.template.spec;
   if (spec.automountServiceAccountToken !== false) throw new Error(`${file}/${value.metadata.name}: service account token must be disabled`);

@@ -27,26 +27,8 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: pactagent-worker-settlement
-  namespace: pactagent
-spec:
-  selector: { app.kubernetes.io/name: pactagent-worker-settlement }
-  ports: [{ name: health, port: 4001, targetPort: health }]
----
-apiVersion: v1
-kind: Service
-metadata:
   name: pactagent-worker-webhook
   namespace: pactagent
 spec:
   selector: { app.kubernetes.io/name: pactagent-worker-webhook }
-  ports: [{ name: health, port: 4001, targetPort: health }]
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: pactagent-worker-ai
-  namespace: pactagent
-spec:
-  selector: { app.kubernetes.io/name: pactagent-worker-ai }
   ports: [{ name: health, port: 4001, targetPort: health }]

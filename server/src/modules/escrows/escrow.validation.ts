@@ -7,7 +7,7 @@ export const createEscrowSchema = z.object({
   milestoneId: z.string().uuid().optional(),
   amount: positiveIntegerString,
   currency: z.string().trim().min(2).max(12).default('CKB'),
-  rail: z.enum(['mock', 'manual', 'ckb', 'future_fiat', 'future_usdt']).default('mock'),
+  rail: z.enum(['mock', 'manual', 'ckb']).default('mock'),
   network: z.enum(['sandbox', 'testnet', 'mainnet']).default('sandbox'),
 });
 

@@ -4,7 +4,6 @@ import { createApp } from './app';
 import { config, validateProductionConfig } from './config';
 import { requireDatabaseUrl } from './db';
 import { prisma } from './db';
-import { closeWebSocketServer, initWebSocket } from './ws';
 import { beginShutdown } from './common/runtime/lifecycle';
 import { installConsoleBridge, log } from './common/observability/logger';
 import { shutdownTracing } from './common/observability/tracing';
@@ -17,14 +16,12 @@ installConsoleBridge();
 
 const app = createApp();
 const server = http.createServer(app);
-initWebSocket(server);
 
 assertRequiredMigrationsApplied()
   .then(() => server.listen(config.port, () => {
     log('info', 'server.started', {
       port: config.port,
       ckbNetwork: config.ckbNetwork,
-      aiEnabled: config.aiEnabled,
       version: config.buildVersion,
       commit: config.buildCommit,
     });
@@ -46,7 +43,6 @@ function shutdown(signal: string) {
       process.exit(1);
     }, config.shutdownTimeoutMs);
     timeout.unref();
-    await closeWebSocketServer();
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await prisma.$disconnect();
     await closeRateLimitStore();

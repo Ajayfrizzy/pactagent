@@ -6,7 +6,7 @@
 | --- | ---: | ---: |
 | API reads and agreement management | 60 minutes | 5 minutes |
 | Worker and webhook processing | 2 hours | Queue state at last database commit |
-| Settlement and treasury signing | 4 hours | Zero acknowledged settlements |
+| CKB settlement readiness | 4 hours | Zero acknowledged settlements |
 | Audit ledger | 4 hours | Zero committed audit rows |
 
 Test database restore quarterly and perform a full regional recovery exercise annually. Record actual recovery time and data loss against these objectives.
@@ -17,16 +17,16 @@ Exercise definitions are machine-readable in `config/operations-exercises.json`.
 
 ## Database outage or restoration
 
-1. Stop workers and disable settlement mutations; keep liveness available but readiness failing.
+1. Stop the webhook worker and disable settlement mutations; keep liveness available but readiness failing.
 2. Confirm provider status and preserve database/connection-pool metrics.
 3. Restore the latest point-in-time backup into an isolated instance and run `npm run db:migrate:status`.
 4. Validate audit-chain continuity, row counts, pending jobs, idempotency records, and latest settlement transaction hashes.
 5. Point one canary API and worker at the restored database, reconcile CKB state, then restore traffic gradually.
 
-## Compromised API, JWT, webhook, or treasury key
+## Compromised API, JWT, or webhook key
 
-1. Disable affected API keys or signing provider immediately and stop settlement workers for treasury exposure.
-2. Revoke the provider credential, activate a new key ID, retain old decryption keys only as required, and re-encrypt webhook secrets.
+1. Disable affected API keys or webhook endpoints immediately and stop the webhook worker for webhook-key exposure.
+2. Revoke the affected credential, activate a new JWT key ID when applicable, retain old decryption keys only as required, and re-encrypt webhook secrets.
 3. Review audit logs from the earliest suspected exposure and reconcile every settlement with CKB.
 4. Resume with a canary and publish an incident timeline. Never delete compromised-key audit evidence.
 
@@ -39,7 +39,7 @@ Exercise definitions are machine-readable in `config/operations-exercises.json`.
 
 ## CKB outage
 
-Open the CKB circuit, pause signing, and continue non-settlement API operations. Do not treat missing RPC data as transaction failure. On recovery, reconcile pending transaction hashes before releasing queued jobs. Fiber is retired; any Fiber-dependent record is historical and must not trigger an active call.
+The Phase 1 CKB adapter is inactive, so an RPC outage affects optional settlement readiness but cannot trigger signing or transfer jobs. Continue non-settlement API operations according to the configured readiness policy. Phase 2 must add a reconciliation runbook before enabling automated CKB settlement.
 
 ## Failed migration
 
@@ -51,7 +51,7 @@ Confirm endpoint/provider health and queue age, then pause new delivery claims i
 
 ## Worker outage
 
-Readiness and heartbeat alerts identify stale workers. Ensure the old process no longer owns locks, start one replacement, observe a full cycle, and scale gradually. Reconcile stale locks and pending settlement operations before replay.
+Readiness and heartbeat alerts identify stale workers. Ensure the old process no longer owns locks, start one replacement, observe a full cycle, and scale gradually. Reconcile stale locks and pending webhook deliveries before replay.
 
 ## Dependency vulnerability response
 

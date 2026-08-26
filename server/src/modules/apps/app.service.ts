@@ -6,13 +6,13 @@ import { serializeApp } from './app.model';
 import * as appRepository from './app.repository';
 import type { AppListQuery, CreateAppInput, UpdateAppInput } from './app.validation';
 
-export async function createAppForOwner(req: Request, ownerUserId: string, input: CreateAppInput) {
+export async function createAppForOwner(req: Request, ownerId: string, input: CreateAppInput) {
   try {
-    const app = await appRepository.createApp(ownerUserId, input);
+    const app = await appRepository.createApp(ownerId, input);
     await createAuditLogForRequest(req, {
       appId: app.id,
       actorType: 'user',
-      actorAddress: ownerUserId,
+      actorAddress: ownerId,
       action: 'app.created',
       targetType: 'app',
       targetId: app.id,
@@ -29,8 +29,8 @@ export async function createAppForOwner(req: Request, ownerUserId: string, input
   }
 }
 
-export async function listAppsForOwner(ownerUserId: string, query: AppListQuery) {
-  const apps = await appRepository.listAppsForOwner(ownerUserId, query);
+export async function listAppsForOwner(ownerId: string, query: AppListQuery) {
+  const apps = await appRepository.listAppsForOwner(ownerId, query);
   const hasMore = apps.length > query.limit;
   const data = apps.slice(0, query.limit);
 
@@ -43,8 +43,8 @@ export async function listAppsForOwner(ownerUserId: string, query: AppListQuery)
   };
 }
 
-export async function getAppForOwner(ownerUserId: string, appId: string) {
-  const app = await appRepository.findAppForOwner(ownerUserId, appId);
+export async function getAppForOwner(ownerId: string, appId: string) {
+  const app = await appRepository.findAppForOwner(ownerId, appId);
   if (!app) {
     throw notFound('App not found.', 'app_not_found');
   }
@@ -54,17 +54,17 @@ export async function getAppForOwner(ownerUserId: string, appId: string) {
 
 export async function updateAppForOwner(
   req: Request,
-  ownerUserId: string,
+  ownerId: string,
   appId: string,
   input: UpdateAppInput,
 ) {
-  const before = await appRepository.findAppForOwner(ownerUserId, appId);
+  const before = await appRepository.findAppForOwner(ownerId, appId);
   if (!before) {
     throw notFound('App not found.', 'app_not_found');
   }
 
-  await appRepository.updateAppForOwner(ownerUserId, appId, input);
-  const after = await appRepository.findAppForOwner(ownerUserId, appId);
+  await appRepository.updateAppForOwner(ownerId, appId, input);
+  const after = await appRepository.findAppForOwner(ownerId, appId);
   if (!after) {
     throw notFound('App not found.', 'app_not_found');
   }
@@ -72,7 +72,7 @@ export async function updateAppForOwner(
   await createAuditLogForRequest(req, {
     appId,
     actorType: 'user',
-    actorAddress: ownerUserId,
+    actorAddress: ownerId,
     action: input.status === 'disabled' ? 'app.disabled' : 'app.updated',
     targetType: 'app',
     targetId: appId,
@@ -83,14 +83,14 @@ export async function updateAppForOwner(
   return serializeApp(after);
 }
 
-export async function disableAppForOwner(req: Request, ownerUserId: string, appId: string) {
-  const before = await appRepository.findAppForOwner(ownerUserId, appId);
+export async function disableAppForOwner(req: Request, ownerId: string, appId: string) {
+  const before = await appRepository.findAppForOwner(ownerId, appId);
   if (!before) {
     throw notFound('App not found.', 'app_not_found');
   }
 
-  await appRepository.disableAppForOwner(ownerUserId, appId);
-  const after = await appRepository.findAppForOwner(ownerUserId, appId);
+  await appRepository.disableAppForOwner(ownerId, appId);
+  const after = await appRepository.findAppForOwner(ownerId, appId);
   if (!after) {
     throw notFound('App not found.', 'app_not_found');
   }
@@ -98,7 +98,7 @@ export async function disableAppForOwner(req: Request, ownerUserId: string, appI
   await createAuditLogForRequest(req, {
     appId,
     actorType: 'user',
-    actorAddress: ownerUserId,
+    actorAddress: ownerId,
     action: 'app.disabled',
     targetType: 'app',
     targetId: appId,

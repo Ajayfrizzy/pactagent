@@ -16,23 +16,14 @@ function runAudit(vulnerabilities) {
 
 test('accepted advisories cover only their transitive vulnerability chains', () => {
   const result = runAudit({
-    elliptic: {
+    'deepmerge-ts': {
       severity: 'high',
       range: '*',
-      via: [{ source: 1, url: 'https://github.com/advisories/GHSA-848j-6mx2-7j84' }],
+      via: [{ source: 1, url: 'https://github.com/advisories/GHSA-ggr8-5vv4-36mx' }],
     },
-    '@joyid/ckb': { severity: 'high', range: '*', via: ['elliptic'] },
-    sharp: {
-      severity: 'high',
-      range: '<0.35.0',
-      via: [{ source: 2, url: 'https://github.com/advisories/GHSA-f88m-g3jw-g9cj' }],
-    },
-    postcss: {
-      severity: 'high',
-      range: '<=8.5.17',
-      via: [{ source: 3, url: 'https://github.com/advisories/GHSA-r28c-9q8g-f849' }],
-    },
-    next: { severity: 'high', range: '*', via: ['sharp', 'postcss'] },
+    '@prisma/config': { severity: 'high', range: '*', via: ['deepmerge-ts'] },
+    '@prisma/dev': { severity: 'moderate', range: '*', via: [] },
+    prisma: { severity: 'high', range: '*', via: ['@prisma/config', '@prisma/dev'] },
   });
 
   assert.equal(result.status, 0, result.stderr);

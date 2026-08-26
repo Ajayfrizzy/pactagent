@@ -28,7 +28,6 @@ export function createProof(tenant: TenantContext, input: CreateProofInput, tx: 
       linksJson: JSON.stringify(input.links),
       fileRefsJson: JSON.stringify(input.fileRefs),
       status: 'submitted',
-      reviewStatus: 'UNREVIEWED',
     },
   });
 }
@@ -59,10 +58,7 @@ export function findProofForApp(tenant: TenantContext, proofId: string, tx?: Pri
 export function updateProofStatus(
   tenant: TenantContext,
   proofId: string,
-  data: {
-    status: string;
-    reviewStatus?: string;
-  },
+  data: { status: string },
   tx: Prisma.TransactionClient,
 ) {
   return tx.proof.update({

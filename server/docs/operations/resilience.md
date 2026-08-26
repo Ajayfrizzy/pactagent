@@ -18,15 +18,9 @@ Completed keys are retained for `IDEMPOTENCY_RETENTION_MS`; in-progress reservat
 
 Use a retention period longer than the maximum client retry window. Monitor table size and stale processing records.
 
-## WebSockets
+## Browser origins
 
-JWTs are sent through the `Sec-WebSocket-Protocol` header and must never be placed in URLs. Invalid credentials are rejected instead of being downgraded to public access. The server enforces configured origins, global and per-IP connection limits, maximum message size, heartbeat termination, and buffered-output limits.
-
-The authenticated subprotocol uses the normal session JWT, so its maximum exposure window is `AUTH_TOKEN_TTL_SECS`. Keep that TTL within the incident-response revocation window, rotate signing keys with overlap no longer than the TTL, and never log the `Sec-WebSocket-Protocol` header. Public clients receive only an allowlisted log projection; agreement objects, tenant IDs, addresses, and metadata are never broadcast publicly.
-
-API instances publish events through Redis and ignore their own pub/sub envelope, allowing each instance to deliver an event once to its local clients. Deployed environments require Redis for both distributed HTTP rate limiting and WebSocket fan-out.
-
-Production `CORS_ORIGIN` must list every allowed browser origin. When operating behind a proxy, ensure it forwards WebSocket upgrades and preserves `Sec-WebSocket-Protocol`.
+Production `CORS_ORIGIN` must list every allowed browser origin. The infrastructure server has no WebSocket surface; lifecycle consumers receive events through durable signed webhooks.
 
 ## Controlled webhook egress
 

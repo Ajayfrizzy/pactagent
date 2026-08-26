@@ -11,14 +11,12 @@ requireDatabaseUrl();
 async function main() {
   const endpoints = await prisma.webhookEndpoint.findMany({
     where: {
-      appId: { not: null },
       deletedAt: null,
     },
     select: {
       id: true,
       appId: true,
       url: true,
-      targetUrl: true,
       secretCiphertext: true,
       encryptionKeyVersion: true,
     },

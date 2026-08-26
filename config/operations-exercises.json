@@ -18,9 +18,9 @@
     {
       "id": "rolling-restart",
       "owner": "release-engineer",
-      "command": "kubectl -n pactagent rollout restart deployment/pactagent-api deployment/pactagent-worker-settlement deployment/pactagent-worker-webhook deployment/pactagent-worker-ai",
-      "expectedEvidence": "All Deployments become ready and in-flight jobs complete or recover without duplicate settlement.",
-      "abortCondition": "Readiness fails, queue age grows beyond five minutes, or settlement reconciliation fails."
+      "command": "kubectl -n pactagent rollout restart deployment/pactagent-api deployment/pactagent-worker-webhook deployment/pactagent-web",
+      "expectedEvidence": "All Deployments become ready and in-flight webhook jobs complete or recover without duplicate delivery records.",
+      "abortCondition": "Readiness fails or queue age grows beyond five minutes."
     },
     {
       "id": "dead-letter-replay",

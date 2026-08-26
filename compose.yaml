@@ -9,11 +9,9 @@ x-server-environment: &server-environment
   AUTH_JWT_ACTIVE_KID: ${AUTH_JWT_ACTIVE_KID:-jwt-local-1}
   WEBHOOK_ENCRYPTION_KEYRING_FILE: /run/secrets/webhook_keyring
   WEBHOOK_ACTIVE_KEY_ID: ${WEBHOOK_ACTIVE_KEY_ID:-webhook-local-1}
-  TREASURY_CKB_PRIVATE_KEY_FILE: /run/secrets/treasury_private_key
   METRICS_BEARER_TOKEN_FILE: /run/secrets/metrics_bearer_token
   ADMIN_ADDRESSES: ${ADMIN_ADDRESSES:?Set ADMIN_ADDRESSES}
   CORS_ORIGIN: ${CORS_ORIGIN:-https://app.example.com}
-  ENABLE_LEGACY_PRODUCT_API: "false"
   REDIS_URL: redis://redis:6379
   TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-0}
 
@@ -63,7 +61,6 @@ services:
     secrets:
       - jwt_keyring
       - webhook_keyring
-      - treasury_private_key
       - metrics_bearer_token
     ports:
       - "4000:4000"
@@ -72,37 +69,6 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
-    init: true
-    read_only: true
-    tmpfs:
-      - /tmp
-    restart: unless-stopped
-
-  worker-settlement:
-    build:
-      context: .
-      dockerfile: server/Dockerfile
-      target: runtime
-    command: ["node", "dist/worker/index.js"]
-    environment:
-      <<: *server-environment
-      SERVICE_ROLE: worker
-      OTEL_SERVICE_NAME: pactagent-worker
-      WORKER_ID: settlement-worker
-      WORKER_QUEUES: settlement
-      WORKER_HEALTH_PORT: 4001
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4001/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
-      interval: 30s
-      timeout: 5s
-      start_period: 20s
-      retries: 3
-    secrets:
-      - webhook_keyring
-      - treasury_private_key
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
     init: true
     read_only: true
     tmpfs:
@@ -121,36 +87,6 @@ services:
       OTEL_SERVICE_NAME: pactagent-worker-webhook
       WORKER_ID: webhook-worker
       WORKER_QUEUES: webhook
-      WORKER_HEALTH_PORT: 4001
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4001/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
-      interval: 30s
-      timeout: 5s
-      start_period: 20s
-      retries: 3
-    secrets:
-      - webhook_keyring
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-    init: true
-    read_only: true
-    tmpfs:
-      - /tmp
-    restart: unless-stopped
-
-  worker-ai:
-    build:
-      context: .
-      dockerfile: server/Dockerfile
-      target: runtime
-    command: ["node", "dist/worker/index.js"]
-    environment:
-      <<: *server-environment
-      SERVICE_ROLE: worker
-      OTEL_SERVICE_NAME: pactagent-worker-ai
-      WORKER_ID: ai-worker
-      WORKER_QUEUES: ai
       WORKER_HEALTH_PORT: 4001
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4001/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
@@ -196,7 +132,5 @@ secrets:
     file: ${AUTH_JWT_KEYRING_SOURCE:?Set AUTH_JWT_KEYRING_SOURCE}
   webhook_keyring:
     file: ${WEBHOOK_KEYRING_SOURCE:?Set WEBHOOK_KEYRING_SOURCE}
-  treasury_private_key:
-    file: ${TREASURY_PRIVATE_KEY_SOURCE:?Set TREASURY_PRIVATE_KEY_SOURCE}
   metrics_bearer_token:
     file: ${METRICS_BEARER_TOKEN_SOURCE:?Set METRICS_BEARER_TOKEN_SOURCE}

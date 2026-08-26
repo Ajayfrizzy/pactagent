@@ -15,8 +15,8 @@ groups:
         expr: pactagent_worker_heartbeat_age_seconds > 60
         for: 2m
         labels: { severity: page }
-        annotations: { summary: "No fresh settlement worker heartbeat" }
-  - name: pactagent-jobs-and-settlement
+        annotations: { summary: "No fresh webhook worker heartbeat" }
+  - name: pactagent-webhook-jobs
     rules:
       - alert: PactAgentQueueTooOld
         expr: pactagent_oldest_queued_job_age_seconds > 300
@@ -33,11 +33,6 @@ groups:
         for: 2m
         labels: { severity: page }
         annotations: { summary: "Worker job lease renewal failed" }
-      - alert: PactAgentSettlementReconciliationFailures
-        expr: increase(pactagent_settlement_reconciliations_total{outcome="failure"}[15m]) > 2
-        for: 5m
-        labels: { severity: page }
-        annotations: { summary: "Settlement reconciliation failures are elevated" }
   - name: pactagent-dependencies
     rules:
       - alert: PactAgentDatabasePoolSaturated
@@ -50,8 +45,3 @@ groups:
         for: 2m
         labels: { severity: page }
         annotations: { summary: "An external provider circuit is open" }
-      - alert: PactAgentWebSocketPressure
-        expr: increase(pactagent_websocket_pressure_total[10m]) > 20
-        for: 5m
-        labels: { severity: ticket }
-        annotations: { summary: "WebSocket clients are hitting resource pressure controls" }

@@ -3,8 +3,8 @@ import './globals.css';
 import { CccProvider } from '@/features/wallet';
 
 export const metadata: Metadata = {
-  title: 'PactAgent — Autonomous Payment Agreements on CKB',
-  description: 'AI-powered agent for milestone-based payment agreements on Nervos CKB',
+  title: 'PactAgent Developer Console',
+  description: 'App-scoped agreement, escrow, proof, dispute, event, and webhook infrastructure.',
   icons: {
     icon: '/PA Symbol.svg',
     shortcut: '/PA Symbol.svg',

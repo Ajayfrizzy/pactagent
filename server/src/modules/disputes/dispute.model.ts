@@ -4,7 +4,6 @@ export type DisputeRecord = {
   agreementId: string;
   milestoneId: string;
   openedByExternalId: string | null;
-  openedBy: string;
   reason: string;
   evidenceLinksJson: string | null;
   status: string;

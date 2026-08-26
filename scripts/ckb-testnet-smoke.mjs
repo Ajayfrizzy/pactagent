@@ -1,5 +1,5 @@
 const nodeUrl = process.env.CKB_NODE_URL || 'https://testnet.ckb.dev/';
-const deploymentTxHash = process.env.ONCHAIN_LOCK_TX_HASH;
+const deploymentTxHash = process.env.CKB_CONTRACT_DEPLOYMENT_TX_HASH;
 
 async function rpc(method, params = []) {
   const response = await fetch(nodeUrl, {
