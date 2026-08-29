@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM node:24.18.1-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7 AS build
+FROM node:26.8.1-bookworm-slim@sha256:367679cf9792759492a486e4aa4b421764d71a9546a6dae8aab81a99eb797b3e AS build
 WORKDIR /app/web
 ENV NEXT_TELEMETRY_DISABLED=1 CI=true
 COPY web/package.json web/package-lock.json ./
@@ -11,7 +11,7 @@ RUN find .next/standalone -type d \( -path '*/node_modules/sharp' -o -path '*/no
       -prune -exec rm -rf '{}' + \
     && test -z "$(find .next/standalone -path '*/node_modules/sharp/package.json' -print -quit)"
 
-FROM node:24.18.1-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7 AS runtime
+FROM node:26.8.1-bookworm-slim@sha256:367679cf9792759492a486e4aa4b421764d71a9546a6dae8aab81a99eb797b3e AS runtime
 ARG BUILD_VERSION=development
 ARG BUILD_COMMIT=unknown
 WORKDIR /app
