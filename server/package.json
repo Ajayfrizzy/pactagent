@@ -47,7 +47,7 @@
   },
   "devDependencies": {
     "@apidevtools/swagger-parser": "^12.1.0",
-    "@cyclonedx/cyclonedx-npm": "^4.1.2",
+    "@cyclonedx/cyclonedx-npm": "^6.0.1",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.10",
