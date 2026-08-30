@@ -14,6 +14,7 @@ export function createTransaction(tenant: TenantContext, data: {
   amount: string;
   currency: string;
   rawPayload?: unknown;
+  operationId?: string | null;
 }, tx: Prisma.TransactionClient) {
   return tx.transaction.create({
     data: {
@@ -29,6 +30,7 @@ export function createTransaction(tenant: TenantContext, data: {
       amount: data.amount,
       currency: data.currency,
       rawPayloadJson: data.rawPayload === undefined ? null : JSON.stringify(data.rawPayload),
+      operationId: data.operationId ?? null,
     },
   });
 }

@@ -53,4 +53,8 @@ export class MockEscrowAdapter implements EscrowAdapter {
       rawPayload: { adapter: 'mock', operation: 'getTransactionStatus' },
     };
   }
+
+  checkSettlementStatus(input: { txHash: string }) {
+    return this.getTransactionStatus(input);
+  }
 }

@@ -23,8 +23,8 @@ export function getHealthStatus() {
 
 export async function getWorkerAndQueueStatus() {
   const now = Date.now();
-  const [heartbeat, queued, deadLetters, oldest] = await Promise.all([
-    prisma.workerHeartbeat.findFirst({ where: { service: 'webhook' }, orderBy: { lastHeartbeatAt: 'desc' } }),
+  const [heartbeats, queued, deadLetters, oldest] = await Promise.all([
+    prisma.workerHeartbeat.findMany({ orderBy: { lastHeartbeatAt: 'desc' }, take: 50 }),
     prisma.agentJob.count({ where: { status: { in: ['QUEUED', 'RETRY'] } } }),
     prisma.agentJob.count({ where: { status: 'DEAD_LETTER' } }),
     prisma.agentJob.findFirst({
@@ -33,6 +33,11 @@ export async function getWorkerAndQueueStatus() {
       select: { availableAt: true },
     }),
   ]);
+  const requiredQueues = new Set(config.workerQueues);
+  const heartbeat = heartbeats.find((candidate) => {
+    const advertised = new Set(candidate.service.split(',').map((queue) => queue.trim()).filter(Boolean));
+    return [...requiredQueues].every((queue) => advertised.has(queue));
+  });
   const heartbeatAgeMs = heartbeat ? Math.max(0, now - heartbeat.lastHeartbeatAt.getTime()) : null;
   const oldestAgeMs = oldest ? Math.max(0, now - oldest.availableAt.getTime()) : 0;
   queuedJobs.set(queued);
@@ -85,26 +90,40 @@ export async function getReadinessStatus() {
   }
 }
 
-export async function getSettlementStatus(required = config.requireSettlementReady, nodeUrl = config.ckbNodeUrl) {
+export async function getSettlementStatus(
+  required = config.requireSettlementReady,
+  nodeUrl = config.ckbNodeUrl,
+  indexerUrl = config.ckbIndexerUrl,
+) {
   if (!required) {
     return { status: 'not_required' as const };
   }
 
   try {
-    const response = await executeProviderRequest({
+    if (!indexerUrl) return { status: 'error' as const };
+    const request = (url: string, method: string) => executeProviderRequest({
       provider: 'ckb', operation: 'readiness', timeoutMs: 3_000, maxAttempts: 1, concurrency: 2,
       run: async ({ signal, requestId }) => {
-        const result = await fetch(nodeUrl, {
+        const result = await fetch(url, {
           method: 'POST', headers: { 'content-type': 'application/json', 'x-request-id': requestId },
-          body: JSON.stringify({ id: 1, jsonrpc: '2.0', method: 'get_tip_header', params: [] }), signal,
+          body: JSON.stringify({ id: 1, jsonrpc: '2.0', method, params: [] }), signal,
         });
         assertProviderResponse(result, 'ckb', requestId);
         return result;
       },
     });
-    if (!response.ok) return { status: 'error' as const };
-    const result = await response.json() as { result?: unknown; error?: unknown };
-    return { status: result.result && !result.error ? 'ok' as const : 'error' as const };
+    const [nodeResponse, indexerResponse] = await Promise.all([
+      request(nodeUrl, 'get_tip_header'),
+      request(indexerUrl, 'get_indexer_tip'),
+    ]);
+    if (!nodeResponse.ok || !indexerResponse.ok) return { status: 'error' as const };
+    const [node, indexer] = await Promise.all([
+      nodeResponse.json() as Promise<{ result?: unknown; error?: unknown }>,
+      indexerResponse.json() as Promise<{ result?: unknown; error?: unknown }>,
+    ]);
+    return {
+      status: node.result && !node.error && indexer.result && !indexer.error ? 'ok' as const : 'error' as const,
+    };
   } catch {
     return { status: 'error' as const };
   }

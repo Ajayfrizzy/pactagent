@@ -7,11 +7,15 @@ import test from 'node:test';
 
 const script = resolve(import.meta.dirname, 'audit-dependencies.mjs');
 
-function runAudit(vulnerabilities) {
+function runAuditReport(report) {
   const directory = mkdtempSync(resolve(tmpdir(), 'pactagent-audit-'));
   const input = resolve(directory, 'audit.json');
-  writeFileSync(input, JSON.stringify({ vulnerabilities }));
+  writeFileSync(input, JSON.stringify(report));
   return spawnSync(process.execPath, [script, '--input', input], { encoding: 'utf8' });
+}
+
+function runAudit(vulnerabilities) {
+  return runAuditReport({ vulnerabilities });
 }
 
 test('accepted advisories cover only their transitive vulnerability chains', () => {
@@ -41,4 +45,14 @@ test('an unrelated high vulnerability still fails the gate', () => {
 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /example: high/);
+});
+
+test('an unavailable npm audit endpoint fails closed', () => {
+  const result = runAuditReport({
+    message: 'audit endpoint unavailable',
+    error: { summary: '', detail: '' },
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /did not return a vulnerability report/);
 });

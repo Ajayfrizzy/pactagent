@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../../db';
 import type { CreateDisputeInput, DisputeListQuery, ResolveDisputeInput } from './dispute.validation';
 import { statusForResolutionType } from './dispute.state-machine';
+import { assertLifecycleCompareAndSwap } from '../../common/lifecycle/compare-and-swap';
 
 export function createDispute(appId: string, input: CreateDisputeInput, tx: Prisma.TransactionClient) {
   return tx.dispute.create({
@@ -40,6 +41,22 @@ export function findDisputeForApp(appId: string, disputeId: string, tx?: Prisma.
   });
 }
 
+export function findUnresolvedDisputeForScope(
+  appId: string,
+  agreementId: string,
+  milestoneId: string,
+  tx: Prisma.TransactionClient,
+) {
+  return tx.dispute.findFirst({
+    where: {
+      appId,
+      agreementId,
+      milestoneId,
+      status: { in: ['open', 'awaiting_response', 'under_review'] },
+    },
+  });
+}
+
 export function findResolvedReleaseDisputeForEscrowScope(
   appId: string,
   agreementId: string,
@@ -58,24 +75,36 @@ export function findResolvedReleaseDisputeForEscrowScope(
   });
 }
 
-export function resolveDisputeForApp(
+export async function resolveDisputeForApp(
   appId: string,
   disputeId: string,
+  expectedStatus: string,
   input: ResolveDisputeInput,
   tx: Prisma.TransactionClient,
 ) {
-  return tx.dispute.update({
+  const nextStatus = statusForResolutionType(input.resolutionType);
+  const result = await tx.dispute.updateMany({
     where: {
       id: disputeId,
       appId,
+      status: expectedStatus,
     },
     data: {
-      status: statusForResolutionType(input.resolutionType),
+      status: nextStatus,
       resolutionType: input.resolutionType,
       resolutionNote: input.resolutionNote ?? null,
       workerAmount: input.workerAmount ?? null,
       clientAmount: input.clientAmount ?? null,
       resolvedAt: new Date(),
     },
+  });
+  assertLifecycleCompareAndSwap({
+    resource: 'dispute',
+    affectedRows: result.count,
+    expectedStatus,
+    nextStatus,
+  });
+  return tx.dispute.findUniqueOrThrow({
+    where: { id_appId: { id: disputeId, appId } },
   });
 }

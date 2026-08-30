@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../../db';
 import type { CreateProofInput, ProofListQuery } from './proof.validation';
 import type { TenantContext } from '../../common/tenancy/tenant-context';
+import { assertLifecycleCompareAndSwap } from '../../common/lifecycle/compare-and-swap';
 
 export function createProofContentHash(input: Pick<CreateProofInput, 'type' | 'content' | 'links' | 'fileRefs'>) {
   return createHash('sha256')
@@ -55,17 +56,28 @@ export function findProofForApp(tenant: TenantContext, proofId: string, tx?: Pri
   });
 }
 
-export function updateProofStatus(
+export async function transitionProofStatus(
   tenant: TenantContext,
   proofId: string,
-  data: { status: string },
+  expectedStatus: string,
+  nextStatus: string,
   tx: Prisma.TransactionClient,
 ) {
-  return tx.proof.update({
+  const result = await tx.proof.updateMany({
     where: {
       id: proofId,
       appId: tenant.appId,
+      status: expectedStatus,
     },
-    data,
+    data: { status: nextStatus },
+  });
+  assertLifecycleCompareAndSwap({
+    resource: 'proof',
+    affectedRows: result.count,
+    expectedStatus,
+    nextStatus,
+  });
+  return tx.proof.findUniqueOrThrow({
+    where: { id_appId: { id: proofId, appId: tenant.appId } },
   });
 }

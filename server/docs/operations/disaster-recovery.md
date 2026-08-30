@@ -17,7 +17,7 @@ Exercise definitions are machine-readable in `config/operations-exercises.json`.
 
 ## Database outage or restoration
 
-1. Stop the webhook worker and disable settlement mutations; keep liveness available but readiness failing.
+1. Stop the infrastructure worker and disable settlement mutations; keep liveness available but readiness failing.
 2. Confirm provider status and preserve database/connection-pool metrics.
 3. Restore the latest point-in-time backup into an isolated instance and run `npm run db:migrate:status`.
 4. Validate audit-chain continuity, row counts, pending jobs, idempotency records, and latest settlement transaction hashes.
@@ -25,7 +25,7 @@ Exercise definitions are machine-readable in `config/operations-exercises.json`.
 
 ## Compromised API, JWT, or webhook key
 
-1. Disable affected API keys or webhook endpoints immediately and stop the webhook worker for webhook-key exposure.
+1. Disable affected API keys or webhook endpoints immediately and stop the infrastructure worker for webhook-key exposure.
 2. Revoke the affected credential, activate a new JWT key ID when applicable, retain old decryption keys only as required, and re-encrypt webhook secrets.
 3. Review audit logs from the earliest suspected exposure and reconcile every settlement with CKB.
 4. Resume with a canary and publish an incident timeline. Never delete compromised-key audit evidence.
@@ -37,9 +37,13 @@ Exercise definitions are machine-readable in `config/operations-exercises.json`.
 3. For a confirmed incorrect transfer, freeze remaining funds, notify both parties, and escalate to the incident commander; blockchain transfers cannot be rolled back.
 4. Use the administrative replay only after correcting state and recording approval in the audit ledger.
 
-## CKB outage
+## CKB outage, ambiguity, or reorg
 
-The Phase 1 CKB adapter is inactive, so an RPC outage affects optional settlement readiness but cannot trigger signing or transfer jobs. Continue non-settlement API operations according to the configured readiness policy. Phase 2 must add a reconciliation runbook before enabling automated CKB settlement.
+1. Disable new CKB settlement mutations while leaving the settlement worker able to observe existing transactions.
+2. Preserve every expected transaction hash and `reconciliation_required` record. Never clear a reservation or create a replacement payment merely because broadcast returned an error.
+3. Query the configured node and indexer independently, verify the exact escrow outpoint and destination output, then record the evidence in the incident.
+4. For a reorg, keep affected escrows in `reconciliation_required`, page the settlement owner, and wait for the configured chain depth before any manual repair.
+5. Resume new settlement only after node/indexer readiness, backlog, stale-transaction, and reorg metrics are stable.
 
 ## Failed migration
 
@@ -51,7 +55,7 @@ Confirm endpoint/provider health and queue age, then pause new delivery claims i
 
 ## Worker outage
 
-Readiness and heartbeat alerts identify stale workers. Ensure the old process no longer owns locks, start one replacement, observe a full cycle, and scale gradually. Reconcile stale locks and pending webhook deliveries before replay.
+Readiness and heartbeat alerts identify stale workers. Ensure the old process no longer owns locks, start one replacement, observe a full cycle, and scale gradually. Reconcile stale locks, pending webhook deliveries, and CKB reconciliation jobs before replay.
 
 ## Dependency vulnerability response
 

@@ -24,7 +24,7 @@ Before the first release, create `pactagent-secrets` in the `pactagent` namespac
 1. CI builds and scans the same Dockerfile targets used for release.
 2. The release workflow publishes immutable images and records their digests.
 3. The migration Job runs the tenant-integrity audit and `prisma migrate deploy` exactly once. An unsuccessful Job stops the release before any application workload changes.
-4. API, webhook worker, and web Deployments receive the new digest references independently.
+4. API, infrastructure worker, and web Deployments receive the new digest references independently.
 5. Kubernetes readiness gates each rolling update with zero configured unavailability.
 6. Smoke checks verify build commit, API liveness/readiness, PostgreSQL, worker heartbeat, queue visibility, settlement provider readiness, and the web response.
 7. Only a successful release is annotated with its commit and immutable image references.

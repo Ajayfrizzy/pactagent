@@ -1,318 +1,355 @@
-# Phase 1 Infrastructure Cleanup Report
-
-Date: 2026-08-22
-
-## Phase 1 correction pass (2026-08-26)
-
-### Webhook migration correction
-
-The cleanup migration previously populated `secretHash` with
-`COALESCE(secretHash, signingSecret)`. That could store a legacy plaintext
-secret in a hash field and leave an active endpoint without decryptable
-`secretCiphertext`.
-
-The corrected migration never copies `signingSecret` into `secretHash`.
-Endpoints remain active only when `secretHash`, `secretCiphertext`, and
-`encryptionKeyVersion` are all present. Any endpoint missing current secret
-material is migrated with `status = 'disabled'`; a missing ciphertext also
-clears `encryptionKeyVersion`, and `secretHash` remains null when no real hash
-already exists. A database check prevents incomplete endpoints from becoming
-active. Archived webhook metadata retains the existing endpoint fields but
-stores `[redacted]` instead of plaintext and removes hash/ciphertext material
-from the retired compatibility-tenant copy.
-
-The `/v1` API reports `requiresSecretRotation` and rejects attempts to enable
-an incomplete migrated endpoint with `webhook_secret_rotation_required`. The
-developer console labels that state as `Recreate required` and does not offer
-an enable action. Phase 1 has no endpoint-secret rotation API, so an operator
-must delete and recreate such an endpoint to receive a new secret before
-delivery can resume.
-
-### CKB primitive review
-
-The deleted `ckbService.ts` and `onchainEscrowService.ts` implementations were
-reviewed against the retained Rust contract and the `/v1` rail boundary.
-Three deterministic, configuration-free primitives were preserved under
-`server/src/rails/ckb/`:
-
-- RPC/CCC script normalization and comparison
-- Contract-compatible 96-byte lock-args and 88-byte escrow cell-data codecs
-- Occupied-capacity calculation from injected scripts and output data
-
-Raw JSON-RPC calls, transaction/outpoint inspection, address derivation, cell
-dep configuration, treasury transfers, signer behavior, and old agreement
-orchestration remain deleted. The old RPC inspection mixed node and indexer
-assumptions, while the other functions depended on retired product/config
-boundaries. Phase 2 should design those pieces around the implemented adapter,
-explicit node/indexer clients, signer isolation, and reconciliation. The CKB
-adapter remains unchanged as an intentional `escrow_adapter_not_ready` stub.
-
-### Files changed in the correction pass
-
-- Webhook migration/schema/API/UI:
-  `server/prisma/migrations/20260821000200_core_schema_cleanup/migration.sql`,
-  `server/prisma/schema.prisma`, webhook model/service and infrastructure
-  integration test files, and `web/src/app/console/page.tsx`
-- Migration rehearsal:
-  `server/prisma/fixtures/migration-upgrade.sql`, new
-  `migration-upgrade-verify.sql`, and `.github/workflows/ci.yml`
-- CKB primitives: new `server/src/rails/ckb/` codec, script, capacity, and test
-  files
-- Stale-reference cleanup: `.github/workflows/deploy.yml`,
-  `scripts/ckb-testnet-smoke.mjs`, and `contracts/README.md`
-- Report: `REPORT.md`
-
-### Correction verification results
-
-- `npm ci`: pass, 888 packages installed; this host runs Node 25.9.0 while the
-  repository requires Node 24.x, so npm emitted the expected engine warning
-- Prisma format check, validate, and generate: pass
-- PostgreSQL 16 clean install: pass, all 17 migrations applied and current
-- Historical baseline upgrade with populated App, API key, Agreement,
-  Milestone, Proof, Review, Dispute, Escrow, Transaction, Event, webhook,
-  delivery, AuditLog, AgentJob, idempotency, and legacy product fixtures: pass,
-  all 17 migrations current
-- Upgrade assertions: pass for complete-current webhook preservation,
-  plaintext-only endpoint disablement, plaintext removal, archive redaction,
-  delivery/job tenancy, core record survival, legacy archival/removal, active
-  endpoint secret constraints, and archive PUBLIC-access revocation
-- Server unit/E2E tests: pass, 81 tests; includes the `/api/*` 410 boundary and
-  six focused CKB primitive tests
-- Real-PostgreSQL integration tests: pass, 22 tests; includes current webhook
-  creation and API/database rejection of incomplete endpoint activation
-- Server and web production build: pass; the sandboxed Turbopack attempt could
-  not bind its helper port, and the same build passed with local binding allowed
-- Lint: pass for server and web
-- OpenAPI validation: pass, 58 operations match the Express `/v1` route table
-- Deployment validation: pass, 10 Kubernetes resources and 2 smoke tests
-- Environment validation: pass, all 73 referenced variables covered
-- Controls, observability, and Phase 7 validation: pass
-- License tests/check: pass, 888 installed packages covered
-- Dependency audit tests/check: pass, no unexcepted high-or-higher records
-- Rust contract tests: pass, 6 tests
-
-### Remaining Phase 2 work and merge readiness
-
-The full CKB adapter, signer infrastructure, typed node/indexer RPC access,
-transaction construction, fee policy, confirmation/reconciliation behavior,
-and deployment cell-dep configuration remain Phase 2 work. A first-class
-webhook signing-secret rotation operation may also be added there; Phase 1
-requires endpoint recreation instead.
-
-No concurrency hardening, aggregate financial locking, uniqueness overhaul,
-new chain/fiat rails, AI, marketplace, or social functionality was added. With
-the checks above passing, this Phase 1 branch is ready to merge; CI should run
-the same committed migration assertions before merge.
+# Phase 2 Infrastructure Hardening Report
 
-## 1. Cleanup summary
+Date: 2026-08-29
 
-PactAgent now presents one supported product boundary: app-scoped infrastructure under `/v1`, with a developer console as the first-party UI.
+Baseline: `772af98` (`Phase 1: Infrastructure Cleanup (#47)`)
 
-### Kept in the infrastructure core
+Scope: app-scoped `/v1` agreement and settlement infrastructure only
 
-- Apps/projects as tenants and operator-owned API-key management
-- Operator wallet authentication, admin allowlisting, API-key scopes, and rate limits
-- Agreements, milestones, proof submissions, proof review decisions, and disputes
-- Escrow adapter interface, mock/manual adapters, CKB adapter boundary, and the CKB Rust contract
-- Transactions, lifecycle events, signed webhooks, audit logs, and idempotency
-- Durable webhook jobs, lease/retry/dead-letter behavior, retention, and worker health
-- Health/readiness, metrics, tracing, deployment manifests, OpenAPI, and developer console
-- Generic agreement integration fields: `externalReferenceId`, participant external IDs, `sourceType`, `sourceUrl`, and metadata
+## 1. Executive Summary
 
-### Isolated or migrated
+Phase 2 hardens PactAgent's existing lifecycle and settlement infrastructure. It
+does not restore the removed product surface or add new rails.
 
-- Operator wallet authentication moved from `/api/auth` to `/v1/auth`; it manages infrastructure ownership rather than product users.
-- All `/api/*` paths are a single `410 Gone` compatibility boundary with no lifecycle implementation.
-- Historical product data is copied to the public-access-revoked `legacy_product_archive` schema before operational tables and columns are removed.
-- Retired webhook secrets are redacted in archive copies rather than duplicated as recoverable credentials.
-- The CKB contract remains under `contracts/`; the server adapter explicitly rejects CKB actions until Phase 2 implements the rail.
+The implementation now has:
 
-### Removed
+- compare-and-swap lifecycle writes with `409` conflict semantics;
+- parent-row locking and PostgreSQL triggers for financial allocation;
+- database-enforced active escrow and unresolved dispute uniqueness;
+- exact bigint-safe dispute split validation;
+- durable idempotency on all required lifecycle/financial mutations;
+- composite tenant/scope foreign keys and explicit breakout tests;
+- webhook delivery result CAS with transactional retry/failure side effects;
+- Redis-backed, TTL-bound, atomically consumed wallet challenges;
+- a disabled-by-default CKB testnet adapter with deterministic commitments,
+  signer isolation, independent chain verification, durable reservation,
+  confirmation/reorg observation, and reconciliation jobs;
+- deployment, readiness, metrics, alerts, and runbooks for the settlement queue.
 
-- Public users/profiles, reputation, invitations, comments, amendments, product evidence/checks, and agent logs
-- DAO, bounty, grant, forum/Nervos Talk import and synchronization behavior
-- AI completeness/recommendation/follow-up flows and market-price conversion
-- Fiber and old on-chain/treasury product settlement implementations
-- Product agreement dashboard, public agreement flows, profile/settings/invite pages, and product wallet onboarding
-- Websocket product updates and their browser/server state
-- Settlement/AI worker roles; only the durable webhook queue remains
-- The unused `shared` workspace and duplicated product contracts/state machine
+The application hardening and deterministic test gates pass. CKB readiness is
+**NOT READY** because no controlled funded testnet lifecycle was run, no external
+signer exists, and the Rust contract lacks transaction-level VM integration tests
+and an independent security review. Mainnet is blocked by startup validation.
 
-## 2. Files and modules removed
+## 2. Findings Before Hardening
+
+The full pre-change inventory is in
+[`docs/phase2-hardening-inventory.md`](docs/phase2-hardening-inventory.md).
+
+| Severity | Pre-hardening finding | Resolution |
+| --- | --- | --- |
+| P0 | Read-validate-write lifecycle transitions could overwrite concurrent state | CAS update predicates and conflicts |
+| P0 | Concurrent milestone creation could over-allocate an agreement | Parent `FOR UPDATE`, recomputation, and trigger |
+| P0 | Multiple active escrows or unresolved disputes could share one scope | Partial unique indexes and application conflicts |
+| P0 | CKB adapter was a stub and real funding could be caller-asserted | Chain verification and reconciliation architecture |
+| P1 | Required mutations had incomplete idempotency adoption | Required route matrix completed |
+| P1 | Dispute splits were not exact or safely bounded | Exact non-negative bigint equality |
+| P1 | Wallet challenges were process-local | Redis TTL and atomic Lua consume |
+| P1 | Critical string lifecycle values were incompletely constrained | Normalization, preflight, checks, and validation |
+| P1 | External CKB work had no durable ambiguity/reorg handling | Reserve/external/finalize plus settlement jobs |
+| P2 | Cross-tenant mutation/reference coverage was incomplete | Composite FKs and breakout suites |
+| P2 | Duplicate webhook executors could race result and failure side effects | Snapshot CAS and atomic retry/failure outbox writes |
+| P2 | Missing conflict, auth, and CKB operational metrics | Bounded-label metrics and alerts |
+| P3 | OpenAPI and operational docs described Phase 1 behavior | Phase 2 API, config, worker, and incident docs |
+
+## 3. Lifecycle Concurrency Changes
+
+Agreement, milestone, proof, dispute, and escrow repositories now transition with
+`UPDATE ... WHERE id = ? AND appId = ? AND status = expectedStatus`. A reusable
+CAS assertion maps a zero-row update to `409 lifecycle_conflict`.
 
-### Backend
+Transition services still validate the allowed edge before writing. Events,
+outbox rows, and audit records are created only after the guarded write succeeds
+and in the same database transaction. There is no arbitrary lifecycle retry.
+
+Covered races include incompatible agreement transitions, stale terminal writes,
+concurrent release/refund reservation, duplicate settlement, and concurrent
+proof/dispute parent transitions.
+
+## 4. Financial Invariants
+
+### Milestone allocation
 
-- Legacy route implementations under `server/src/routes/`: agreements, auth, integrations, invites, logs, me, profiles, and webhooks
-- Product services: agreement orchestration, AI structured output, commitment/follow-up, Discourse/source sync, invite/profile/reputation, report review, market price, Nervos grant resolution, old CKB/on-chain escrow, treasury signer, rich payloads, old webhook service, and legacy tenant mapping
-- Product-only unit tests associated with those services
-- Server websocket entry point/tests and `common/websocket/websocket-bus.ts`
-- Legacy tenant backfill command and package script
+Milestone creation locks the tenant-scoped parent agreement with `SELECT ... FOR
+UPDATE`, recomputes the current allocation under that lock, checks exact currency,
+and inserts before commit. PostgreSQL repeats the allocation check in a trigger.
+
+Enforced invariants:
+
+- milestone amount is a canonical positive integer;
+- milestone currency equals agreement currency;
+- milestone sum does not exceed agreement amount;
+- funded financial terms remain immutable.
+
+### Escrow allocation
 
-### Frontend
-
-- Routes: `/admin`, `/dashboard`, `/agreement/*`, `/invites/*`, `/profiles/*`, `/settings/profile`, and `/settings/webhooks`
-- Product components: agent log panel, status/product wallet compatibility wrappers, and wallet onboarding card
-- Product websocket hook, rich-payload helpers, and browser-side agreement/CKB transaction builders
-- Legacy API client methods and product state for logs, websocket connectivity, and agreement update broadcasts
-
-### Shared/domain
-
-- Entire unused `shared` workspace, including legacy enums, agreement state machine, product contracts, and generated local artifacts
-
-### Documentation and product artifacts
-
-- DAO proposal Markdown and DOCX artifacts
-- Legacy route/service READMEs
-- Root documentation was replaced with infrastructure setup and API guidance
-- Active architecture, configuration, worker, provider, deployment, and roadmap documents were rewritten to remove retired capability claims
-
-### Configuration/deployment
-
-- Fiber, forum, AI/OpenAI, market-price, websocket, legacy-route, treasury signer, and on-chain adapter enablement variables
-- Direct server `ws` and `@types/ws` dependencies (transitive wallet-library websocket dependencies remain)
-- Settlement and AI worker services from Compose, Kubernetes, service discovery, operations exercises, and telemetry scraping
-
-## 3. Database changes
-
-### Models removed
-
-- `User`
-- `PublicProfile`
-- `ReputationSnapshot`
-- `InviteLink`
-- `AgreementSource`
-- `ProofCheck`
-- `InfoRequest`
-- `DisputeEvidence`
-- `AgentLog`
-- `MilestoneSettlement`
-- `AgreementComment`
-- `AgreementAmendment`
-
-`Review` remains and is documented as a proof review decision record, not a social/reputation review.
-
-### Agreement columns removed
-
-- Product wallet participants: `clientAddress`, `workerAddress`, `arbitratorAddress`
-- Fiber: `workerFiberPubkey`, `fiberPaymentReference`
-- Product proof/reviewer configuration: `proofType`, `reviewerMode`, legacy `releaseMode`
-- Product payout/escrow duplication: `payoutNetwork`, `escrowModel`, `escrowAddress`, lock-script fields, agreement/milestone digests
-- Quote/reserve state: pricing mode, reserve balances, price quote/source/time, reserve health
-- Product settlement duplication: last settlement error and legacy CKB create/fund/release transaction hashes
-
-The canonical infrastructure `infrastructureReleaseMode` column is migrated to `releaseMode`. `disputeMode`, external participant IDs, amount/currency, deadline, generic source metadata, and settlement/lifecycle status remain.
-
-### Other columns removed or changed
-
-- Milestone quote, released-value, and legacy on-chain output fields removed
-- Dispute wallet opener, evidence notes, and AI summary/recommendation/confidence/rationale removed; `openedByExternalId` remains
-- Proof automation `reviewStatus` and `lastCheckedAt` removed; proof lifecycle status and `Review` decisions remain
-- Webhook duplicate product columns removed; `appId` and `url` are required,
-  while `secretHash` may be null only for disabled migrated endpoints that need
-  recreation
-- Webhook delivery `appId` is required
-- `App.ownerUserId` renamed to `ownerId`; it stores the infrastructure operator identity
-- `AgentJob.appId` is required and compound agreement tenancy is enforced
-- Job kind/queue constrained to `DELIVER_WEBHOOK`/`webhook`; worker heartbeat defaults to `webhook`
-
-### Relations and integrity
-
-- Product-model relations were removed from agreement, milestone, proof, dispute, and app records.
-- Agent jobs now relate directly to `App` and optionally to `(agreementId, appId)`.
-- Existing compound tenant foreign keys remain the database tenant boundary.
-- Funded agreement terms and milestone terms/membership triggers are recreated against the cleaned schema.
-
-### Forward migrations
-
-1. `20260821000100_archive_legacy_product`
-   Archives product tables and fixed legacy-tenant operational rows, redacts retired webhook secrets, removes product tables/data, authorizes the append-only audit cleanup for the migration session, and revokes public archive access.
-2. `20260821000200_core_schema_cleanup`
-   Archives removed columns/unsupported jobs, renames app ownership, app-scopes jobs and webhooks, removes obsolete columns, constrains the remaining queue, and rebuilds funded-term triggers.
-
-Historical migrations were not edited.
-
-## 4. Legacy API status
-
-- No `/api` route implementation remains.
-- `server/src/app.ts` returns `410 Gone` for every `/api/*` request with direction to `/v1`.
-- `/v1/auth` is the operator wallet session API.
-- `/v1` is canonical for all apps, API keys, agreements, milestones, escrows, transactions, proofs, reviews, disputes, events, webhooks, audit logs, and admin operations.
-- OpenAPI documents all 58 implemented `/v1` operations; validation now fails when an Express `/v1` route is undocumented or a documented route is missing.
-
-## 5. Frontend status
-
-The Next.js app now redirects `/` to `/console`. The remaining experience provides:
-
-- App/project selection and creation
-- Scoped API-key creation/revocation and key inspection
-- Agreement, milestone, escrow, transaction, proof, review, dispute, event, and audit inspection
-- Webhook endpoint management, delivery history, and retry
-- Sandbox lifecycle workbench
-- Operator admin/system health views
-- Links to `/docs` and `/openapi.json`
-- CKB wallet operator sign-in through `/v1/auth`
-
-The console has no legacy `/api`, websocket, public profile, invite, bounty/forum import, social onboarding, or product settlement dependency.
-
-## 6. Verification results
-
-Completed checks:
-
-- `npm install --ignore-scripts`: pass; removed retired workspace packages. The host uses Node 25.9.0 while the repository requires Node 24.x, so npm emitted an engine warning.
-- `npx prisma format`: pass
-- `npx prisma validate`: pass
-- `npx prisma generate`: pass
-- `npm test`: pass, 75 unit/E2E tests
-- `npm run test:integration`: pass, 21 real-PostgreSQL infrastructure tests
-- `npm run build`: pass for the TypeScript server and optimized Next.js production build
-- `npm run env:check`: pass, 73 referenced variables covered
-- `npm run openapi:check --workspace @pact-agent/server`: pass, 58 operations matched
-- `npm run lint`: pass for server and web
-- `npm run deploy:check`: pass, 10 Kubernetes resources and 2 smoke tests
-- Production Compose interpolation/syntax check: pass with non-secret placeholder secret paths
-- Server and web runtime container builds: pass, including isolated `npm ci`, Prisma generation, TypeScript/Next builds, and runtime assembly
-- `npm run controls:check`: pass, 27 controls and evidence paths
-- `npm run observability:check`: pass, collector pipelines, 8 alerts, and 6 dashboards
-- `npm run phase7:check`: pass, 3 load profiles, 12 paginated repositories, 5 exercises, and critical query plans
-- `npm run licenses:test`: pass, 2 policy tests
-- `npm run licenses:check`: pass, 888 installed packages checked at the time of the run
-- `npm run audit:test`: pass, 2 audit-policy tests
-- `npm run audit:dependencies`: pass; patched `fast-uri`/`nanoid` overrides are installed and the exact Prisma tooling exception is active
-- Exact server-workspace CI audit: pass against `server/package-lock.json` with the same scoped exception
-- Clean-install migration rehearsal on PostgreSQL 16: pass, all 17 migrations applied and current
-- Historical-baseline upgrade rehearsal on PostgreSQL 16: pass with populated core and legacy-product fixtures; all forward migrations applied and current
-- Upgrade preservation checks: pass for app ownership, agreement, transaction/idempotency response data, product row archival, webhook-secret redaction, audit/job archival, compatibility-tenant deletion, and product-table removal
-- `make test` under `contracts/`: pass, 6 Rust contract tests
-- Local console HTTP verification: pass; `/` redirects to `/console`, console/docs/OpenAPI return 200, the first render is infrastructure-only, and the `/v1/auth` proxy returns the canonical envelope
-
-The first sandboxed Next production build attempt reached compilation but Turbopack could not bind its internal helper port (`EPERM`). The same build passed when local process binding was allowed.
-
-Visual browser verification is the remaining test limitation. The mandated in-app browser runtime rejected bootstrap because its host did not provide required sandbox metadata, so desktop/mobile screenshots and hydrated interaction checks could not be collected. This is recorded as a tooling limitation rather than a visual pass; production build, server-rendered markup, route responses, and the `/v1` proxy were verified independently.
-
-## 7. Deferred items for Phase 2
-
-- Compare-and-swap lifecycle transitions and concurrency conflict behavior
-- Exact agreement/milestone financial locks and aggregate invariants
-- One-active-escrow enforcement and dispute uniqueness
-- Full CKB adapter: construction, signer isolation, fees, confirmations, reconciliation, and ambiguous outcomes
-- Redis-backed one-time wallet challenge storage across replicas
-- PostgreSQL enums and any broader lifecycle type migration
-- Separate least-privilege database roles and renewed RLS evaluation
-- Production migration rehearsal on an approved sanitized data set
-- Deeper webhook/worker reliability and security work discovered during load testing
-
-No fiat, USDT, multi-chain, AI proof verification, marketplace, chat, reputation replacement, or bounty integrations were added.
-
-## 8. Remaining technical debt
-
-- The agreement and milestone lifecycle still has both infrastructure status and settlement status fields; Phase 2 should formalize their invariant matrix.
-- The CKB adapter is deliberately a rejecting stub while the Rust contract remains separately testable.
-- Operator wallet challenges are process-local by design until the deferred Redis challenge work.
-- The archive schema needs an externally approved retention/export/deletion policy and restricted production role grants.
-- Some historical operations/ADR documents describe guarantees from earlier phases; active entry-point documents are corrected, but a later documentation governance pass should mark historical decisions as superseded where appropriate.
-- Existing Prisma models still use string lifecycle values; database checks exist for several critical fields, while a complete enum strategy is deferred.
-- The standalone migration image forces patched `deepmerge-ts`, `fast-uri`, `js-yaml`, and `valibot` transitive versions. Prisma's root development-workspace pin to `deepmerge-ts@7.1.5` retains a narrow exception through 2026-09-22, but the affected version is no longer shipped in the migration image.
-
-## 9. Recommended next step
-
-Deploy the two cleanup migrations to an isolated clone of the current production schema, verify archive row counts and representative agreement/webhook/job preservation, and obtain an explicit database-owner sign-off. Then begin Phase 2 with lifecycle compare-and-swap and financial invariants before implementing the CKB adapter.
+Application validation derives amount and currency from the persisted agreement
+or milestone scope. Agreement escrow cannot exceed the agreement. Milestone
+escrow cannot exceed the milestone. CKB escrow is milestone-scoped and must equal
+the milestone amount exactly.
+
+### Settlement split
+
+Split resolution parses integer strings as `bigint`. Both shares are non-negative,
+either may be zero, neither may exceed the funded scope, and their sum must equal
+the funded escrow amount exactly. The database trigger applies the same equality.
+
+## 5. Escrow Uniqueness
+
+Settlement scope is:
+
+- agreement: `(appId, agreementId)` where `milestoneId IS NULL`;
+- milestone: `(appId, milestoneId)` where `milestoneId IS NOT NULL`.
+
+Two partial unique indexes allow only one active escrow per scope. Active includes
+`not_created`, `awaiting_funding`, `funding_detected`, `funded`,
+`release_pending`, `refund_pending`, `reconciliation_required`, and `failed`.
+`P2002` is translated to `409 active_escrow_exists`.
+
+## 6. Dispute Uniqueness
+
+Disputes are explicitly milestone-scoped. Partial unique indexes enforce one
+`open`, `awaiting_response`, or `under_review` dispute per
+`(appId, agreementId, milestoneId)`. Application prechecks improve the response;
+the database remains authoritative during races. Conflicts return
+`409 active_dispute_exists`.
+
+## 7. Idempotency Coverage
+
+| Mutation | Before | After |
+| --- | --- | --- |
+| `POST /v1/agreements` | required | required |
+| agreement accept/funding-required/cancel | absent | required |
+| milestone create | absent | required |
+| proof submit | required | required |
+| proof review | absent | required |
+| dispute create | absent | required |
+| dispute resolve | required | required |
+| escrow create | required | required |
+| escrow mark-funded | absent | required |
+| escrow release/refund | required | required |
+
+The key is app-scoped and bound to HTTP method, canonical path, and request body.
+Same key and same request replays the stored response. A changed request returns
+`409 idempotency_key_conflict`; a live pending request returns
+`409 idempotency_key_in_progress`. Integration tests verify same-request replay,
+request mismatch, concurrent pending behavior, and no duplicate transaction,
+event, or audit rows.
+
+Operator-owned app/API-key mutations and webhook endpoint management remain
+outside this app-scoped idempotency table. No API-key or webhook-secret rotation
+endpoint was added in Phase 2.
+
+## 8. Database Constraints
+
+Phase 2 uses checks rather than a broad Prisma enum conversion. Migration
+preflight blocks unknown values and duplicate/invalid financial state before any
+constraint is added. Historical valid case variants are normalized; rows are not
+silently deleted.
+
+Constraints cover critical app/API-key, agreement, milestone, proof/review,
+dispute, escrow, transaction, webhook, idempotency, and job lifecycle values;
+amount format/range; rail/network combinations; exact dispute splits; allocation;
+CKB commitments; transaction/escrow scope; and cross-resource app ownership.
+
+## 9. Tenant Isolation Results
+
+`appId` remains the tenant boundary. Composite foreign keys require children to
+share app, agreement, milestone, proof, and escrow ownership as applicable.
+
+Real PostgreSQL and HTTP tests prove App B cannot get/list App A resources or use
+App A agreement/milestone/proof/escrow/event/webhook references. Coverage includes
+agreements, milestones, proofs, reviews, disputes, escrows, transactions, events,
+webhook endpoints/deliveries, audit logs, jobs, and idempotency records. Public
+resource access returns non-enumerating not-found or generic relationship errors.
+
+Webhook execution also uses snapshot CAS over app, status, and attempt count.
+Only the winning executor records the result and transactionally creates the next
+retry job or final-failure event; duplicate executors observe the winning result.
+
+## 10. Auth Challenge Durability
+
+Deployed API processes require Redis. Challenge keys hash the normalized address,
+carry a TTL, bind the exact address and message, and use Lua to compare then delete
+atomically only after signature/address verification. Cross-client Redis tests
+prove multi-instance visibility, wrong-message preservation, one winner under
+concurrent consume, replay prevention, and expiry.
+
+The in-memory implementation is restricted to local/unit-test use. Operator JWT
+TTL now defaults to one hour and is capped at 24 hours in deployed environments.
+Admin status is recomputed from the server-side allowlist during every token
+verification. MFA/passkeys are not implemented.
+
+## 11. CKB Rail Architecture
+
+```text
+Escrow service
+  -> reserve transaction (PostgreSQL CAS)
+  -> CkbEscrowAdapter
+       -> deterministic transaction/commitment builder
+       -> isolated signer provider
+       -> CKB node client (chain state and broadcast)
+       -> CKB indexer client (cell/script searches)
+       -> funding/settlement verifier
+  -> finalize or mark reconciliation_required
+  -> durable settlement queue reconciliation
+```
+
+Node and indexer RPC clients are separate. No database transaction is held during
+signing, broadcast, or provider reads. Expected transaction identity is persisted
+for ambiguous broadcasts. Reconciliation compares exact outpoints, lock scripts,
+cell data, capacity, destination output, block identity, and confirmation depth.
+
+`CkbSignerProvider` isolates signing. `LocalDevCkbSignerProvider` is testnet-only.
+Staging/production reject local signing. The unimplemented external provider and
+all mainnet configurations fail closed at startup.
+
+## 12. CKB Implementation Status
+
+| Capability | Status |
+| --- | --- |
+| Create lock | Implemented for explicitly enabled development testnet |
+| Persist lock/script/data/version/timeout | Implemented |
+| Funding verification | Independent exact chain verification implemented |
+| Release | Full-amount cooperative release implemented |
+| Refund | Full-amount cooperative/timeout-since transaction path implemented |
+| Transaction observation | pending/proposed/committed/confirmed/rejected/unknown mapped |
+| Ambiguous broadcast | Expected hash persisted; reconciliation required |
+| Reorg handling | Prior confirmation loss raises reorg state/event/metric |
+| Durable worker | Settlement queue, dedupe, leases, healthy deferral, stale metrics |
+| Mainnet signer | Not implemented and explicitly blocked |
+| On-chain split dispute payout | Not implemented |
+
+The Rust lock enforces canonical args/data, version/magic/reserved bytes, one
+escrow group input, exact full-capacity destination, unambiguous outputs, signer
+paths, and absolute block timeout semantics.
+
+## 13. CKB Testnet Results
+
+The non-mutating public testnet smoke passed on 2026-08-28 at node tip
+`0x1534afe`. No deployment transaction hash was configured, so deployment was not
+verified. `CKB_TESTNET_E2E` was not enabled and no funded credentials/participant
+scripts were supplied; therefore create/fund/proof/release/refund lifecycle E2E
+was **not run**.
+
+`scripts/ckb-testnet-smoke.mjs` now provides an explicit testnet-only controlled
+release and refund lifecycle harness. It requires an API, scoped test API key,
+funded development signer, participant scripts, contract deployment, worker, and
+explicit `CKB_TESTNET_E2E=true`. It has no mainnet mode.
+
+## 14. Security Review
+
+This was a static engineering review, not a formal security audit.
+
+- Tenant identity is middleware-derived and all financial repositories are
+  app-scoped; composite foreign keys reject crafted references.
+- Mutation routes retain explicit scopes; settlement/webhook/admin actions retain
+  high-risk rate limits.
+- Admin routes require a verified JWT and server allowlist. Admin privilege cannot
+  be asserted from a request or token claim.
+- Raw SQL with dynamic values uses database parameters. Remaining unsafe APIs use
+  fixed internal SQL templates or fixed audit-maintenance statements, not request
+  interpolation.
+- HTTP payloads have global and per-domain bounds. Deployed Redis failure policy is
+  fail-closed.
+- Webhook DNS/redirect/egress controls were retained; jobs and event delivery stay
+  transactionally linked to domain events.
+- Logger redaction covers authorization, tokens, secrets, signatures, ciphertext,
+  private keys, API keys, JWTs, and database URLs. CKB payloads persist public
+  transaction/commitment data only.
+- CKB mainnet, deployed local keys, incomplete config, and unavailable external
+  signing fail closed.
+- No dedicated secret-scanner binary was installed. A tracked-source pattern scan
+  found only the documented placeholder; this is weaker than a full history scan.
+
+Supply-chain policy fails closed on an unavailable or malformed audit response
+and passes against live registry data, but production `npm audit` reports 21 low,
+2 moderate, and 3 high vulnerability records. The high chain is covered by the
+time-limited `GHSA-ggr8-5vv4-36mx` Prisma migration-tooling exception expiring
+2026-09-22. Low-severity CKB dependency findings remain subject to the
+cryptography upgrade policy and must not be auto-upgraded without
+compatibility/testnet evidence.
+
+## 15. Migrations
+
+New forward migrations:
+
+1. `20260827000100_phase2_financial_lifecycle_constraints`
+2. `20260827000200_ckb_reconciliation_state`
+3. `20260827000300_cross_resource_scope_constraints`
+
+All 20 migrations applied successfully to a fresh PostgreSQL database. A separate
+populated Phase 1 upgrade applied all three Phase 2 migrations while preserving
+one row in each required resource class: App, API key, Agreement, Milestone,
+Proof, Review, Dispute, Escrow, Transaction, Event, WebhookEndpoint,
+WebhookDelivery, AuditLog, AgentJob, and IdempotencyKey. Legacy values were
+verified as normalized to `draft`, `pending`, `CKB`, and `text`.
+
+Historical migration files were not modified.
+
+## 16. Test Results
+
+| Gate | Result |
+| --- | --- |
+| `npm ci` | Pass; Node 25 runner warning against required Node 24 |
+| Prisma format/validate/generate | Pass |
+| Fresh 20-migration install | Pass |
+| Populated Phase 1 upgrade | Pass; all 15 resource counts preserved |
+| Server unit/e2e tests | Pass, 94 passed and 0 failed |
+| PostgreSQL/Redis integration | Pass, 36 passed and 0 failed against fresh migrated services |
+| Server/web TypeScript lint | Pass |
+| Server and Next.js production build | Pass |
+| OpenAPI route validation | 58 operations pass |
+| OpenAPI Phase 1 compatibility | No removed `/v1` path or operation |
+| Docker Compose config | Pass |
+| Kubernetes deployment validation/smoke | Pass, 10 resources and 2 tests |
+| Observability validation | Pass, 12 alerts and 6 dashboards |
+| Infrastructure control matrix | Pass, 27 controls |
+| Dependency policy | Pass with one active high-advisory exception; 3 policy tests pass |
+| License policy | Pass, 888 packages; 2 policy tests pass |
+| Rust contract host tests | 11 passed, 0 failed |
+| CKB public testnet RPC smoke | Pass; lifecycle/deployment not exercised |
+
+## 17. Known Limitations
+
+- No external/KMS signer provider is installed; deployed CKB and mainnet are
+  intentionally unavailable.
+- No funded testnet lifecycle or contract deployment verification was run.
+- Contract tests exercise pure validation logic, not a full ckb-testtool/VM
+  transaction with witnesses, fee inputs, and multiple script groups.
+- The local environment lacks the RISC-V GCC cross compiler, so the release
+  contract binary was not rebuilt in this verification run.
+- Dispute split accounting is exact in PostgreSQL, but arbitrary split outputs are
+  not implemented by the CKB adapter/contract path.
+- Webhook delivery is intentionally at-least-once. Receivers must deduplicate by
+  event ID; an external side effect cannot be made exactly-once across HTTP.
+- Webhook signing-secret rotation and API-key rotation do not have dedicated
+  idempotent public endpoints in this phase.
+- Operator MFA/passkeys are deferred.
+- The Node verification runner is v25.9.0; release CI should use the pinned Node
+  24.x runtime.
+
+## 18. Items Deferred to Phase 3
+
+- reviewed external/KMS CKB signer with approval, rotation, and recovery policy;
+- ckb-testtool/VM transaction integration and independent contract review;
+- funded testnet release, refund, reorg, crash-after-broadcast, and dispute
+  settlement evidence with recorded transaction hashes;
+- explicit on-chain split-dispute construction if product policy requires it;
+- webhook/API-key secret rotation APIs with grace/revocation policy;
+- operator MFA/passkey enforcement;
+- removal of the Prisma advisory exception and reviewed CKB dependency upgrades.
+
+## 19. Production Readiness Assessment
+
+### CKB classification: NOT READY
+
+The rail has the required architectural safety boundaries, deterministic unit
+coverage, durable ambiguity handling, and operational instrumentation, but it
+does not meet the evidence threshold for testnet or mainnet readiness. Missing
+funded E2E, production signer, transaction-level VM tests, RISC-V release build,
+and external review are blocking readiness evidence.
+
+The app-scoped core with CKB disabled passed the local staging gates. Release CI
+must repeat them under the pinned Node 24 runtime. This report does not claim a
+formal security audit or production mainnet readiness.

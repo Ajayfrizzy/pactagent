@@ -5,7 +5,7 @@ import type { TenantContext } from '../../common/tenancy/tenant-context';
 
 export function createReview(tenant: TenantContext, input: {
   agreementId: string;
-  milestoneId: string | null;
+  milestoneId: string;
   proofSubmissionId: string;
 } & ReviewProofInput, tx: Prisma.TransactionClient) {
   return tx.review.create({

@@ -27,7 +27,7 @@ async function executeCycle() {
   try {
     const succeeded = await runAgentCycle({
       workerId,
-      queues: config.workerQueues as Array<'webhook'>,
+      queues: config.workerQueues as Array<'webhook' | 'settlement'>,
       concurrency: config.workerConcurrency,
     });
     await recordWorkerCycle(workerId, Date.now() - startedAt, succeeded ? undefined : 'Agent cycle failed.');
@@ -55,7 +55,7 @@ async function main() {
   installConsoleBridge();
   await assertRequiredMigrationsApplied();
 
-  await registerWorker(workerId, 'webhook');
+  await registerWorker(workerId, config.workerQueues.join(','));
   healthServer.listen(config.workerHealthPort, '0.0.0.0');
   heartbeatTimer = setInterval(() => {
     void touchWorker(workerId).catch((error) => log('error', 'worker.heartbeat.failed', { workerId, error }));

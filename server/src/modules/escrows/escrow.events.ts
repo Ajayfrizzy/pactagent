@@ -7,4 +7,6 @@ export const ESCROW_EVENTS = {
   refundPending: 'escrow.refund_pending',
   refunded: 'escrow.refunded',
   failed: 'escrow.failed',
+  reconciliationRequired: 'escrow.reconciliation_required',
+  reorgDetected: 'escrow.reorg_detected',
 } as const;

@@ -20,7 +20,7 @@ receivers:
             credentials: ${env:METRICS_BEARER_TOKEN}
           static_configs:
             - targets:
-                - pactagent-worker-webhook.pactagent.svc.cluster.local:4001
+                - pactagent-worker-infrastructure.pactagent.svc.cluster.local:4001
 
 processors:
   memory_limiter:

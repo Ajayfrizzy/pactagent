@@ -43,6 +43,12 @@ fn validate() -> Result<(), Error> {
     let data = load_cell_data(0, Source::GroupInput).map_err(map_sys_error)?;
     let terms = parse_terms(&data)?;
 
+    match load_cell_capacity(1, Source::GroupInput) {
+        Ok(_) => return Err(Error::MultipleEscrowInputs),
+        Err(SysError::IndexOutOfBound) => {}
+        Err(err) => return Err(map_sys_error(err)),
+    }
+
     let input_capacity = load_cell_capacity(0, Source::GroupInput).map_err(map_sys_error)?;
     let input_since = load_input_since(0, Source::GroupInput).map_err(map_sys_error)?;
     let signer_lock_hashes = collect_lock_hashes(Source::Input)?;

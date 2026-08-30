@@ -1,18 +1,21 @@
 import type { Prisma } from '@prisma/client';
 import type { Request } from 'express';
-import { prisma } from '../../db';
 import { tenantContext } from '../../common/tenancy/tenant-context';
 import { runIdempotentTransaction } from '../../common/idempotency/idempotency.service';
-import { invalidRequest, notFound } from '../../common/errors/app-error';
+import { isUniqueConstraintError } from '../../common/idempotency/idempotency.service';
+import { assertSettlementSplit } from '../../common/amounts/financial-invariants';
+import { conflict, invalidRequest, notFound } from '../../common/errors/app-error';
+import { activeScopeConflicts } from '../../common/observability/metrics';
 import { createInfrastructureAuditLog } from '../audit-logs/audit-log.repository';
-import { findAgreementForApp, updateAgreementStatus } from '../agreements/agreement.repository';
+import { findAgreementForApp, transitionAgreementStatus } from '../agreements/agreement.repository';
 import {
   assertAgreementTransition,
   isAgreementStatus,
   type InfrastructureAgreementStatus,
 } from '../agreements/agreement.state-machine';
 import { createEvent } from '../events/event.repository';
-import { findMilestoneForApp, updateMilestoneStatus } from '../milestones/milestone.repository';
+import { findMilestoneForApp, transitionMilestoneStatus } from '../milestones/milestone.repository';
+import { findActiveEscrowForScope } from '../escrows/escrow.repository';
 import {
   assertMilestoneTransition,
   isMilestoneStatus,
@@ -63,7 +66,7 @@ async function advanceAgreement(
 
   for (const toStatus of path) {
     assertAgreementTransition(current, toStatus);
-    await updateAgreementStatus(tenantContext(appId), agreementId, toStatus, tx);
+    await transitionAgreementStatus(tenantContext(appId), agreementId, current, toStatus, tx);
     current = toStatus;
   }
 }
@@ -79,7 +82,7 @@ async function advanceMilestone(
 
   for (const toStatus of path) {
     assertMilestoneTransition(current, toStatus);
-    await updateMilestoneStatus(tenantContext(appId), milestoneId, toStatus, tx);
+    await transitionMilestoneStatus(tenantContext(appId), milestoneId, current, toStatus, tx);
     current = toStatus;
   }
 }
@@ -109,7 +112,12 @@ function auditDispute(tx: Prisma.TransactionClient, req: Request, params: {
 }
 
 export async function createDisputeForApp(req: Request, appId: string, input: CreateDisputeInput) {
-  return prisma.$transaction(async (tx) => {
+  return runIdempotentTransaction<ReturnType<typeof serializeDispute>>({
+    req,
+    appId,
+    statusCode: 201,
+    responseBody: (result) => ({ data: result, requestId: req.requestId }),
+    run: async (tx) => {
     const agreement = await findAgreementForApp(tenantContext(appId), input.agreementId, tx);
     if (!agreement) {
       throw notFound('Agreement not found.', 'agreement_not_found');
@@ -120,11 +128,29 @@ export async function createDisputeForApp(req: Request, appId: string, input: Cr
       throw notFound('Milestone not found for agreement.', 'milestone_not_found');
     }
 
+    const existing = await disputeRepository.findUnresolvedDisputeForScope(
+      appId, agreement.id, milestone.id, tx,
+    );
+    if (existing) {
+      activeScopeConflicts.inc({ resource: 'dispute' });
+      throw conflict('An unresolved dispute already exists for this settlement scope.', 'active_dispute_exists');
+    }
+
     const agreementStatus = assertInfrastructureAgreementStatus(agreement.status);
     const milestoneStatus = assertInfrastructureMilestoneStatus(milestone.status);
     const agreementPath = agreementPathForDisputeOpen(agreementStatus);
     const milestonePath = milestonePathForDisputeOpen(milestoneStatus);
-    const created = await disputeRepository.createDispute(appId, input, tx);
+
+    let created: Awaited<ReturnType<typeof disputeRepository.createDispute>>;
+    try {
+      created = await disputeRepository.createDispute(appId, input, tx);
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        activeScopeConflicts.inc({ resource: 'dispute' });
+        throw conflict('An unresolved dispute already exists for this settlement scope.', 'active_dispute_exists');
+      }
+      throw error;
+    }
     const serialized = serializeDispute(created);
 
     await advanceAgreement(appId, agreement.id, agreementStatus, agreementPath, tx);
@@ -148,6 +174,7 @@ export async function createDisputeForApp(req: Request, appId: string, input: Cr
     });
 
     return serialized;
+    },
   });
 }
 
@@ -175,7 +202,7 @@ export async function getDisputeForApp(appId: string, disputeId: string) {
 }
 
 export async function resolveDisputeForApp(req: Request, appId: string, disputeId: string, input: ResolveDisputeInput) {
-  return runIdempotentTransaction({
+  return runIdempotentTransaction<ReturnType<typeof serializeDispute>>({
     req,
     appId,
     statusCode: 200,
@@ -198,11 +225,28 @@ export async function resolveDisputeForApp(req: Request, appId: string, disputeI
       throw notFound('Milestone not found for dispute.', 'milestone_not_found');
     }
 
+    if (input.resolutionType === 'split') {
+      const escrow = await findActiveEscrowForScope(
+        tenantContext(appId), agreement.id, milestone.id, tx,
+      );
+      if (!escrow || escrow.status !== 'funded') {
+        throw invalidRequest(
+          'Split resolution requires one funded escrow for the disputed milestone.',
+          'dispute_funded_escrow_required',
+        );
+      }
+      assertSettlementSplit({
+        workerAmount: input.workerAmount!,
+        clientAmount: input.clientAmount!,
+        settlementAmount: escrow.amount,
+      });
+    }
+
     const agreementStatus = assertInfrastructureAgreementStatus(agreement.status);
     const milestoneStatus = assertInfrastructureMilestoneStatus(milestone.status);
     const agreementPath = agreementPathForDisputeResolution(agreementStatus, input.resolutionType);
     const milestonePath = milestonePathForDisputeResolution(milestoneStatus, input.resolutionType);
-    const resolved = await disputeRepository.resolveDisputeForApp(appId, disputeId, input, tx);
+    const resolved = await disputeRepository.resolveDisputeForApp(appId, disputeId, dispute.status, input, tx);
     const serializedBefore = serializeDispute(dispute);
     const serializedAfter = serializeDispute(resolved);
 

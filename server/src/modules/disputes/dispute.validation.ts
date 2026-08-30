@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { DISPUTE_RESOLUTION_TYPES, DISPUTE_STATUSES } from './dispute.state-machine';
 
-const positiveIntegerString = z.string().regex(/^[1-9]\d*$/, 'Amount must be a positive integer string.');
+const nonNegativeIntegerString = z.string().regex(/^(0|[1-9]\d*)$/, 'Amount must be a non-negative integer string.');
 
 export const createDisputeSchema = z.object({
   agreementId: z.string().uuid(),
@@ -22,14 +22,21 @@ export const disputeListQuerySchema = z.object({
 export const resolveDisputeSchema = z.object({
   resolutionType: z.enum(DISPUTE_RESOLUTION_TYPES),
   resolutionNote: z.string().trim().max(5000).optional(),
-  workerAmount: positiveIntegerString.optional(),
-  clientAmount: positiveIntegerString.optional(),
+  workerAmount: nonNegativeIntegerString.optional(),
+  clientAmount: nonNegativeIntegerString.optional(),
 }).superRefine((value, ctx) => {
   if (value.resolutionType !== 'split') {
+    if (value.workerAmount !== undefined || value.clientAmount !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Settlement amounts are only valid for split resolution.',
+        path: ['workerAmount'],
+      });
+    }
     return;
   }
 
-  if (!value.workerAmount || !value.clientAmount) {
+  if (value.workerAmount === undefined || value.clientAmount === undefined) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: 'Split resolution requires workerAmount and clientAmount.',

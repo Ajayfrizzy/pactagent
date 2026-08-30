@@ -39,7 +39,12 @@ if (inputIndex >= 0) {
 }
 
 const report = JSON.parse(raw);
-const vulnerabilities = report.vulnerabilities || {};
+if (report.error || typeof report.vulnerabilities !== 'object' || report.vulnerabilities === null) {
+  console.error(`Dependency audit did not return a vulnerability report: ${report.message || 'unknown npm audit error'}`);
+  process.exit(1);
+}
+
+const vulnerabilities = report.vulnerabilities;
 const blocking = Object.entries(vulnerabilities).filter(([, vulnerability]) => (
   (severityRank[vulnerability.severity] ?? 0) >= threshold
 ));

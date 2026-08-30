@@ -19,6 +19,8 @@ pub enum Error {
     MissingExpectedOutput = 10,
     InvalidTimeoutSince = 11,
     AmbiguousSettlementOutputs = 12,
+    MultipleEscrowInputs = 13,
+    NonCanonicalCellData = 14,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -87,8 +89,15 @@ pub fn parse_terms(data: &[u8]) -> Result<EscrowTerms, Error> {
         return Err(Error::UnsupportedVersion);
     }
 
+    if data[9..12] != [0, 0, 0] {
+        return Err(Error::NonCanonicalCellData);
+    }
+
     let milestone_index = u32::from_le_bytes(data[12..16].try_into().map_err(|_| Error::InvalidCellDataLength)?);
     let refund_timeout_since = u64::from_le_bytes(data[16..24].try_into().map_err(|_| Error::InvalidCellDataLength)?);
+    if refund_timeout_since >> 56 != 0 {
+        return Err(Error::InvalidTimeoutSince);
+    }
     let agreement_digest = data[24..56].try_into().map_err(|_| Error::InvalidCellDataLength)?;
     let milestone_digest = data[56..88].try_into().map_err(|_| Error::InvalidCellDataLength)?;
 
@@ -121,6 +130,10 @@ pub fn evaluate_spend(
     let worker_auth = has_signer(tx.signer_lock_hashes, &parties.worker);
     let worker_output = has_exact_output(tx.outputs, &parties.worker, tx.input_capacity)?;
     let client_output = has_exact_output(tx.outputs, &parties.client, tx.input_capacity)?;
+
+    if worker_output && client_output {
+        return Err(Error::AmbiguousSettlementOutputs);
+    }
 
     if worker_output && client_auth {
         return Ok(ResolutionPath::ClientPayout);
@@ -287,5 +300,110 @@ mod tests {
 
         let err = evaluate_spend(&parties, &sample_terms(), &tx).unwrap_err();
         assert_eq!(err, Error::MissingExpectedOutput);
+    }
+
+    #[test]
+    fn rejects_malformed_args_and_terms() {
+        assert_eq!(parse_party_hashes(&[0; PARTY_HASHES_LEN - 1]), Err(Error::InvalidArgsLength));
+        assert_eq!(parse_terms(&[0; ESCROW_DATA_LEN - 1]), Err(Error::InvalidCellDataLength));
+
+        let mut invalid_magic = serialize_terms(&sample_terms());
+        invalid_magic[0] ^= 1;
+        assert_eq!(parse_terms(&invalid_magic), Err(Error::InvalidMagic));
+
+        let mut invalid_version = serialize_terms(&sample_terms());
+        invalid_version[8] = VERSION + 1;
+        assert_eq!(parse_terms(&invalid_version), Err(Error::UnsupportedVersion));
+
+        let mut noncanonical = serialize_terms(&sample_terms());
+        noncanonical[9] = 1;
+        assert_eq!(parse_terms(&noncanonical), Err(Error::NonCanonicalCellData));
+
+        let mut invalid_since = serialize_terms(&sample_terms());
+        invalid_since[23] = 1;
+        assert_eq!(parse_terms(&invalid_since), Err(Error::InvalidTimeoutSince));
+    }
+
+    #[test]
+    fn rejects_capacity_off_by_one_and_duplicate_outputs() {
+        let parties = sample_parties();
+        let signers = [parties.client];
+        for capacity in [99, 101] {
+            let outputs = [OutputCell { lock_hash: parties.worker, capacity }];
+            let tx = TxState {
+                input_capacity: 100,
+                input_since: 0,
+                signer_lock_hashes: &signers,
+                outputs: &outputs,
+            };
+            assert_eq!(evaluate_spend(&parties, &sample_terms(), &tx), Err(Error::MissingExpectedOutput));
+        }
+
+        let outputs = [
+            OutputCell { lock_hash: parties.worker, capacity: 100 },
+            OutputCell { lock_hash: parties.worker, capacity: 100 },
+        ];
+        let tx = TxState {
+            input_capacity: 100,
+            input_since: 0,
+            signer_lock_hashes: &signers,
+            outputs: &outputs,
+        };
+        assert_eq!(evaluate_spend(&parties, &sample_terms(), &tx), Err(Error::AmbiguousSettlementOutputs));
+    }
+
+    #[test]
+    fn rejects_dual_destinations_even_with_both_signers() {
+        let parties = sample_parties();
+        let outputs = [
+            OutputCell { lock_hash: parties.client, capacity: 100 },
+            OutputCell { lock_hash: parties.worker, capacity: 100 },
+        ];
+        let signers = [parties.client, parties.worker];
+        let tx = TxState {
+            input_capacity: 100,
+            input_since: 0,
+            signer_lock_hashes: &signers,
+            outputs: &outputs,
+        };
+        assert_eq!(evaluate_spend(&parties, &sample_terms(), &tx), Err(Error::AmbiguousSettlementOutputs));
+    }
+
+    #[test]
+    fn output_order_does_not_change_authorization() {
+        let parties = sample_parties();
+        let outputs = [
+            OutputCell { lock_hash: hash(8), capacity: 50 },
+            OutputCell { lock_hash: parties.worker, capacity: 100 },
+        ];
+        let signers = [parties.client];
+        let tx = TxState {
+            input_capacity: 100,
+            input_since: 0,
+            signer_lock_hashes: &signers,
+            outputs: &outputs,
+        };
+        assert_eq!(evaluate_spend(&parties, &sample_terms(), &tx), Ok(ResolutionPath::ClientPayout));
+    }
+
+    #[test]
+    fn timeout_refund_enforces_exact_boundary_and_absolute_block_since() {
+        let parties = sample_parties();
+        let outputs = [OutputCell { lock_hash: parties.client, capacity: 100 }];
+        let signers: [[u8; HASH_LEN]; 0] = [];
+
+        for (since, expected) in [
+            (122, Err(Error::MissingRequiredSigner)),
+            (123, Ok(ResolutionPath::TimeoutRefund)),
+            ((1u64 << 56) | 123, Err(Error::MissingRequiredSigner)),
+        ] {
+            let tx = TxState {
+                input_capacity: 100,
+                input_since: since,
+                signer_lock_hashes: &signers,
+                outputs: &outputs,
+            };
+            assert_eq!(evaluate_spend(&parties, &sample_terms(), &tx), expected);
+        }
     }
 }

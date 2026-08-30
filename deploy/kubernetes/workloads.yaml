@@ -76,17 +76,17 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: pactagent-worker-webhook
+  name: pactagent-worker-infrastructure
   namespace: pactagent
 spec:
   replicas: 2
   revisionHistoryLimit: 5
   strategy: { type: RollingUpdate, rollingUpdate: { maxUnavailable: 0, maxSurge: 1 } }
   selector:
-    matchLabels: { app.kubernetes.io/name: pactagent-worker-webhook }
+    matchLabels: { app.kubernetes.io/name: pactagent-worker-infrastructure }
   template:
     metadata:
-      labels: { app.kubernetes.io/name: pactagent-worker-webhook }
+      labels: { app.kubernetes.io/name: pactagent-worker-infrastructure }
     spec:
       terminationGracePeriodSeconds: 45
       automountServiceAccountToken: false
@@ -107,8 +107,8 @@ spec:
             - secretRef: { name: pactagent-secrets }
           env:
             - { name: SERVICE_ROLE, value: worker }
-            - { name: WORKER_QUEUES, value: webhook }
-            - { name: OTEL_SERVICE_NAME, value: pactagent-worker-webhook }
+            - { name: WORKER_QUEUES, value: "webhook,settlement" }
+            - { name: OTEL_SERVICE_NAME, value: pactagent-worker-infrastructure }
             - name: WORKER_ID
               valueFrom: { fieldRef: { fieldPath: metadata.name } }
           readinessProbe: { httpGet: { path: /ready, port: health }, periodSeconds: 10, timeoutSeconds: 5, failureThreshold: 6 }

@@ -9,6 +9,7 @@ import { installConsoleBridge, log } from './common/observability/logger';
 import { shutdownTracing } from './common/observability/tracing';
 import { closeRateLimitStore } from './common/rate-limit/infrastructure-rate-limit';
 import { assertRequiredMigrationsApplied } from './common/migrations/migration-readiness';
+import { closeAuthChallengeStore } from './services/authChallengeStore';
 
 validateProductionConfig();
 requireDatabaseUrl();
@@ -46,6 +47,7 @@ function shutdown(signal: string) {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await prisma.$disconnect();
     await closeRateLimitStore();
+    await closeAuthChallengeStore();
     await shutdownTracing();
     clearTimeout(timeout);
     log('info', 'server.shutdown.completed');

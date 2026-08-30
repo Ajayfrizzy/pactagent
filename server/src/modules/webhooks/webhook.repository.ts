@@ -273,24 +273,41 @@ export function listDueWebhookDeliveries(limit: number) {
   });
 }
 
-export function updateWebhookDeliveryResult(deliveryId: string, data: {
-  status: 'PENDING' | 'DELIVERED' | 'FAILED' | 'RETRY';
-  statusCode?: number | null;
-  responseBodySnippet?: string | null;
-  lastError?: string | null;
-  nextRetryAt?: Date | null;
-  deliveredAt?: Date | null;
-}) {
-  return prisma.webhookDelivery.update({
-    where: { id: deliveryId },
+export async function updateWebhookDeliveryResult(params: {
+  deliveryId: string;
+  appId: string;
+  expectedStatus: string;
+  expectedAttempts: number;
+  data: {
+    status: 'PENDING' | 'DELIVERED' | 'FAILED' | 'RETRY';
+    statusCode?: number | null;
+    responseBodySnippet?: string | null;
+    lastError?: string | null;
+    nextRetryAt?: Date | null;
+    deliveredAt?: Date | null;
+  };
+}, tx?: Prisma.TransactionClient | PrismaTransaction) {
+  const client = getClient(tx);
+  const result = await client.webhookDelivery.updateMany({
+    where: {
+      id: params.deliveryId,
+      appId: params.appId,
+      status: params.expectedStatus,
+      attempts: params.expectedAttempts,
+    },
     data: {
-      status: data.status,
-      statusCode: data.statusCode ?? null,
-      responseBodySnippet: data.responseBodySnippet ?? null,
-      lastError: data.lastError ?? null,
-      nextRetryAt: data.nextRetryAt ?? null,
-      deliveredAt: data.deliveredAt ?? null,
+      status: params.data.status,
+      statusCode: params.data.statusCode ?? null,
+      responseBodySnippet: params.data.responseBodySnippet ?? null,
+      lastError: params.data.lastError ?? null,
+      nextRetryAt: params.data.nextRetryAt ?? null,
+      deliveredAt: params.data.deliveredAt ?? null,
       attempts: { increment: 1 },
     },
   });
+
+  const delivery = await client.webhookDelivery.findUniqueOrThrow({
+    where: { id_appId: { id: params.deliveryId, appId: params.appId } },
+  });
+  return { applied: result.count === 1, delivery };
 }

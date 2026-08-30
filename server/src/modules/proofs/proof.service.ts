@@ -1,10 +1,9 @@
 import type { Prisma } from '@prisma/client';
 import type { Request } from 'express';
-import { prisma } from '../../db';
 import { runIdempotentTransaction } from '../../common/idempotency/idempotency.service';
 import { invalidRequest, notFound } from '../../common/errors/app-error';
 import { createInfrastructureAuditLog } from '../audit-logs/audit-log.repository';
-import { findAgreementForApp, updateAgreementStatus } from '../agreements/agreement.repository';
+import { findAgreementForApp, transitionAgreementStatus } from '../agreements/agreement.repository';
 import {
   assertAgreementTransition,
   isAgreementStatus,
@@ -12,7 +11,7 @@ import {
 } from '../agreements/agreement.state-machine';
 import { createEvent } from '../events/event.repository';
 import { MILESTONE_EVENTS } from '../milestones/milestone.events';
-import { findMilestoneForApp, updateMilestoneStatus } from '../milestones/milestone.repository';
+import { findMilestoneForApp, transitionMilestoneStatus } from '../milestones/milestone.repository';
 import {
   assertMilestoneTransition,
   isMilestoneStatus,
@@ -67,7 +66,7 @@ async function advanceAgreement(
 
   for (const toStatus of path) {
     assertAgreementTransition(current, toStatus);
-    updated = await updateAgreementStatus(tenantContext(appId), agreementId, toStatus, tx);
+    updated = await transitionAgreementStatus(tenantContext(appId), agreementId, current, toStatus, tx);
     current = toStatus;
   }
 
@@ -86,7 +85,7 @@ async function advanceMilestone(
 
   for (const toStatus of path) {
     assertMilestoneTransition(current, toStatus);
-    updated = await updateMilestoneStatus(tenantContext(appId), milestoneId, toStatus, tx);
+    updated = await transitionMilestoneStatus(tenantContext(appId), milestoneId, current, toStatus, tx);
     current = toStatus;
   }
 
@@ -201,7 +200,12 @@ export async function getProofForApp(appId: string, proofId: string) {
 }
 
 export async function reviewProofForApp(req: Request, appId: string, proofId: string, input: ReviewProofInput) {
-  return prisma.$transaction(async (tx) => {
+  return runIdempotentTransaction({
+    req,
+    appId,
+    statusCode: 200,
+    responseBody: (result) => ({ data: result, requestId: req.requestId }),
+    run: async (tx) => {
     const proof = await proofRepository.findProofForApp(tenantContext(appId), proofId, tx);
     if (!proof) {
       throw notFound('Proof submission not found.', 'proof_not_found');
@@ -226,10 +230,12 @@ export async function reviewProofForApp(req: Request, appId: string, proofId: st
     const agreementPath = agreementPathForReviewDecision(agreementStatus, input.decision);
     const milestonePath = milestonePathForReviewDecision(milestoneStatus, input.decision);
 
-    if (agreementPath[0] === 'under_review' || milestonePath[0] === 'under_review') {
-      await proofRepository.updateProofStatus(tenantContext(appId), proof.id, {
-        status: 'under_review',
-      }, tx);
+    let currentProofStatus = proof.status;
+    if (currentProofStatus === 'submitted') {
+      await proofRepository.transitionProofStatus(
+        tenantContext(appId), proof.id, currentProofStatus, 'under_review', tx,
+      );
+      currentProofStatus = 'under_review';
 
       await createEvent(tenantContext(appId), {type: PROOF_EVENTS.underReview,
         agreementId: proof.agreementId,
@@ -242,9 +248,13 @@ export async function reviewProofForApp(req: Request, appId: string, proofId: st
     await advanceAgreement(appId, agreement.id, agreementStatus, agreementPath, tx);
     await advanceMilestone(appId, milestone.id, milestoneStatus, milestonePath, tx);
 
-    const reviewedProof = await proofRepository.updateProofStatus(tenantContext(appId), proof.id, {
-      status: proofStatusForReviewDecision(input.decision),
-    }, tx);
+    const reviewedProof = await proofRepository.transitionProofStatus(
+      tenantContext(appId),
+      proof.id,
+      currentProofStatus,
+      proofStatusForReviewDecision(input.decision),
+      tx,
+    );
     const review = await reviewRepository.createReview(tenantContext(appId), {
       ...input,
       agreementId: proof.agreementId,
@@ -297,5 +307,6 @@ export async function reviewProofForApp(req: Request, appId: string, proofId: st
       proof: serializedProofAfter,
       review: serializedReview,
     };
+    },
   });
 }

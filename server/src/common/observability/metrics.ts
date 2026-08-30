@@ -62,6 +62,73 @@ export const jobLeaseRenewals = new Counter({
 export const jobRetries = new Counter({
   name: 'pactagent_job_retries_total', help: 'Job retry and dead-letter transitions by queue.', labelNames: ['queue', 'outcome'] as const, registers: [metricsRegistry],
 });
+export const lifecycleTransitionConflicts = new Counter({
+  name: 'pactagent_lifecycle_transition_conflicts_total',
+  help: 'Compare-and-swap lifecycle transitions rejected because the persisted state changed.',
+  labelNames: ['resource'] as const,
+  registers: [metricsRegistry],
+});
+export const idempotencyConflicts = new Counter({
+  name: 'pactagent_idempotency_conflicts_total',
+  help: 'Idempotent requests rejected because a key is in progress or bound to a different request.',
+  labelNames: ['reason'] as const,
+  registers: [metricsRegistry],
+});
+export const financialInvariantRejections = new Counter({
+  name: 'pactagent_financial_invariant_rejections_total',
+  help: 'Financial mutations rejected by invariant.',
+  labelNames: ['invariant'] as const,
+  registers: [metricsRegistry],
+});
+export const activeScopeConflicts = new Counter({
+  name: 'pactagent_active_scope_conflicts_total',
+  help: 'Active settlement resources rejected by uniqueness scope.',
+  labelNames: ['resource'] as const,
+  registers: [metricsRegistry],
+});
+export const authChallengeFailures = new Counter({
+  name: 'pactagent_auth_challenge_failures_total',
+  help: 'Wallet challenge failures by bounded reason.',
+  labelNames: ['reason'] as const,
+  registers: [metricsRegistry],
+});
+export const ckbRpcDuration = new Histogram({
+  name: 'pactagent_ckb_rpc_duration_seconds',
+  help: 'CKB RPC request duration by endpoint class and method.',
+  labelNames: ['endpoint', 'method', 'outcome'] as const,
+  buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+  registers: [metricsRegistry],
+});
+export const ckbRpcErrors = new Counter({
+  name: 'pactagent_ckb_rpc_errors_total',
+  help: 'CKB RPC failures by endpoint class and method.',
+  labelNames: ['endpoint', 'method'] as const,
+  registers: [metricsRegistry],
+});
+export const ckbBroadcastFailures = new Counter({
+  name: 'pactagent_ckb_broadcast_failures_total',
+  help: 'CKB broadcasts with rejected or ambiguous outcomes.',
+  labelNames: ['outcome'] as const,
+  registers: [metricsRegistry],
+});
+export const ckbReconciliationBacklog = new Gauge({
+  name: 'pactagent_ckb_reconciliation_backlog',
+  help: 'CKB transactions waiting for reconciliation.',
+  labelNames: ['status'] as const,
+  registers: [metricsRegistry],
+});
+export const ckbStaleTransactions = new Gauge({
+  name: 'pactagent_ckb_stale_transactions',
+  help: 'CKB transactions whose reconciliation observation is older than the configured threshold.',
+  labelNames: ['status'] as const,
+  registers: [metricsRegistry],
+});
+export const ckbReorgs = new Counter({
+  name: 'pactagent_ckb_reorgs_total',
+  help: 'Previously confirmed CKB transactions that disappeared or became rejected.',
+  labelNames: ['type'] as const,
+  registers: [metricsRegistry],
+});
 const FORBIDDEN_METRIC_LABELS = new Set([
   'appId', 'agreementId', 'milestoneId', 'transactionId', 'deliveryId', 'jobId',
   'requestId', 'providerRequestId', 'traceId', 'spanId', 'address', 'url',

@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../../db';
 import type { CreateMilestoneInput } from './milestone.validation';
 import type { TenantContext } from '../../common/tenancy/tenant-context';
+import { assertLifecycleCompareAndSwap } from '../../common/lifecycle/compare-and-swap';
 
 export function createMilestone(tenant: TenantContext, agreementId: string, input: CreateMilestoneInput & { order: number; currency: string }, tx: Prisma.TransactionClient) {
   return tx.milestone.create({
@@ -62,21 +63,47 @@ export function findMilestoneForApp(tenant: TenantContext, milestoneId: string, 
   });
 }
 
-export function updateMilestoneStatus(
+export async function transitionMilestoneStatus(
   tenant: TenantContext,
   milestoneId: string,
-  status: string,
+  expectedStatus: string,
+  nextStatus: string,
   tx: Prisma.TransactionClient,
 ) {
-  return tx.milestone.update({
+  const result = await tx.milestone.updateMany({
     where: {
       id: milestoneId,
       appId: tenant.appId,
+      status: expectedStatus,
     },
     data: {
-      status,
+      status: nextStatus,
     },
   });
+  assertLifecycleCompareAndSwap({
+    resource: 'milestone',
+    affectedRows: result.count,
+    expectedStatus,
+    nextStatus,
+  });
+
+  return tx.milestone.findUniqueOrThrow({
+    where: { id_appId: { id: milestoneId, appId: tenant.appId } },
+  });
+}
+
+export async function lockAgreementForMilestoneAllocation(
+  tenant: TenantContext,
+  agreementId: string,
+  tx: Prisma.TransactionClient,
+) {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT id
+    FROM "Agreement"
+    WHERE id = ${agreementId} AND "appId" = ${tenant.appId}
+    FOR UPDATE
+  `;
+  return rows.length === 1;
 }
 
 export function getMilestoneAmountSumForAgreement(tenant: TenantContext, agreementId: string, tx: Prisma.TransactionClient) {

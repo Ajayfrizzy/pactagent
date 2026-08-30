@@ -106,7 +106,12 @@ export async function getAgreementForApp(appId: string, agreementId: string) {
 }
 
 async function transitionAgreement(req: Request, appId: string, agreementId: string, toStatus: InfrastructureAgreementStatus) {
-  const agreement = await prisma.$transaction(async (tx) => {
+  return runIdempotentTransaction({
+    req,
+    appId,
+    statusCode: 200,
+    responseBody: (result) => ({ data: result, requestId: req.requestId }),
+    run: async (tx) => {
     const before = await agreementRepository.findAgreementForApp(tenantContext(appId), agreementId, tx);
     if (!before) {
       throw notFound('Agreement not found.', 'agreement_not_found');
@@ -115,7 +120,9 @@ async function transitionAgreement(req: Request, appId: string, agreementId: str
     const fromStatus = assertInfrastructureStatus(before.status);
     assertAgreementTransition(fromStatus, toStatus);
 
-    const after = await agreementRepository.updateAgreementStatus(tenantContext(appId), agreementId, toStatus, tx);
+    const after = await agreementRepository.transitionAgreementStatus(
+      tenantContext(appId), agreementId, fromStatus, toStatus, tx,
+    );
     const eventType = eventTypeForAgreementStatus(toStatus);
     const serializedBefore = serializeAgreement(before);
     const serializedAfter = serializeAgreement(after);
@@ -138,14 +145,18 @@ async function transitionAgreement(req: Request, appId: string, agreementId: str
       after: serializedAfter,
     });
 
-    return after;
+    return serializedAfter;
+    },
   });
-
-  return serializeAgreement(agreement);
 }
 
 export async function acceptAgreement(req: Request, appId: string, agreementId: string) {
-  return prisma.$transaction(async (tx) => {
+  return runIdempotentTransaction({
+    req,
+    appId,
+    statusCode: 200,
+    responseBody: (result) => ({ data: result, requestId: req.requestId }),
+    run: async (tx) => {
     const before = await agreementRepository.findAgreementForApp(tenantContext(appId), agreementId, tx);
     if (!before) {
       throw notFound('Agreement not found.', 'agreement_not_found');
@@ -155,8 +166,12 @@ export async function acceptAgreement(req: Request, appId: string, agreementId: 
     assertAgreementTransition(fromStatus, 'pending_acceptance');
     assertAgreementTransition('pending_acceptance', 'accepted');
 
-    await agreementRepository.updateAgreementStatus(tenantContext(appId), agreementId, 'pending_acceptance', tx);
-    const accepted = await agreementRepository.updateAgreementStatus(tenantContext(appId), agreementId, 'accepted', tx);
+    await agreementRepository.transitionAgreementStatus(
+      tenantContext(appId), agreementId, fromStatus, 'pending_acceptance', tx,
+    );
+    const accepted = await agreementRepository.transitionAgreementStatus(
+      tenantContext(appId), agreementId, 'pending_acceptance', 'accepted', tx,
+    );
     const serializedBefore = serializeAgreement(before);
     const serializedAfter = serializeAgreement(accepted);
 
@@ -177,6 +192,7 @@ export async function acceptAgreement(req: Request, appId: string, agreementId: 
     });
 
     return serializedAfter;
+    },
   });
 }
 
