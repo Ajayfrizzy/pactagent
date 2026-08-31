@@ -44,7 +44,7 @@ jobs:
     steps:
       # This IS your checkout step
       - name: Checkout release commit
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.RELEASE_SHA }}
 
@@ -204,7 +204,7 @@ jobs:
 
       # Second checkout step
       - name: Checkout release commit
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.RELEASE_SHA }}
 
