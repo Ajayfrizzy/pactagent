@@ -20,7 +20,7 @@ The former standalone product, public profiles, reputation, invites, comments, D
 
 | Path | Purpose |
 | --- | --- |
-| `server/` | Express `/v1` API, PostgreSQL persistence, webhook worker, maintenance commands |
+| `server/` | Express `/v1` API, PostgreSQL persistence, webhook and settlement worker, maintenance commands |
 | `web/` | Next.js developer console and operator wallet sign-in |
 | `contracts/` | CKB escrow contract source and deployment artifacts |
 | `docs/` | Architecture decisions and repository-wide operations guidance |

@@ -99,13 +99,15 @@
         }
       },
       "Conflict": {
-        "description": "The mutation lost a lifecycle compare-and-swap race, reused an idempotency key for a different request, or conflicts with an active escrow/dispute scope.",
+        "description": "The mutation lost a lifecycle compare-and-swap race, reused an idempotency key for a different request, duplicates an agreement or milestone external reference, or conflicts with an active escrow/dispute scope.",
         "content": {
           "application/json": {
             "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
             "examples": {
               "lifecycle": { "value": { "error": { "type": "conflict", "code": "lifecycle_conflict", "message": "The resource changed before this transition could be applied." } } },
               "idempotency": { "value": { "error": { "type": "conflict", "code": "idempotency_key_conflict", "message": "Idempotency key was already used with a different request body." } } },
+              "agreementReference": { "value": { "error": { "type": "conflict", "code": "agreement_already_exists", "message": "An agreement already exists with this external reference." } } },
+              "milestoneReference": { "value": { "error": { "type": "conflict", "code": "milestone_already_exists", "message": "A milestone already exists with this external reference or order." } } },
               "activeScope": { "value": { "error": { "type": "conflict", "code": "active_escrow_exists", "message": "An active escrow already exists for this settlement scope." } } }
             }
           }
@@ -391,7 +393,7 @@
       "get": { "tags": ["Milestones"], "summary": "Get an app-scoped milestone", "parameters": [{ "$ref": "#/components/parameters/Id" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/escrows": {
-      "post": { "tags": ["Escrows"], "summary": "Create a mock, manual, or CKB escrow record", "description": "Only one active escrow is allowed per agreement or milestone settlement scope. CKB requires exact milestone allocation and persists its script/data commitments for reconciliation.", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EscrowInput" } } } }, "responses": { "201": { "$ref": "#/components/responses/Created" }, "409": { "$ref": "#/components/responses/Conflict" }, "default": { "$ref": "#/components/responses/Error" } } },
+      "post": { "tags": ["Escrows"], "summary": "Create a mock, manual, or CKB escrow record", "description": "Only one active escrow is allowed per agreement or milestone settlement scope. failed and reconciliation_required remain active and block replacement creation until reconciliation establishes a safe state. CKB requires exact milestone allocation and persists its script/data commitments for reconciliation.", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EscrowInput" } } } }, "responses": { "201": { "$ref": "#/components/responses/Created" }, "409": { "$ref": "#/components/responses/Conflict" }, "default": { "$ref": "#/components/responses/Error" } } },
       "get": { "tags": ["Escrows"], "summary": "List app-scoped escrows", "parameters": [{ "name": "agreementId", "in": "query", "schema": { "type": "string", "format": "uuid" } }, { "name": "status", "in": "query", "schema": { "type": "string" } }, { "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/escrows/{id}": {

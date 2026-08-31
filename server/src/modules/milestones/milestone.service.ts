@@ -5,8 +5,8 @@ import {
   assertCurrencyMatchesAgreement,
   assertMilestoneAllocationWithinAgreement,
 } from '../../common/amounts/financial-invariants';
-import { invalidRequest, notFound } from '../../common/errors/app-error';
-import { runIdempotentTransaction } from '../../common/idempotency/idempotency.service';
+import { conflict, invalidRequest, notFound } from '../../common/errors/app-error';
+import { isUniqueConstraintError, runIdempotentTransaction } from '../../common/idempotency/idempotency.service';
 import { createInfrastructureAuditLog } from '../audit-logs/audit-log.repository';
 import { findAgreementForApp } from '../agreements/agreement.repository';
 import { createEvent } from '../events/event.repository';
@@ -80,11 +80,22 @@ export async function createMilestoneForAgreement(
     const currency = input.currency ?? agreement.currency;
     assertCurrencyMatchesAgreement(currency, agreement.currency);
 
-    const created = await milestoneRepository.createMilestone(tenantContext(appId), agreementId, {
-      ...input,
-      order,
-      currency,
-    }, tx);
+    let created: Awaited<ReturnType<typeof milestoneRepository.createMilestone>>;
+    try {
+      created = await milestoneRepository.createMilestone(tenantContext(appId), agreementId, {
+        ...input,
+        order,
+        currency,
+      }, tx);
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        throw conflict(
+          'A milestone with this externalReferenceId or order already exists for the agreement.',
+          'milestone_already_exists',
+        );
+      }
+      throw error;
+    }
     const serialized = serializeMilestone(created);
 
     await createEvent(tenantContext(appId), {type: MILESTONE_EVENTS.created,

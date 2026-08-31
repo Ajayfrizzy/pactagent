@@ -79,7 +79,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=https://otel-collector.internal
 OTEL_EXPORTER_OTLP_HEADERS_FILE=/run/secrets/otel-headers
 ```
 
-Use a distinct `OTEL_SERVICE_NAME` for the worker. Request logs include the active trace and span IDs. Place the collector on a private network and apply sampling/retention controls there.
+Use `OTEL_SERVICE_NAME=pactagent-worker-infrastructure` for the combined webhook and settlement worker. Request logs include the active trace and span IDs. Place the collector on a private network and apply sampling/retention controls there.
 
 The version-controlled collector configuration is `observability/otel-collector.yaml`. It receives OTLP traces, scrapes API and worker metrics, applies memory limiting, resource enrichment and batching, exposes metrics for Prometheus, and forwards traces to the configured OTLP backend.
 

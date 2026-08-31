@@ -225,7 +225,8 @@ model Event {
 }
 
 model Escrow {
-  // Active-scope uniqueness is enforced by partial indexes in the Phase 2 SQL migration.
+  // Active-scope uniqueness is enforced by Phase 2 partial indexes. `failed`
+  // remains active because its settlement outcome is unresolved until reconciliation.
   id                   String   @id @default(uuid())
   appId                String
   agreementId          String

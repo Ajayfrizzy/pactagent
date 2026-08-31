@@ -15,6 +15,8 @@ export const ESCROW_STATUSES = [
 
 export type EscrowStatus = (typeof ESCROW_STATUSES)[number];
 
+// `failed` is unresolved rather than terminal: the settlement scope remains
+// reserved until reconciliation establishes a safe state.
 const VALID_TRANSITIONS: Record<EscrowStatus, EscrowStatus[]> = {
   not_created: ['awaiting_funding', 'reconciliation_required', 'failed'],
   awaiting_funding: ['funding_detected', 'funded', 'reconciliation_required', 'failed'],

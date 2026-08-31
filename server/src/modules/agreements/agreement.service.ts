@@ -1,8 +1,8 @@
 import type { Prisma } from '@prisma/client';
 import type { Request } from 'express';
 import { prisma } from '../../db';
-import { invalidRequest, notFound } from '../../common/errors/app-error';
-import { runIdempotentTransaction } from '../../common/idempotency/idempotency.service';
+import { conflict, invalidRequest, notFound } from '../../common/errors/app-error';
+import { isUniqueConstraintError, runIdempotentTransaction } from '../../common/idempotency/idempotency.service';
 import { createInfrastructureAuditLog } from '../audit-logs/audit-log.repository';
 import { createEvent } from '../events/event.repository';
 import { serializeAgreement } from './agreement.model';
@@ -60,7 +60,18 @@ export async function createAgreementForApp(req: Request, appId: string, input: 
       requestId: req.requestId,
     }),
     run: async (tx) => {
-      const created = await agreementRepository.createAgreement(tenantContext(appId), input, tx);
+      let created: Awaited<ReturnType<typeof agreementRepository.createAgreement>>;
+      try {
+        created = await agreementRepository.createAgreement(tenantContext(appId), input, tx);
+      } catch (error) {
+        if (input.externalReferenceId && isUniqueConstraintError(error)) {
+          throw conflict(
+            'An agreement with this externalReferenceId already exists for the app.',
+            'agreement_already_exists',
+          );
+        }
+        throw error;
+      }
       const serialized = serializeAgreement(created);
 
       await createEvent(tenantContext(appId), {type: AGREEMENT_EVENTS.created,

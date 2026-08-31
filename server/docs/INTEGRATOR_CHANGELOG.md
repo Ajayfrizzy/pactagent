@@ -10,7 +10,7 @@
 - Cross-resource app ownership is enforced with composite foreign keys and non-enumerating relationship failures.
 - Wallet challenges are shared, TTL-bound, and atomically consumed through Redis in deployed API processes.
 - CKB funding can no longer be asserted by the client. When explicitly enabled for development testnet, the service verifies the persisted lock script, cell data, amount, transaction state, and confirmation depth.
-- CKB release/refund use reserve/broadcast/finalize semantics. Ambiguous broadcasts, rejected transactions, and reorgs surface as reconciliation state and durable settlement jobs.
+- CKB release/refund use reserve/broadcast/finalize semantics. Ambiguous broadcasts and reorgs surface as `reconciliation_required`; `failed` and `reconciliation_required` both block replacement escrow creation until reconciliation establishes a safe state.
 - The CKB rail remains disabled by default and is not mainnet-ready; deployed external signing is not implemented.
 
 - `/v1` is the only supported infrastructure lifecycle API; every legacy `/api/*` path now returns `410 Gone`.

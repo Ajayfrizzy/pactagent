@@ -1,6 +1,6 @@
 # Infrastructure worker jobs
 
-`AgentJob` is app-scoped and accepts `DELIVER_WEBHOOK` on `webhook` and `CKB_RECONCILE_TRANSACTION` on `settlement`. Run the general worker with `WORKER_QUEUES=webhook,settlement`; `WORKER_CONCURRENCY` is bounded from 1 to 32. A unique active dedupe key prevents concurrent enqueue from creating duplicate reconciliation jobs.
+`AgentJob` is app-scoped and accepts `DELIVER_WEBHOOK` on `webhook` and `CKB_RECONCILE_TRANSACTION` on `settlement`. The Kubernetes workload is `pactagent-worker-infrastructure`; run it with `WORKER_QUEUES=webhook,settlement`. `WORKER_CONCURRENCY` is bounded from 1 to 32. A unique active dedupe key prevents concurrent enqueue from creating duplicate reconciliation jobs.
 
 Workers claim jobs atomically with `FOR UPDATE SKIP LOCKED`. Claims record a worker ID and renewable lease. Completion, failure, and lease renewal require the same worker ID, so a process that lost its lease cannot later commit a result.
 
