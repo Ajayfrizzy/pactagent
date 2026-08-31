@@ -270,20 +270,20 @@ export function createInfrastructureAgreement(data: Record<string, unknown>, ide
   return v1Request<any>('/agreements', { method: 'POST', idempotencyKey, body: JSON.stringify(data) });
 }
 
-export function acceptInfrastructureAgreement(id: string) {
-  return v1Request<any>(`/agreements/${id}/accept`, { method: 'POST' });
+export function acceptInfrastructureAgreement(id: string, idempotencyKey: string) {
+  return v1Request<any>(`/agreements/${id}/accept`, { method: 'POST', idempotencyKey, body: '{}' });
 }
 
-export function moveInfrastructureAgreementToFundingRequired(id: string) {
-  return v1Request<any>(`/agreements/${id}/funding-required`, { method: 'POST' });
+export function moveInfrastructureAgreementToFundingRequired(id: string, idempotencyKey: string) {
+  return v1Request<any>(`/agreements/${id}/funding-required`, { method: 'POST', idempotencyKey, body: '{}' });
 }
 
 export function fetchInfrastructureMilestones(limit = 50) {
   return v1ListRequest<any>(withQuery('/milestones', { limit }));
 }
 
-export function createInfrastructureMilestone(agreementId: string, data: Record<string, unknown>) {
-  return v1Request<any>(`/agreements/${agreementId}/milestones`, { method: 'POST', body: JSON.stringify(data) });
+export function createInfrastructureMilestone(agreementId: string, data: Record<string, unknown>, idempotencyKey: string) {
+  return v1Request<any>(`/agreements/${agreementId}/milestones`, { method: 'POST', idempotencyKey, body: JSON.stringify(data) });
 }
 
 export function fetchInfrastructureEscrows(limit = 50) {
@@ -294,9 +294,10 @@ export function createInfrastructureEscrow(data: Record<string, unknown>, idempo
   return v1Request<any>('/escrows', { method: 'POST', idempotencyKey, body: JSON.stringify(data) });
 }
 
-export function markInfrastructureEscrowFunded(id: string, txHash?: string) {
+export function markInfrastructureEscrowFunded(id: string, idempotencyKey: string, txHash?: string) {
   return v1Request<any>(`/escrows/${id}/mark-funded`, {
     method: 'POST',
+    idempotencyKey,
     body: JSON.stringify(txHash ? { txHash } : {}),
   });
 }
@@ -317,8 +318,8 @@ export function createInfrastructureProof(data: Record<string, unknown>, idempot
   return v1Request<any>('/proofs', { method: 'POST', idempotencyKey, body: JSON.stringify(data) });
 }
 
-export function reviewInfrastructureProof(id: string, data: Record<string, unknown>) {
-  return v1Request<any>(`/proofs/${id}/review`, { method: 'POST', body: JSON.stringify(data) });
+export function reviewInfrastructureProof(id: string, data: Record<string, unknown>, idempotencyKey: string) {
+  return v1Request<any>(`/proofs/${id}/review`, { method: 'POST', idempotencyKey, body: JSON.stringify(data) });
 }
 
 export function fetchInfrastructureReviews(limit = 50) {

@@ -8,7 +8,7 @@ The canonical API is `/v1`. The first-party web application is a developer conso
 
 - Apps as the tenant boundary, with operator-managed API keys and scopes
 - Agreements, milestones, proof submissions, proof review decisions, and disputes
-- Mock/manual escrow flows and a rail adapter boundary for CKB
+- Mock/manual escrow flows and a disabled-by-default CKB testnet adapter with durable reconciliation
 - App-scoped transactions, lifecycle events, audit logs, and idempotent mutations
 - HMAC-signed webhooks with durable delivery, retry, and delivery history
 - Operator administration, health/readiness, metrics, tracing, and retention jobs
@@ -20,7 +20,7 @@ The former standalone product, public profiles, reputation, invites, comments, D
 
 | Path | Purpose |
 | --- | --- |
-| `server/` | Express `/v1` API, PostgreSQL persistence, webhook worker, maintenance commands |
+| `server/` | Express `/v1` API, PostgreSQL persistence, webhook and settlement worker, maintenance commands |
 | `web/` | Next.js developer console and operator wallet sign-in |
 | `contracts/` | CKB escrow contract source and deployment artifacts |
 | `docs/` | Architecture decisions and repository-wide operations guidance |
@@ -82,7 +82,7 @@ GET  /v1/auth/me
 
 Integrator endpoints use an app-scoped API key in `x-api-key`. Each key has explicit scopes such as `agreements:create`, `proofs:review`, or `webhooks:manage`. Tenant identity is derived from the key and is never accepted from the request body.
 
-Sensitive create/release/refund operations require an `Idempotency-Key` header. Reusing a key with the same body returns the recorded result; reusing it with a different body is rejected.
+Lifecycle and financial mutations require an `Idempotency-Key` header: agreement create/actions, milestone create, proof submit/review, dispute create/resolve, and escrow create/fund/release/refund. Reusing a key with the same request returns the recorded result; reusing it for a different request returns `409`.
 
 ## API surface
 
@@ -106,16 +106,17 @@ Escrow behavior is selected through the adapter interface under `server/src/modu
 
 - `mock`: deterministic sandbox behavior used by the console and tests
 - `manual`: records externally coordinated funding/release/refund state
-- `ckb`: reserved adapter boundary; it intentionally returns `escrow_adapter_not_ready` in Phase 1
+- `ckb`: testnet transaction construction, local development signing, independent funding verification, release/refund reservation, confirmation tracking, and durable reconciliation
 
-The CKB Rust contract remains in `contracts/`. Full `/v1` CKB transaction construction, signer integration, reconciliation, and concurrency hardening are Phase 2 work. Fiat, USDT, Fiber, and additional chains are not supported rails.
+The CKB rail is disabled unless its node, indexer, deployment, fee, confirmation, network, and signer configuration is complete. Local private-key signing is forbidden in staging, production, and mainnet. The external signer provider is not implemented, so deployed CKB and mainnet enablement fail startup validation. The current readiness classification is documented in [REPORT.md](REPORT.md); it is not a mainnet-readiness claim. Fiat, USDT, Fiber, and additional chains are not supported rails.
 
 ## Database changes
 
-Prisma migrations are forward-only. The Phase 1 cleanup adds two explicit migrations:
+Prisma migrations are forward-only. Phase 2 adds three explicit migrations after the Phase 1 cleanup:
 
-1. Archive retired product tables and records into `legacy_product_archive`, then remove them from the operational schema.
-2. Remove obsolete product columns, app-scope webhook jobs, require canonical webhook tenancy, rename `App.ownerUserId` to `ownerId`, and restore funded-term triggers against the cleaned models.
+1. Normalize lifecycle values and enforce lifecycle, amount, allocation, escrow-scope, and dispute-scope invariants.
+2. Persist CKB commitments and reconciliation state and add the settlement job queue.
+3. Add cross-resource tenant/scope foreign keys and require canonical review ownership.
 
 Run:
 
@@ -153,7 +154,7 @@ The Makefile resolves the local Rust host target while contract builds continue 
 - [Configuration](docs/configuration.md)
 - [Integrator quickstart](server/docs/examples/integrator-quickstart.md)
 - [API lifecycle policy](server/docs/api-lifecycle.md)
-- [Phase 1 implementation report](REPORT.md)
+- [Phase 2 hardening report](REPORT.md)
 
 ## License
 

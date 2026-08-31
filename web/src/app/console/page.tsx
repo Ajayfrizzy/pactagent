@@ -518,7 +518,7 @@ export default function InfrastructureConsolePage() {
           disputeMode: 'app_managed',
           metadata: { source: 'console-workbench' },
         }, createIdempotencyKey('agreement'));
-        await acceptInfrastructureAgreement(agreement.id).catch(() => null);
+        await acceptInfrastructureAgreement(agreement.id, createIdempotencyKey('agreement-accept')).catch(() => null);
         setWorkbench((prev) => ({ ...prev, lastAgreementId: agreement.id }));
       }
 
@@ -530,13 +530,16 @@ export default function InfrastructureConsolePage() {
           amount: workbench.amount,
           currency: 'CKB',
           order: 1,
-        });
+        }, createIdempotencyKey('milestone'));
         setWorkbench((prev) => ({ ...prev, lastMilestoneId: milestone.id }));
       }
 
       if (step === 'fundingRequired') {
         if (!workbench.lastAgreementId) throw new Error('Create an agreement first.');
-        await moveInfrastructureAgreementToFundingRequired(workbench.lastAgreementId);
+        await moveInfrastructureAgreementToFundingRequired(
+          workbench.lastAgreementId,
+          createIdempotencyKey('agreement-funding-required'),
+        );
       }
 
       if (step === 'escrow') {
@@ -554,7 +557,7 @@ export default function InfrastructureConsolePage() {
 
       if (step === 'funded') {
         if (!workbench.lastEscrowId) throw new Error('Create an escrow first.');
-        await markInfrastructureEscrowFunded(workbench.lastEscrowId);
+        await markInfrastructureEscrowFunded(workbench.lastEscrowId, createIdempotencyKey('escrow-funded'));
       }
 
       if (step === 'proof') {
@@ -577,7 +580,7 @@ export default function InfrastructureConsolePage() {
           reviewerExternalId: workbench.clientExternalId,
           decision: step === 'approve' ? 'approved' : 'rejected',
           note: step === 'approve' ? 'Approved from sandbox workbench.' : 'Rejected from sandbox workbench.',
-        });
+        }, createIdempotencyKey(`proof-${step}`));
       }
 
       if (step === 'release') {

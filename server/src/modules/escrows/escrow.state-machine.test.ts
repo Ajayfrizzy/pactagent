@@ -23,3 +23,9 @@ test('escrow state machine rejects release/refund reversals', () => {
     /Escrow cannot transition from refunded to released/,
   );
 });
+
+test('failed remains unresolved and can recover only through verified funding', () => {
+  assert.equal(canTransitionEscrow('failed', 'funded'), true);
+  assert.equal(canTransitionEscrow('failed', 'awaiting_funding'), false);
+  assert.equal(canTransitionEscrow('failed', 'released'), false);
+});

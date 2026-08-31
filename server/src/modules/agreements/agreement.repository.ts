@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../../db';
 import type { CreateAgreementInput } from './agreement.validation';
 import type { TenantContext } from '../../common/tenancy/tenant-context';
+import { assertLifecycleCompareAndSwap } from '../../common/lifecycle/compare-and-swap';
 
 export function createAgreement(tenant: TenantContext, input: CreateAgreementInput, tx: Prisma.TransactionClient) {
   const now = new Date();
@@ -74,24 +75,36 @@ export function findAgreementForApp(tenant: TenantContext, agreementId: string, 
   });
 }
 
-export function updateAgreementStatus(
+export async function transitionAgreementStatus(
   tenant: TenantContext,
   agreementId: string,
-  status: string,
+  expectedStatus: string,
+  nextStatus: string,
   tx: Prisma.TransactionClient,
 ) {
-  return tx.agreement.update({
+  const result = await tx.agreement.updateMany({
     where: {
       id: agreementId,
       appId: tenant.appId,
+      status: expectedStatus,
     },
     data: {
-      status,
-      ...(status === 'funding_required' ? { settlementStatus: 'FUNDING_PENDING' } : {}),
-      ...(status === 'funded' ? { settlementStatus: 'FUNDED', fundingConfirmedAt: new Date() } : {}),
-      ...(status === 'released' ? { settlementStatus: 'PAYOUT_CONFIRMED' } : {}),
-      ...(status === 'refunded' ? { settlementStatus: 'REFUND_CONFIRMED' } : {}),
+      status: nextStatus,
+      ...(nextStatus === 'funding_required' ? { settlementStatus: 'FUNDING_PENDING' } : {}),
+      ...(nextStatus === 'funded' ? { settlementStatus: 'FUNDED', fundingConfirmedAt: new Date() } : {}),
+      ...(nextStatus === 'released' ? { settlementStatus: 'PAYOUT_CONFIRMED' } : {}),
+      ...(nextStatus === 'refunded' ? { settlementStatus: 'REFUND_CONFIRMED' } : {}),
     },
+  });
+  assertLifecycleCompareAndSwap({
+    resource: 'agreement',
+    affectedRows: result.count,
+    expectedStatus,
+    nextStatus,
+  });
+
+  return tx.agreement.findUniqueOrThrow({
+    where: { id_appId: { id: agreementId, appId: tenant.appId } },
     include: {
       milestones: {
         select: {

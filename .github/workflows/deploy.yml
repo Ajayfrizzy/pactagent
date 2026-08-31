@@ -314,7 +314,7 @@ jobs:
 
           for deployment in \
             pactagent-api \
-            pactagent-worker-webhook \
+            pactagent-worker-infrastructure \
             pactagent-web
           do
             kubectl \
@@ -370,7 +370,7 @@ jobs:
         run: |
           for deployment in \
             pactagent-api \
-            pactagent-worker-webhook \
+            pactagent-worker-infrastructure \
             pactagent-web
           do
             kubectl \

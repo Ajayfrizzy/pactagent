@@ -13,4 +13,4 @@ Rounding upward prevents an agreed USD obligation from being underfunded. UI-onl
 
 Every persisted conversion records the price provider and quote timestamp. CoinGecko quotes use the provider's `last_updated_at` when available and otherwise use the fetch timestamp. Historical rows migrated without provenance use `legacy_unknown`; they must not be presented as contemporaneous market quotes.
 
-Split settlements use integer arithmetic. `workerAmount + clientRefundAmount` must equal the milestone amount exactly, with both shares greater than zero. No tolerance or floating-point comparison is permitted.
+Split settlements use integer arithmetic. `workerAmount + clientAmount` must equal the funded escrow amount exactly. Either share may be zero, but neither may be negative or exceed the scope. No tolerance or floating-point comparison is permitted.

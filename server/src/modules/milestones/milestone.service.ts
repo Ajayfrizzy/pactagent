@@ -1,8 +1,12 @@
 import type { Prisma } from '@prisma/client';
 import type { Request } from 'express';
-import { prisma } from '../../db';
-import { parsePositiveIntegerAmount, sumIntegerAmounts } from '../../common/amounts/integer-amount';
-import { invalidRequest, notFound } from '../../common/errors/app-error';
+import { sumIntegerAmounts } from '../../common/amounts/integer-amount';
+import {
+  assertCurrencyMatchesAgreement,
+  assertMilestoneAllocationWithinAgreement,
+} from '../../common/amounts/financial-invariants';
+import { conflict, invalidRequest, notFound } from '../../common/errors/app-error';
+import { isUniqueConstraintError, runIdempotentTransaction } from '../../common/idempotency/idempotency.service';
 import { createInfrastructureAuditLog } from '../audit-logs/audit-log.repository';
 import { findAgreementForApp } from '../agreements/agreement.repository';
 import { createEvent } from '../events/event.repository';
@@ -39,7 +43,18 @@ export async function createMilestoneForAgreement(
   agreementId: string,
   input: CreateMilestoneInput,
 ) {
-  const milestone = await prisma.$transaction(async (tx) => {
+  return runIdempotentTransaction({
+    req,
+    appId,
+    statusCode: 201,
+    responseBody: (result) => ({ data: result, requestId: req.requestId }),
+    run: async (tx) => {
+    const locked = await milestoneRepository.lockAgreementForMilestoneAllocation(
+      tenantContext(appId), agreementId, tx,
+    );
+    if (!locked) {
+      throw notFound('Agreement not found.', 'agreement_not_found');
+    }
     const agreement = await findAgreementForApp(tenantContext(appId), agreementId, tx);
     if (!agreement) {
       throw notFound('Agreement not found.', 'agreement_not_found');
@@ -54,25 +69,33 @@ export async function createMilestoneForAgreement(
 
     const existingMilestones = await milestoneRepository.getMilestoneAmountSumForAgreement(tenantContext(appId), agreementId, tx);
     const existingTotal = sumIntegerAmounts(existingMilestones.map((item) => item.amount));
-    const newAmount = parsePositiveIntegerAmount(input.amount, 'amount');
-    const agreementTotal = parsePositiveIntegerAmount(agreement.amount, 'agreement.totalAmount');
-
-    if (existingTotal + newAmount > agreementTotal) {
-      throw invalidRequest(
-        'The sum of milestone amounts cannot exceed the agreement totalAmount.',
-        'milestone_total_exceeds_agreement',
-      );
-    }
+    assertMilestoneAllocationWithinAgreement({
+      existingTotal,
+      proposedAmount: input.amount,
+      agreementAmount: agreement.amount,
+    });
 
     const lastMilestone = await milestoneRepository.getNextMilestoneOrder(tenantContext(appId), agreementId, tx);
     const order = input.order ?? ((lastMilestone?.sortOrder ?? 0) + 1);
     const currency = input.currency ?? agreement.currency;
+    assertCurrencyMatchesAgreement(currency, agreement.currency);
 
-    const created = await milestoneRepository.createMilestone(tenantContext(appId), agreementId, {
-      ...input,
-      order,
-      currency,
-    }, tx);
+    let created: Awaited<ReturnType<typeof milestoneRepository.createMilestone>>;
+    try {
+      created = await milestoneRepository.createMilestone(tenantContext(appId), agreementId, {
+        ...input,
+        order,
+        currency,
+      }, tx);
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        throw conflict(
+          'A milestone with this externalReferenceId or order already exists for the agreement.',
+          'milestone_already_exists',
+        );
+      }
+      throw error;
+    }
     const serialized = serializeMilestone(created);
 
     await createEvent(tenantContext(appId), {type: MILESTONE_EVENTS.created,
@@ -90,10 +113,9 @@ export async function createMilestoneForAgreement(
       after: serialized,
     });
 
-    return created;
+    return serialized;
+    },
   });
-
-  return serializeMilestone(milestone);
 }
 
 export async function listMilestonesForAgreement(appId: string, agreementId: string, query: MilestoneListQuery) {

@@ -34,7 +34,7 @@ router.post(
   '/challenge',
   authRateLimit,
   validateBody(challengeSchema),
-  asyncHandler(async (req, res) => sendSuccess(res, createChallenge(req.body.address))),
+  asyncHandler(async (req, res) => sendSuccess(res, await createChallenge(req.body.address))),
 );
 
 router.post(

@@ -20,6 +20,7 @@ const environmentSchema = z.object({
   WEBHOOK_EGRESS_PROXY_URL: optionalUrl,
   OTEL_EXPORTER_OTLP_ENDPOINT: optionalUrl,
   CKB_NODE_URL: z.string().url().default('https://testnet.ckb.dev/'),
+  CKB_INDEXER_URL: optionalUrl,
   CKB_NETWORK: z.enum(['testnet', 'mainnet']).default('testnet'),
   DEFAULT_CKB_FEE_RATE: z.string().regex(/^[1-9][0-9]*$/).default('1200'),
   REQUIRE_SETTLEMENT_READY: z.enum(['true', 'false']).optional(),
@@ -163,6 +164,8 @@ function requireStrongSecret(value: string, name: string) {
   }
 }
 
+const ckbRailEnabled = parseBoolean(process.env.CKB_RAIL_ENABLED, false, 'CKB_RAIL_ENABLED');
+
 export const config = {
   nodeEnv: environment.NODE_ENV,
   serviceRole: environment.SERVICE_ROLE,
@@ -172,19 +175,32 @@ export const config = {
   allowLocalhostCors: !isProduction(),
 
   ckbNodeUrl: environment.CKB_NODE_URL,
+  ckbIndexerUrl: environment.CKB_INDEXER_URL || '',
   ckbNetwork: environment.CKB_NETWORK,
   defaultCkbFeeRate: environment.DEFAULT_CKB_FEE_RATE,
+  ckbRailEnabled,
+  ckbMainnetEnabled: parseBoolean(process.env.CKB_MAINNET_ENABLED, false, 'CKB_MAINNET_ENABLED'),
+  ckbContractCodeHash: process.env.CKB_CONTRACT_CODE_HASH || '',
+  ckbContractHashType: process.env.CKB_CONTRACT_HASH_TYPE || '',
+  ckbContractDeploymentTxHash: process.env.CKB_CONTRACT_DEPLOYMENT_TX_HASH || '',
+  ckbContractOutputIndex: parseNonNegativeNumber(process.env.CKB_CONTRACT_OUTPUT_INDEX, 0),
+  ckbContractDepType: process.env.CKB_CONTRACT_DEP_TYPE || 'code',
+  ckbConfirmations: parseBoundedNumber(process.env.CKB_CONFIRMATIONS, 4, 'CKB_CONFIRMATIONS', 1, 10_000),
+  ckbStaleTransactionMs: parseBoundedNumber(process.env.CKB_STALE_TRANSACTION_MS, 15 * 60_000, 'CKB_STALE_TRANSACTION_MS', 60_000, 24 * 60 * 60_000),
+  ckbReconciliationPollMs: parseBoundedNumber(process.env.CKB_RECONCILIATION_POLL_MS, 15_000, 'CKB_RECONCILIATION_POLL_MS', 5_000, 5 * 60_000),
+  ckbSignerMode: process.env.CKB_SIGNER_MODE || 'disabled',
+  ckbSignerPrivateKey: secretValue('CKB_SIGNER_PRIVATE_KEY'),
 
   agentIntervalMs: parseNumber(process.env.AGENT_INTERVAL_MS, 2000),
   shutdownTimeoutMs: parseBoundedNumber(process.env.SHUTDOWN_TIMEOUT_MS, 30_000, 'SHUTDOWN_TIMEOUT_MS', 5_000, 120_000),
   workerHeartbeatStaleMs: parseBoundedNumber(process.env.WORKER_HEARTBEAT_STALE_MS, 30_000, 'WORKER_HEARTBEAT_STALE_MS', 5_000, 10 * 60_000),
   workerId: process.env.WORKER_ID || '',
-  workerQueues: parseCsv(process.env.WORKER_QUEUES || 'webhook'),
+  workerQueues: parseCsv(process.env.WORKER_QUEUES || 'webhook,settlement'),
   workerConcurrency: parseBoundedNumber(process.env.WORKER_CONCURRENCY, 4, 'WORKER_CONCURRENCY', 1, 32),
   jobLeaseMs: parseBoundedNumber(process.env.JOB_LEASE_MS, 60_000, 'JOB_LEASE_MS', 10_000, 15 * 60_000),
   jobTimeoutMs: parseBoundedNumber(process.env.JOB_TIMEOUT_MS, 5 * 60_000, 'JOB_TIMEOUT_MS', 5_000, 30 * 60_000),
   requireWorkerReady: parseBoolean(process.env.REQUIRE_WORKER_READY, isDeployedEnvironment(), 'REQUIRE_WORKER_READY'),
-  requireSettlementReady: parseBoolean(process.env.REQUIRE_SETTLEMENT_READY, isProduction(), 'REQUIRE_SETTLEMENT_READY'),
+  requireSettlementReady: parseBoolean(process.env.REQUIRE_SETTLEMENT_READY, ckbRailEnabled && isDeployedEnvironment(), 'REQUIRE_SETTLEMENT_READY'),
   metricsBearerToken: secretValue('METRICS_BEARER_TOKEN'),
   buildVersion: process.env.BUILD_VERSION || 'development',
   buildCommit: process.env.BUILD_COMMIT || 'unknown',
@@ -192,7 +208,7 @@ export const config = {
   authJwtSecret: secretValue('AUTH_JWT_SECRET'),
   authJwtActiveKid: process.env.AUTH_JWT_ACTIVE_KID || 'legacy',
   authJwtKeys: parseSecretKeyring('AUTH_JWT_KEYRING'),
-  authTokenTtlSecs: parseNumber(process.env.AUTH_TOKEN_TTL_SECS, 604800),
+  authTokenTtlSecs: parseNumber(process.env.AUTH_TOKEN_TTL_SECS, 3_600),
   authChallengeTtlSecs: parseNumber(process.env.AUTH_CHALLENGE_TTL_SECS, 600),
   webhookSecretEncryptionKey: secretValue('WEBHOOK_SECRET_ENCRYPTION_KEY'),
   webhookActiveKeyId: process.env.WEBHOOK_ACTIVE_KEY_ID || 'legacy',
@@ -241,21 +257,28 @@ export function requireConfig(value: string, name: string) {
 }
 
 export function validateProductionConfig() {
+  validateCkbRailConfig();
   if (!isDeployedEnvironment()) {
     return;
+  }
+  if (config.ckbRailEnabled && !config.requireSettlementReady) {
+    throw new Error('REQUIRE_SETTLEMENT_READY=true is required when the CKB rail is enabled in a deployed environment.');
+  }
+  if (config.authTokenTtlSecs > 86_400) {
+    throw new Error('AUTH_TOKEN_TTL_SECS must not exceed 86400 in staging or production.');
   }
 
   requireConfig(process.env.DATABASE_URL || '', 'DATABASE_URL');
   requireConfig(process.env.DIRECT_URL || '', 'DIRECT_URL');
   assertDistinctDatabaseEndpoints(process.env.DATABASE_URL!, process.env.DIRECT_URL!);
   if (config.serviceRole === 'api' && !config.redisUrl) {
-    throw new Error('REDIS_URL or REDIS_URL_FILE is required in staging and production for distributed rate limiting.');
+    throw new Error('REDIS_URL or REDIS_URL_FILE is required in staging and production for distributed rate limiting and auth challenges.');
   }
   assertControlledEgressProxy(config.webhookEgressProxyUrl);
   if (config.serviceRole === 'worker') {
-    const invalidQueues = config.workerQueues.filter((queue) => queue !== 'webhook');
+    const invalidQueues = config.workerQueues.filter((queue) => !['webhook', 'settlement'].includes(queue));
     if (config.workerQueues.length === 0 || invalidQueues.length > 0) {
-      throw new Error(`WORKER_QUEUES must contain webhook. Invalid values: ${invalidQueues.join(', ')}`);
+      throw new Error(`WORKER_QUEUES must contain only webhook and settlement. Invalid values: ${invalidQueues.join(', ')}`);
     }
     if (config.jobTimeoutMs >= config.jobLeaseMs * 30) {
       throw new Error('JOB_TIMEOUT_MS must be less than 30 lease periods.');
@@ -282,4 +305,40 @@ export function validateProductionConfig() {
     throw new Error('Staging and production CORS origins cannot include wildcards, localhost, or invalid URLs.');
   }
 
+}
+
+const HEX_32 = /^0x[0-9a-fA-F]{64}$/;
+
+export function validateCkbRailConfig() {
+  if (!config.ckbRailEnabled) return;
+
+  requireConfig(config.ckbNodeUrl, 'CKB_NODE_URL');
+  requireConfig(config.ckbIndexerUrl, 'CKB_INDEXER_URL');
+  if (!HEX_32.test(config.ckbContractCodeHash)) throw new Error('CKB_CONTRACT_CODE_HASH must be a 32-byte hex value.');
+  if (!['data', 'type', 'data1', 'data2'].includes(config.ckbContractHashType)) {
+    throw new Error('CKB_CONTRACT_HASH_TYPE must be data, type, data1, or data2.');
+  }
+  if (!HEX_32.test(config.ckbContractDeploymentTxHash)) {
+    throw new Error('CKB_CONTRACT_DEPLOYMENT_TX_HASH must be a 32-byte hex value.');
+  }
+  if (!['code', 'depGroup'].includes(config.ckbContractDepType)) {
+    throw new Error('CKB_CONTRACT_DEP_TYPE must be code or depGroup.');
+  }
+  if (!['local_dev', 'external'].includes(config.ckbSignerMode)) {
+    throw new Error('CKB_SIGNER_MODE must be local_dev or external when the CKB rail is enabled.');
+  }
+  if (config.ckbSignerMode === 'local_dev' && !/^0x[0-9a-fA-F]{64}$/.test(config.ckbSignerPrivateKey)) {
+    throw new Error('CKB_SIGNER_PRIVATE_KEY must be a 32-byte hex value for local_dev signing.');
+  }
+  if (config.ckbNetwork === 'mainnet') {
+    if (!config.ckbMainnetEnabled) throw new Error('CKB_MAINNET_ENABLED=true is required for mainnet.');
+    if (config.ckbSignerMode !== 'external') throw new Error('Mainnet requires an external signer provider.');
+    throw new Error('The external mainnet signer provider is not installed; mainnet cannot be enabled.');
+  }
+  if (config.ckbSignerMode === 'external') {
+    throw new Error('The external CKB signer provider is not installed; the CKB rail cannot be enabled with CKB_SIGNER_MODE=external.');
+  }
+  if (isDeployedEnvironment() && config.ckbSignerMode === 'local_dev') {
+    throw new Error('Local CKB private-key signing is forbidden in staging and production.');
+  }
 }

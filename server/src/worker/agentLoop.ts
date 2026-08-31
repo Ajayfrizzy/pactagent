@@ -5,8 +5,13 @@ import { runWithJobDeadline } from '../common/runtime/job-deadline';
 import { config } from '../config';
 import { deliverWebhookDelivery } from '../modules/webhooks/webhook.service';
 import {
+  refreshCkbReconciliationMetrics,
+  runCkbReconciliationWorker,
+} from '../workers/ckb-reconciliation.worker';
+import {
   claimAvailableJobs,
   completeJob,
+  deferJob,
   failJob,
   parseJobPayload,
   releaseStaleLocks,
@@ -24,16 +29,28 @@ async function processJob(job: {
 }, signal: AbortSignal) {
   signal.throwIfAborted();
 
+  const payload = parseJobPayload(job.payloadJson);
+  if (job.kind === 'CKB_RECONCILE_TRANSACTION') {
+    if (!payload.transactionId) {
+      throw new Error('CKB reconciliation job is missing transactionId.');
+    }
+    const result = await runCkbReconciliationWorker(payload.transactionId);
+    if (!result.complete) {
+      return { deferMs: config.ckbReconciliationPollMs };
+    }
+    return null;
+  }
   if (job.kind !== 'DELIVER_WEBHOOK') {
     throw new Error(`Unsupported infrastructure job kind: ${job.kind}`);
   }
 
-  const { deliveryId } = parseJobPayload(job.payloadJson);
+  const { deliveryId } = payload;
   if (!deliveryId) {
     throw new Error('Webhook delivery job is missing deliveryId.');
   }
 
   await deliverWebhookDelivery(deliveryId);
+  return null;
 }
 
 async function executeClaimedJob(
@@ -53,16 +70,21 @@ async function executeClaimedJob(
   }, Math.max(1_000, Math.floor(config.jobLeaseMs / 3)));
 
   try {
-    await runWithJobDeadline(config.jobTimeoutMs, async (deadlineSignal) => {
+    const result = await runWithJobDeadline(config.jobTimeoutMs, async (deadlineSignal) => {
       const abortFromDeadline = () => abortController.abort(deadlineSignal.reason);
       deadlineSignal.addEventListener('abort', abortFromDeadline, { once: true });
       try {
-        await processJob(job, abortController.signal);
+        return await processJob(job, abortController.signal);
       } finally {
         deadlineSignal.removeEventListener('abort', abortFromDeadline);
       }
     });
-    await completeJob(job.id, workerId);
+    if (result?.deferMs) {
+      outcome = 'deferred';
+      await deferJob(job.id, workerId, result.deferMs);
+    } else {
+      await completeJob(job.id, workerId);
+    }
   } catch (error) {
     outcome = 'failure';
     const message = error instanceof Error ? error.message : 'Unknown job failure';
@@ -107,6 +129,7 @@ export async function runAgentCycle(options: {
       lastIdempotencyCleanupAt = Date.now();
     }
     await releaseStaleLocks(config.jobLeaseMs);
+    if (queues.includes('settlement')) await refreshCkbReconciliationMetrics();
     const jobs = await claimAvailableJobs(workerId, queues, concurrency, config.jobLeaseMs);
     await Promise.all(jobs.map((job) => executeClaimedJob(job, workerId)));
     return true;

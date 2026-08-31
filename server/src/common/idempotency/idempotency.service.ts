@@ -3,6 +3,7 @@ import type { Request } from 'express';
 import { config } from '../../config';
 import { prisma } from '../../db';
 import { conflict, invalidRequest } from '../errors/app-error';
+import { idempotencyConflicts } from '../observability/metrics';
 import { createRequestHash } from './request-hash';
 import {
   completeIdempotencyKey,
@@ -60,6 +61,7 @@ export async function getIdempotencyReplay<T>(req: Request, appId: string): Prom
   }
 
   if (existing.requestHash !== requestHash) {
+    idempotencyConflicts.inc({ reason: 'request_mismatch' });
     throw conflict(
       'Idempotency key was already used with a different request body.',
       'idempotency_key_conflict',
@@ -67,6 +69,7 @@ export async function getIdempotencyReplay<T>(req: Request, appId: string): Prom
   }
 
   if (existing.status !== 'completed' || existing.responseStatus === null || existing.responseBodyJson === null) {
+    idempotencyConflicts.inc({ reason: 'in_progress' });
     throw conflict(
       'Idempotency key is already processing. Retry the same request after the first request completes.',
       'idempotency_key_in_progress',

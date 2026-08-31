@@ -79,7 +79,7 @@ model Agreement {
   metadataJson        String?
   settlementStatus    String    @default("UNFUNDED") // SettlementStatus enum
   fundingConfirmedAt  DateTime?
-  status              String    @default("DRAFT") // AgreementStatus enum
+  status              String    @default("draft") // infrastructure agreement lifecycle
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
@@ -169,9 +169,9 @@ model Milestone {
   title               String
   description         String
   amount              String
-  currency            String?
+  currency            String
   sortOrder           Int
-  status              String    @default("PENDING")
+  status              String    @default("pending")
   dueDate             DateTime?
   reviewStartedAt     DateTime?
   reviewDeadlineAt    DateTime?
@@ -190,6 +190,7 @@ model Milestone {
   @@unique([appId, externalReferenceId])
   @@unique([agreementId, sortOrder])
   @@unique([id, appId])
+  @@unique([id, agreementId, appId])
   @@index([appId, createdAt])
   @@index([agreementId, status])
   @@index([status, reviewDeadlineAt])
@@ -216,6 +217,7 @@ model Event {
   webhookDeliveries WebhookDelivery[]
 
   @@unique([id, appId])
+  @@unique([id, agreementId, milestoneId, appId])
   @@index([appId, createdAt])
   @@index([appId, type, createdAt])
   @@index([agreementId, createdAt])
@@ -223,21 +225,30 @@ model Event {
 }
 
 model Escrow {
-  id            String   @id @default(uuid())
-  appId         String
-  agreementId   String
-  milestoneId   String?
-  amount        String
-  currency      String
-  rail          String   @default("mock") // mock | manual | ckb
-  network       String   @default("sandbox") // sandbox | testnet | mainnet
-  status        String   @default("not_created")
-  lockAddress   String?
-  lockTxHash    String?
-  releaseTxHash String?
-  refundTxHash  String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  // Active-scope uniqueness is enforced by Phase 2 partial indexes. `failed`
+  // remains active because its settlement outcome is unresolved until reconciliation.
+  id                   String   @id @default(uuid())
+  appId                String
+  agreementId          String
+  milestoneId          String?
+  amount               String
+  currency             String
+  rail                 String   @default("mock") // mock | manual | ckb
+  network              String   @default("sandbox") // sandbox | testnet | mainnet
+  status               String   @default("not_created")
+  lockAddress          String?
+  lockTxHash           String?
+  lockOutputIndex      Int?
+  lockScriptJson       String?
+  clientLockScriptJson String?
+  workerLockScriptJson String?
+  cellData             String?
+  contractVersion      Int?
+  refundTimeoutSince   String?
+  releaseTxHash        String?
+  refundTxHash         String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   app          App           @relation(fields: [appId], references: [id])
   agreement    Agreement     @relation(fields: [agreementId, appId], references: [id, appId], onDelete: Restrict)
@@ -253,21 +264,29 @@ model Escrow {
 }
 
 model Transaction {
-  id             String   @id @default(uuid())
-  appId          String
-  agreementId    String?
-  milestoneId    String?
-  escrowId       String?
-  type           String // lock | release | refund | manual_adjustment
-  rail           String // mock | manual | ckb
-  network        String // sandbox | testnet | mainnet
-  status         String   @default("pending") // pending | confirmed | failed
-  txHash         String?
-  amount         String
-  currency       String
-  rawPayloadJson String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                  String    @id @default(uuid())
+  appId               String
+  agreementId         String?
+  milestoneId         String?
+  escrowId            String?
+  type                String // lock | release | refund | manual_adjustment
+  rail                String // mock | manual | ckb
+  network             String // sandbox | testnet | mainnet
+  status              String    @default("pending") // pending | confirmed | failed
+  operationId         String?
+  txHash              String?
+  blockHash           String?
+  blockNumber         String?
+  confirmations       Int       @default(0)
+  lastCheckedAt       DateTime?
+  broadcastAt         DateTime?
+  confirmedAt         DateTime?
+  reconciliationError String?
+  amount              String
+  currency            String
+  rawPayloadJson      String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   app       App        @relation(fields: [appId], references: [id])
   agreement Agreement? @relation(fields: [agreementId, appId], references: [id, appId], onDelete: Restrict)
@@ -275,6 +294,7 @@ model Transaction {
   escrow    Escrow?    @relation(fields: [escrowId, appId], references: [id, appId], onDelete: Restrict)
 
   @@unique([id, appId])
+  @@unique([appId, operationId])
   @@unique([rail, network, type, txHash, escrowId])
   @@index([appId, createdAt])
   @@index([escrowId, type, createdAt])
@@ -310,7 +330,7 @@ model Proof {
   agreementId           String
   milestoneId           String
   submittedByExternalId String?
-  proofType             String // URL | TEXT | FILE_HASH
+  proofType             String // text | url | file | github | mixed
   content               String
   contentHash           String
   linksJson             String?
@@ -336,17 +356,17 @@ model Review {
   id                 String   @id @default(uuid())
   appId              String
   agreementId        String
-  milestoneId        String?
+  milestoneId        String
   proofSubmissionId  String
   reviewerExternalId String
   decision           String // approved | rejected | needs_changes
   note               String?
   createdAt          DateTime @default(now())
 
-  app       App        @relation(fields: [appId], references: [id])
-  agreement Agreement  @relation(fields: [agreementId, appId], references: [id, appId], onDelete: Restrict)
-  milestone Milestone? @relation(fields: [milestoneId, appId], references: [id, appId], onDelete: Restrict)
-  proof     Proof      @relation(fields: [proofSubmissionId, appId], references: [id, appId], onDelete: Restrict)
+  app       App       @relation(fields: [appId], references: [id])
+  agreement Agreement @relation(fields: [agreementId, appId], references: [id, appId], onDelete: Restrict)
+  milestone Milestone @relation(fields: [milestoneId, appId], references: [id, appId], onDelete: Restrict)
+  proof     Proof     @relation(fields: [proofSubmissionId, appId], references: [id, appId], onDelete: Restrict)
 
   @@unique([id, appId])
   @@index([appId, createdAt])
@@ -355,6 +375,7 @@ model Review {
 }
 
 model Dispute {
+  // One unresolved dispute per milestone settlement scope is enforced by a partial index.
   id                 String    @id @default(uuid())
   appId              String
   agreementId        String

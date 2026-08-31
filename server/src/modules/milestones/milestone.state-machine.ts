@@ -12,6 +12,8 @@ export const MILESTONE_STATUSES = [
   'rejected',
   'disputed',
   'refunded',
+  'cancelled',
+  'expired',
 ] as const;
 
 export type InfrastructureMilestoneStatus = (typeof MILESTONE_STATUSES)[number];
@@ -28,6 +30,8 @@ const VALID_TRANSITIONS: Record<InfrastructureMilestoneStatus, InfrastructureMil
   rejected: ['in_progress'],
   disputed: ['approved', 'released', 'refunded'],
   refunded: [],
+  cancelled: [],
+  expired: [],
 };
 
 export function isMilestoneStatus(status: string): status is InfrastructureMilestoneStatus {

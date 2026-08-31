@@ -8,7 +8,7 @@ import { createAgreementForApp, getAgreementForApp } from './agreements/agreemen
 import { releaseEscrow, refundEscrow } from './escrows/escrow.service';
 import { assertWebhookUrlAllowed, fetchWebhookUrl, resetWebhookSecurityTestHooks, setWebhookSecurityTestHooks } from './webhooks/webhook.security';
 import { createInfrastructureAuditLog } from './audit-logs/audit-log.repository';
-import { claimAvailableJobs, completeJob, enqueueJob, releaseStaleLocks, renewJobLease } from '../services/jobQueueService';
+import { claimAvailableJobs, completeJob, deferJob, enqueueJob, releaseStaleLocks, renewJobLease } from '../services/jobQueueService';
 import { getAppEvent, listAppEvents } from './events/event.service';
 import { listAppTransactions } from './transactions/transaction.service';
 import http from 'node:http';
@@ -17,6 +17,8 @@ import { getApiKeyPrefix, hashApiKey } from '../common/crypto/api-keys';
 import { config } from '../config';
 import {
   createWebhookEndpointForApp,
+  deliverWebhookDelivery,
+  retryWebhookDeliveryForApp,
   updateWebhookEndpointForApp,
 } from './webhooks/webhook.service';
 
@@ -317,7 +319,7 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
     const proof = await prisma.proof.create({
       data: {
         id: randomUUID(), appId: appB.id, agreementId: agreement.id, milestoneId: milestone.id,
-        proofType: 'TEXT', content: 'proof', contentHash: randomUUID(),
+        proofType: 'text', content: 'proof', contentHash: randomUUID(),
       },
     });
     const escrow = await prisma.escrow.create({
@@ -336,7 +338,7 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
     const invalidWrites = [
       () => prisma.proof.create({ data: {
         id: randomUUID(), appId: appA.id, agreementId: agreement.id, milestoneId: milestone.id,
-        proofType: 'TEXT', content: 'invalid', contentHash: randomUUID(),
+        proofType: 'text', content: 'invalid', contentHash: randomUUID(),
       } }),
       () => prisma.review.create({ data: {
         id: randomUUID(), appId: appA.id, agreementId: agreement.id, milestoneId: milestone.id,
@@ -387,7 +389,7 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
     } });
     const proof = await prisma.proof.create({ data: {
       id: randomUUID(), appId: appB.id, agreementId: agreement.id, milestoneId: milestone.id,
-      proofType: 'TEXT', content: 'private', contentHash: randomUUID(),
+      proofType: 'text', content: 'private', contentHash: randomUUID(),
     } });
     const escrow = await prisma.escrow.create({ data: {
       id: randomUUID(), appId: appB.id, agreementId: agreement.id, milestoneId: milestone.id,
@@ -506,6 +508,28 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
     assert.match(recovered.lastError ?? '', /Recovered stale worker lock/);
   });
 
+  test('concurrent reconciliation enqueues with one dedupe key create one settlement job', async () => {
+    const app = await createIntegrationApp('Reconciliation Dedupe App');
+    const agreement = await seedAgreement(app.id);
+    const transactionId = randomUUID();
+    const dedupeKey = `ckb-reconcile:${transactionId}`;
+    const jobs = await Promise.all(Array.from({ length: 8 }, () => enqueueJob({
+      appId: app.id,
+      agreementId: agreement.id,
+      kind: 'CKB_RECONCILE_TRANSACTION',
+      payload: { transactionId },
+      dedupeKey,
+    })));
+
+    assert.equal(new Set(jobs.map((job) => job.id)).size, 1);
+    assert.equal(jobs[0].queue, 'settlement');
+    assert.equal(await prisma.agentJob.count({ where: { appId: app.id, dedupeKey } }), 1);
+    await prisma.agentJob.update({
+      where: { id: jobs[0].id },
+      data: { status: 'COMPLETED', dedupeKey: null, completedAt: new Date() },
+    });
+  });
+
   test('atomic SKIP LOCKED claims partition jobs across concurrent workers', async () => {
     const app = await createIntegrationApp('Concurrent Claim App');
     const agreement = await seedAgreement(app.id);
@@ -550,6 +574,103 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
     assert.equal(completed.leaseExpiresAt, null);
   });
 
+  test('only the lease owner can defer a healthy pending reconciliation job', async () => {
+    const app = await createIntegrationApp('Deferred Reconciliation App');
+    const agreement = await seedAgreement(app.id);
+    const queued = await enqueueJob({
+      appId: app.id,
+      agreementId: agreement.id,
+      kind: 'CKB_RECONCILE_TRANSACTION',
+      payload: { transactionId: randomUUID() },
+      dedupeKey: randomUUID(),
+      availableAt: new Date(0),
+    });
+    const [claimed] = await claimAvailableJobs('settlement-owner', ['settlement'], 1, 60_000);
+    assert.equal(claimed.id, queued.id);
+    await assert.rejects(() => deferJob(claimed.id, 'other-worker', 5_000));
+    await deferJob(claimed.id, 'settlement-owner', 5_000);
+    const deferred = await prisma.agentJob.findUniqueOrThrow({ where: { id: claimed.id } });
+    assert.equal(deferred.status, 'RETRY');
+    assert.equal(deferred.lastError, null);
+    assert.equal(deferred.lockedBy, null);
+    assert.ok(deferred.availableAt > new Date());
+  });
+
+  test('duplicate webhook execution records one result and one failure event', async () => {
+    const app = await createIntegrationApp('Webhook Execution CAS App');
+    const endpoint = await prisma.webhookEndpoint.create({
+      data: {
+        id: randomUUID(),
+        appId: app.id,
+        url: 'https://example.com/inactive-hook',
+        subscribedEvents: [],
+        status: 'disabled',
+      },
+    });
+    const delivery = await prisma.webhookDelivery.create({
+      data: {
+        id: randomUUID(),
+        appId: app.id,
+        endpointId: endpoint.id,
+        eventType: 'agreement.created',
+        payloadJson: '{}',
+        payloadHash: randomUUID(),
+      },
+    });
+
+    const [first, second] = await Promise.all([
+      deliverWebhookDelivery(delivery.id),
+      deliverWebhookDelivery(delivery.id),
+    ]);
+    assert.equal(first.status, 'failed');
+    assert.equal(second.status, 'failed');
+
+    const persisted = await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: delivery.id } });
+    assert.equal(persisted.status, 'FAILED');
+    assert.equal(persisted.attempts, 1);
+    assert.equal(await prisma.event.count({
+      where: { appId: app.id, type: 'webhook.delivery_failed' },
+    }), 1);
+  });
+
+  test('concurrent manual webhook retry creates one audit row and one job', async () => {
+    const app = await createIntegrationApp('Webhook Retry Transaction App');
+    const endpoint = await prisma.webhookEndpoint.create({
+      data: {
+        id: randomUUID(),
+        appId: app.id,
+        url: 'https://example.com/retry-hook',
+        subscribedEvents: [],
+        status: 'disabled',
+      },
+    });
+    const delivery = await prisma.webhookDelivery.create({
+      data: {
+        id: randomUUID(),
+        appId: app.id,
+        endpointId: endpoint.id,
+        eventType: 'agreement.created',
+        payloadJson: '{}',
+        payloadHash: randomUUID(),
+        status: 'FAILED',
+        attempts: 1,
+      },
+    });
+
+    const results = await Promise.allSettled([
+      retryWebhookDeliveryForApp(requestStub({ appId: app.id }), app.id, delivery.id),
+      retryWebhookDeliveryForApp(requestStub({ appId: app.id }), app.id, delivery.id),
+    ]);
+    assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+    assert.equal(results.filter((result) => result.status === 'rejected').length, 1);
+    assert.equal(await prisma.auditLog.count({
+      where: { appId: app.id, action: 'webhook_delivery.retried', targetId: delivery.id },
+    }), 1);
+    assert.equal(await prisma.agentJob.count({
+      where: { appId: app.id, kind: 'DELIVER_WEBHOOK', status: 'QUEUED' },
+    }), 1);
+  });
+
   test('audit ledger hashes new rows and rejects mutation', async () => {
     const app = await createIntegrationApp('Immutable Audit App');
     const row = await createInfrastructureAuditLog({
@@ -592,7 +713,7 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
 
     const transactionData = {
       appId: app.id, agreementId: agreement.id, milestoneId: milestone.id, escrowId: escrow.id,
-      type: 'release', rail: 'ckb', network: 'testnet', status: 'confirmed',
+      type: 'release', rail: 'mock', network: 'sandbox', status: 'confirmed',
       txHash: `0x${'1'.repeat(64)}`, amount: '1000', currency: 'CKB',
     };
     await prisma.transaction.create({ data: { id: randomUUID(), ...transactionData } });
@@ -654,6 +775,34 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
       },
     });
     assert.equal(agreements.length, 1);
+  });
+
+  test('an idempotency key cannot be reused for a different request', async () => {
+    const app = await createIntegrationApp('Idempotency Mismatch App');
+    const key = `idem-mismatch-${randomUUID()}`;
+    const body = {
+      title: 'Original agreement',
+      description: 'Original body',
+      clientExternalId: 'client_1',
+      workerExternalId: 'worker_1',
+      totalAmount: '2500',
+      currency: 'CKB',
+      releaseMode: 'milestone' as const,
+      disputeMode: 'app_managed' as const,
+      metadata: {},
+    };
+    await createAgreementForApp(requestStub({ appId: app.id, body, idempotencyKey: key }), app.id, body);
+
+    const changed = { ...body, title: 'Changed agreement' };
+    await assert.rejects(
+      () => createAgreementForApp(
+        requestStub({ appId: app.id, body: changed, idempotencyKey: key }),
+        app.id,
+        changed,
+      ),
+      (error) => error instanceof AppError && error.code === 'idempotency_key_conflict',
+    );
+    assert.equal(await prisma.agreement.count({ where: { appId: app.id } }), 1);
   });
 
   test('webhook SSRF protection rejects redirect targets that resolve private', async () => {
@@ -824,6 +973,12 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
     });
     assert.equal(releaseTransactions.length, 1);
     assert.equal(releaseTransactions[0].status, 'confirmed');
+    assert.equal(await prisma.event.count({
+      where: { appId: app.id, escrowId: escrow.id, type: 'escrow.released' },
+    }), 1);
+    assert.equal(await prisma.auditLog.count({
+      where: { appId: app.id, targetId: escrow.id, action: 'escrow.released' },
+    }), 1);
   });
 
   test('concurrent release with different idempotency keys only reserves one adapter operation', async () => {
@@ -892,17 +1047,37 @@ describe('real database infrastructure safety', skipUnlessEnabled(), () => {
 
   test('adapter failure is recorded outside the reservation transaction', async () => {
     const app = await createIntegrationApp('Release Failure App');
-    const agreement = await seedAgreement(app.id, { status: 'approved', amount: '1000' });
+    const agreement = await seedAgreement(app.id, { status: 'draft', amount: '1000' });
+    const milestone = await prisma.milestone.create({ data: {
+      id: randomUUID(), appId: app.id, agreementId: agreement.id,
+      title: 'Release failure milestone', description: '', amount: '1000', currency: 'CKB', sortOrder: 1,
+      status: 'approved',
+    } });
+    await prisma.agreement.update({
+      where: { id: agreement.id },
+      data: { status: 'approved', settlementStatus: 'FUNDED', fundingConfirmedAt: new Date() },
+    });
+    const clientLockScript = { codeHash: `0x${'2'.repeat(64)}`, hashType: 'type', args: '0x01' };
+    const workerLockScript = { codeHash: `0x${'3'.repeat(64)}`, hashType: 'type', args: '0x02' };
     const escrow = await prisma.escrow.create({
       data: {
         id: randomUUID(),
         appId: app.id,
         agreementId: agreement.id,
+        milestoneId: milestone.id,
         amount: '1000',
         currency: 'CKB',
         rail: 'ckb',
         network: 'testnet',
         status: 'funded',
+        lockTxHash: `0x${'1'.repeat(64)}`,
+        lockOutputIndex: 0,
+        lockScriptJson: JSON.stringify({ codeHash: `0x${'4'.repeat(64)}`, hashType: 'type', args: `0x${'5'.repeat(192)}` }),
+        clientLockScriptJson: JSON.stringify(clientLockScript),
+        workerLockScriptJson: JSON.stringify(workerLockScript),
+        cellData: `0x${'0'.repeat(176)}`,
+        contractVersion: 1,
+        refundTimeoutSince: '1',
       },
     });
 

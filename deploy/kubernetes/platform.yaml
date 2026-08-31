@@ -11,7 +11,8 @@ metadata:
 data:
   NODE_ENV: production
   REQUIRE_WORKER_READY: "true"
-  REQUIRE_SETTLEMENT_READY: "true"
+  REQUIRE_SETTLEMENT_READY: "false"
+  WORKER_QUEUES: "webhook,settlement"
   RATE_LIMIT_FAIL_CLOSED: "true"
   WORKER_CONCURRENCY: "4"
   JOB_LEASE_MS: "60000"

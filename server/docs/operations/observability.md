@@ -39,6 +39,17 @@ Important series include:
 - `pactagent_job_lease_renewals_total`
 - `pactagent_job_retries_total`
 - `pactagent_provider_request_duration_seconds`
+- `pactagent_lifecycle_transition_conflicts_total`
+- `pactagent_idempotency_conflicts_total`
+- `pactagent_financial_invariant_rejections_total`
+- `pactagent_active_scope_conflicts_total`
+- `pactagent_auth_challenge_failures_total`
+- `pactagent_ckb_rpc_duration_seconds`
+- `pactagent_ckb_rpc_errors_total`
+- `pactagent_ckb_broadcast_failures_total`
+- `pactagent_ckb_reconciliation_backlog`
+- `pactagent_ckb_stale_transactions`
+- `pactagent_ckb_reorgs_total`
 
 Recommended initial alerts:
 
@@ -48,6 +59,7 @@ Recommended initial alerts:
 - HTTP 5xx ratio exceeds 2% for ten minutes.
 - P95 HTTP latency exceeds the service objective for ten minutes.
 - Process restarts or readiness failures repeat during a deployment.
+- CKB reconciliation-required/reorg counts are nonzero or pending transactions exceed `CKB_STALE_TRANSACTION_MS`.
 
 ## Logs and build identity
 
@@ -67,7 +79,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=https://otel-collector.internal
 OTEL_EXPORTER_OTLP_HEADERS_FILE=/run/secrets/otel-headers
 ```
 
-Use a distinct `OTEL_SERVICE_NAME` for the worker. Request logs include the active trace and span IDs. Place the collector on a private network and apply sampling/retention controls there.
+Use `OTEL_SERVICE_NAME=pactagent-worker-infrastructure` for the combined webhook and settlement worker. Request logs include the active trace and span IDs. Place the collector on a private network and apply sampling/retention controls there.
 
 The version-controlled collector configuration is `observability/otel-collector.yaml`. It receives OTLP traces, scrapes API and worker metrics, applies memory limiting, resource enrichment and batching, exposes metrics for Prometheus, and forwards traces to the configured OTLP backend.
 
@@ -75,4 +87,4 @@ Set `SERVICE_ROLE=api` on API replicas and `SERVICE_ROLE=worker` on workers. Pro
 
 ## Financial precision
 
-Agreement, milestone, escrow, dispute-split, and transaction amounts are positive integer strings. CKB values are denominated in shannon. API consumers must use integer arithmetic and must not convert settlement amounts through binary floating point.
+Agreement, milestone, escrow, and transaction amounts are positive integer strings. Dispute split shares are non-negative integer strings whose sum must equal the funded scope. CKB values are denominated in shannon. API consumers must use integer arithmetic and must not convert settlement amounts through binary floating point.

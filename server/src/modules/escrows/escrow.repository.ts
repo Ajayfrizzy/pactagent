@@ -14,6 +14,9 @@ export function createEscrow(tenant: TenantContext, input: CreateEscrowInput, tx
       rail: input.rail,
       network: input.network,
       status: 'not_created',
+      clientLockScriptJson: input.clientLockScript ? JSON.stringify(input.clientLockScript) : null,
+      workerLockScriptJson: input.workerLockScript ? JSON.stringify(input.workerLockScript) : null,
+      refundTimeoutSince: input.refundTimeoutSince ?? null,
     },
   });
 }
@@ -115,5 +118,45 @@ export function listEscrowsForAgreement(tenant: TenantContext, agreementId: stri
       milestoneId: true,
       status: true,
     },
+  });
+}
+
+export function findActiveEscrowForScope(
+  tenant: TenantContext,
+  agreementId: string,
+  milestoneId: string | null,
+  tx: Prisma.TransactionClient,
+) {
+  return tx.escrow.findFirst({
+    where: {
+      appId: tenant.appId,
+      agreementId,
+      milestoneId,
+      status: {
+        in: [
+          'not_created',
+          'awaiting_funding',
+          'funding_detected',
+          'funded',
+          'release_pending',
+          'refund_pending',
+          'reconciliation_required',
+          'failed',
+        ],
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+}
+
+export function findTransactionForEscrowType(
+  tenant: TenantContext,
+  escrowId: string,
+  type: string,
+  tx: Prisma.TransactionClient,
+) {
+  return tx.transaction.findFirst({
+    where: { appId: tenant.appId, escrowId, type },
+    orderBy: { createdAt: 'desc' },
   });
 }

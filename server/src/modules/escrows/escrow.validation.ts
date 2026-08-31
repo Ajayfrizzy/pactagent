@@ -1,6 +1,11 @@
 import { z } from 'zod';
 
 const positiveIntegerString = z.string().regex(/^[1-9]\d*$/, 'Amount must be a positive integer string.');
+const ckbScriptSchema = z.object({
+  codeHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
+  hashType: z.enum(['data', 'type', 'data1', 'data2']),
+  args: z.string().regex(/^0x[0-9a-fA-F]*$/),
+});
 
 export const createEscrowSchema = z.object({
   agreementId: z.string().uuid(),
@@ -9,6 +14,26 @@ export const createEscrowSchema = z.object({
   currency: z.string().trim().min(2).max(12).default('CKB'),
   rail: z.enum(['mock', 'manual', 'ckb']).default('mock'),
   network: z.enum(['sandbox', 'testnet', 'mainnet']).default('sandbox'),
+  clientLockScript: ckbScriptSchema.optional(),
+  workerLockScript: ckbScriptSchema.optional(),
+  refundTimeoutSince: z.string().regex(/^(0|[1-9]\d*)$/).optional(),
+}).superRefine((value, ctx) => {
+  const validRailNetwork = value.rail === 'ckb'
+    ? ['testnet', 'mainnet'].includes(value.network)
+    : value.network === 'sandbox';
+  if (!validRailNetwork) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['network'], message: 'Rail and network combination is invalid.' });
+  }
+  if (value.rail === 'ckb') {
+    if (value.currency !== 'CKB') {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['currency'], message: 'CKB rail requires CKB currency.' });
+    }
+    for (const field of ['milestoneId', 'clientLockScript', 'workerLockScript', 'refundTimeoutSince'] as const) {
+      if (value[field] === undefined) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: [field], message: `${field} is required for CKB escrow.` });
+      }
+    }
+  }
 });
 
 export const escrowListQuerySchema = z.object({

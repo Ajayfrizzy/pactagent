@@ -1,5 +1,6 @@
 import type { Request } from 'express';
 import { config } from '../../config';
+import { prisma } from '../../db';
 import { tenantContext } from '../../common/tenancy/tenant-context';
 import { invalidRequest, notFound } from '../../common/errors/app-error';
 import { createInfrastructureAuditLog } from '../audit-logs/audit-log.repository';
@@ -37,7 +38,7 @@ function auditWebhook(req: Request, params: {
   targetId: string;
   before?: unknown;
   after?: unknown;
-}) {
+}, tx?: Parameters<typeof createInfrastructureAuditLog>[1]) {
   return createInfrastructureAuditLog({
     appId: params.appId,
     actorType: req.apiKey ? 'api_key' : 'system',
@@ -50,7 +51,7 @@ function auditWebhook(req: Request, params: {
     ipAddress: req.ip,
     userAgent: req.header('user-agent') ?? null,
     requestId: req.requestId,
-  });
+  }, tx);
 }
 
 function responseSnippet(body: string) {
@@ -71,7 +72,7 @@ async function enqueueWebhookDeliveryJob(params: {
   agreementId: string | null;
   attemptKey: string;
   availableAt?: Date | null;
-}) {
+}, tx?: Parameters<typeof enqueueJob>[1]) {
   await enqueueJob({
     appId: params.appId,
     agreementId: params.agreementId,
@@ -83,7 +84,7 @@ async function enqueueWebhookDeliveryJob(params: {
     availableAt: params.availableAt ?? undefined,
     maxAttempts: 1,
     dedupeKey: `INFRA_WEBHOOK_DELIVERY:${params.deliveryId}:${params.attemptKey}`,
-  });
+  }, tx);
 }
 
 export async function createWebhookEndpointForApp(req: Request, app: AppContext, input: CreateWebhookEndpointInput) {
@@ -230,33 +231,39 @@ export async function retryWebhookDeliveryForApp(req: Request, appId: string, de
     throw invalidRequest('Delivered webhook deliveries cannot be retried.', 'webhook_delivery_already_delivered');
   }
 
-  const updated = await webhookRepository.markWebhookDeliveryForRetry(tenantContext(appId), deliveryId);
-  if (!updated) {
-    throw invalidRequest('Webhook delivery is already queued or being delivered.', 'webhook_delivery_retry_in_progress');
-  }
-  const serializedBefore = serializeWebhookDelivery(before);
-  const serializedAfter = serializeWebhookDelivery(updated);
+  return prisma.$transaction(async (tx) => {
+    const updated = await webhookRepository.markWebhookDeliveryForRetry(tenantContext(appId), deliveryId, tx);
+    if (!updated) {
+      throw invalidRequest('Webhook delivery is already queued or being delivered.', 'webhook_delivery_retry_in_progress');
+    }
+    const serializedBefore = serializeWebhookDelivery(before);
+    const serializedAfter = serializeWebhookDelivery(updated);
 
-  await auditWebhook(req, {
-    appId,
-    action: 'webhook_delivery.retried',
-    targetType: 'webhook_delivery',
-    targetId: deliveryId,
-    before: serializedBefore,
-    after: serializedAfter,
+    await auditWebhook(req, {
+      appId,
+      action: 'webhook_delivery.retried',
+      targetType: 'webhook_delivery',
+      targetId: deliveryId,
+      before: serializedBefore,
+      after: serializedAfter,
+    }, tx);
+
+    await enqueueWebhookDeliveryJob({
+      appId,
+      deliveryId: updated.id,
+      agreementId: updated.agreementId,
+      attemptKey: `manual:${Date.now()}`,
+    }, tx);
+
+    return serializedAfter;
   });
-
-  await enqueueWebhookDeliveryJob({
-    appId,
-    deliveryId: updated.id,
-    agreementId: updated.agreementId,
-    attemptKey: `manual:${Date.now()}`,
-  });
-
-  return serializedAfter;
 }
 
-async function recordFinalDeliveryFailure(delivery: { appId: string | null; eventType: string; id: string; endpointId: string; eventId: string | null }, reason: string) {
+async function recordFinalDeliveryFailure(
+  delivery: { appId: string | null; eventType: string; id: string; endpointId: string; eventId: string | null },
+  reason: string,
+  tx?: Parameters<typeof createEvent>[2],
+) {
   if (!delivery.appId || delivery.eventType === WEBHOOK_EVENTS.deliveryFailed) {
     return;
   }
@@ -269,6 +276,38 @@ async function recordFinalDeliveryFailure(delivery: { appId: string | null; even
       eventId: delivery.eventId,
       reason,
     },
+  }, tx);
+}
+
+async function recordDeliveryResult(params: {
+  delivery: NonNullable<Awaited<ReturnType<typeof webhookRepository.findWebhookDeliveryWithEndpoint>>>;
+  data: Parameters<typeof webhookRepository.updateWebhookDeliveryResult>[0]['data'];
+  finalFailureReason?: string;
+  retry?: { attemptKey: string; availableAt: Date | null };
+}) {
+  return prisma.$transaction(async (tx) => {
+    const result = await webhookRepository.updateWebhookDeliveryResult({
+      deliveryId: params.delivery.id,
+      appId: params.delivery.appId,
+      expectedStatus: params.delivery.status,
+      expectedAttempts: params.delivery.attempts,
+      data: params.data,
+    }, tx);
+    if (!result.applied) return result.delivery;
+
+    if (params.finalFailureReason) {
+      await recordFinalDeliveryFailure(params.delivery, params.finalFailureReason, tx);
+    }
+    if (params.retry) {
+      await enqueueWebhookDeliveryJob({
+        appId: params.delivery.appId,
+        deliveryId: params.delivery.id,
+        agreementId: params.delivery.agreementId,
+        attemptKey: params.retry.attemptKey,
+        availableAt: params.retry.availableAt,
+      }, tx);
+    }
+    return result.delivery;
   });
 }
 
@@ -289,20 +328,20 @@ export async function deliverWebhookDelivery(deliveryId: string) {
 
   const endpointUrl = deliveryEndpointUrl(delivery);
   if (delivery.endpoint.status !== 'active' || !endpointUrl) {
-    const updated = await webhookRepository.updateWebhookDeliveryResult(delivery.id, {
-      status: 'FAILED',
-      lastError: 'Webhook endpoint is inactive.',
+    const updated = await recordDeliveryResult({
+      delivery,
+      data: { status: 'FAILED', lastError: 'Webhook endpoint is inactive.' },
+      finalFailureReason: 'Webhook endpoint is inactive.',
     });
-    await recordFinalDeliveryFailure(delivery, 'Webhook endpoint is inactive.');
     return serializeWebhookDelivery(updated);
   }
 
   if (!delivery.endpoint.secretCiphertext) {
-    const updated = await webhookRepository.updateWebhookDeliveryResult(delivery.id, {
-      status: 'FAILED',
-      lastError: 'Webhook endpoint signing secret is unavailable.',
+    const updated = await recordDeliveryResult({
+      delivery,
+      data: { status: 'FAILED', lastError: 'Webhook endpoint signing secret is unavailable.' },
+      finalFailureReason: 'Webhook endpoint signing secret is unavailable.',
     });
-    await recordFinalDeliveryFailure(delivery, 'Webhook endpoint signing secret is unavailable.');
     return serializeWebhookDelivery(updated);
   }
 
@@ -331,13 +370,16 @@ export async function deliverWebhookDelivery(deliveryId: string) {
       throw new Error(`Webhook responded with status ${response.status}`);
     }
 
-    const updated = await webhookRepository.updateWebhookDeliveryResult(delivery.id, {
-      status: 'DELIVERED',
-      statusCode: response.status,
-      responseBodySnippet: responseSnippet(body),
-      lastError: null,
-      nextRetryAt: null,
-      deliveredAt: new Date(),
+    const updated = await recordDeliveryResult({
+      delivery,
+      data: {
+        status: 'DELIVERED',
+        statusCode: response.status,
+        responseBodySnippet: responseSnippet(body),
+        lastError: null,
+        nextRetryAt: null,
+        deliveredAt: new Date(),
+      },
     });
 
     return serializeWebhookDelivery(updated);
@@ -346,26 +388,20 @@ export async function deliverWebhookDelivery(deliveryId: string) {
     const retryDelayMs = getWebhookRetryDelayMs(failedAttemptCount);
     const message = error instanceof Error ? error.message : 'Webhook delivery failed.';
     const shouldRetry = retryDelayMs !== null;
-    const updated = await webhookRepository.updateWebhookDeliveryResult(delivery.id, {
-      status: shouldRetry ? 'RETRY' : 'FAILED',
-      statusCode: null,
-      responseBodySnippet: null,
-      lastError: message,
-      nextRetryAt: shouldRetry ? new Date(Date.now() + retryDelayMs) : null,
-      deliveredAt: null,
+    const nextRetryAt = shouldRetry ? new Date(Date.now() + retryDelayMs) : null;
+    const updated = await recordDeliveryResult({
+      delivery,
+      data: {
+        status: shouldRetry ? 'RETRY' : 'FAILED',
+        statusCode: null,
+        responseBodySnippet: null,
+        lastError: message,
+        nextRetryAt,
+        deliveredAt: null,
+      },
+      finalFailureReason: shouldRetry ? undefined : message,
+      retry: shouldRetry ? { attemptKey: String(failedAttemptCount), availableAt: nextRetryAt } : undefined,
     });
-
-    if (!shouldRetry) {
-      await recordFinalDeliveryFailure(delivery, message);
-    } else {
-      await enqueueWebhookDeliveryJob({
-        appId: delivery.appId,
-        deliveryId: delivery.id,
-        agreementId: delivery.agreementId,
-        attemptKey: String(failedAttemptCount),
-        availableAt: updated.nextRetryAt,
-      });
-    }
 
     return serializeWebhookDelivery(updated);
   }

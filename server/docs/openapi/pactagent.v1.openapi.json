@@ -97,6 +97,21 @@
             "schema": { "$ref": "#/components/schemas/ErrorEnvelope" }
           }
         }
+      },
+      "Conflict": {
+        "description": "The mutation lost a lifecycle compare-and-swap race, reused an idempotency key for a different request, duplicates an agreement or milestone external reference, or conflicts with an active escrow/dispute scope.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+            "examples": {
+              "lifecycle": { "value": { "error": { "type": "conflict", "code": "lifecycle_conflict", "message": "The resource changed before this transition could be applied." } } },
+              "idempotency": { "value": { "error": { "type": "conflict", "code": "idempotency_key_conflict", "message": "Idempotency key was already used with a different request body." } } },
+              "agreementReference": { "value": { "error": { "type": "conflict", "code": "agreement_already_exists", "message": "An agreement already exists with this external reference." } } },
+              "milestoneReference": { "value": { "error": { "type": "conflict", "code": "milestone_already_exists", "message": "A milestone already exists with this external reference or order." } } },
+              "activeScope": { "value": { "error": { "type": "conflict", "code": "active_escrow_exists", "message": "An active escrow already exists for this settlement scope." } } }
+            }
+          }
+        }
       }
     },
     "schemas": {
@@ -233,7 +248,19 @@
           "amount": { "type": "string", "pattern": "^[1-9][0-9]*$" },
           "currency": { "type": "string", "default": "CKB" },
           "rail": { "type": "string", "enum": ["mock", "manual", "ckb"], "default": "mock" },
-          "network": { "type": "string", "enum": ["sandbox", "testnet", "mainnet"], "default": "sandbox" }
+          "network": { "type": "string", "enum": ["sandbox", "testnet", "mainnet"], "default": "sandbox" },
+          "clientLockScript": { "$ref": "#/components/schemas/CkbScript" },
+          "workerLockScript": { "$ref": "#/components/schemas/CkbScript" },
+          "refundTimeoutSince": { "type": "string", "pattern": "^(0|[1-9][0-9]*)$", "description": "Absolute CKB block-number since value. Required for CKB escrow." }
+        }
+      },
+      "CkbScript": {
+        "type": "object",
+        "required": ["codeHash", "hashType", "args"],
+        "properties": {
+          "codeHash": { "type": "string", "pattern": "^0x[0-9a-fA-F]{64}$" },
+          "hashType": { "type": "string", "enum": ["data", "type", "data1", "data2"] },
+          "args": { "type": "string", "pattern": "^0x[0-9a-fA-F]*$" }
         }
       },
       "ProofInput": {
@@ -275,8 +302,8 @@
         "properties": {
           "resolutionType": { "type": "string", "enum": ["release", "refund", "split"] },
           "resolutionNote": { "type": "string", "maxLength": 5000 },
-          "workerAmount": { "type": "string", "pattern": "^[1-9][0-9]*$" },
-          "clientAmount": { "type": "string", "pattern": "^[1-9][0-9]*$" }
+          "workerAmount": { "type": "string", "pattern": "^(0|[1-9][0-9]*)$" },
+          "clientAmount": { "type": "string", "pattern": "^(0|[1-9][0-9]*)$" }
         }
       },
       "WebhookInput": {
@@ -340,23 +367,23 @@
       "delete": { "tags": ["API Keys"], "summary": "Revoke an API key", "security": [{ "operatorBearer": [] }], "parameters": [{ "$ref": "#/components/parameters/Id" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/agreements": {
-      "post": { "tags": ["Agreements"], "summary": "Create an app-scoped agreement", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AgreementInput" } } } }, "responses": { "201": { "$ref": "#/components/responses/Created" }, "default": { "$ref": "#/components/responses/Error" } } },
+      "post": { "tags": ["Agreements"], "summary": "Create an app-scoped agreement", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AgreementInput" } } } }, "responses": { "201": { "$ref": "#/components/responses/Created" }, "409": { "$ref": "#/components/responses/Conflict" }, "default": { "$ref": "#/components/responses/Error" } } },
       "get": { "tags": ["Agreements"], "summary": "List app-scoped agreements", "parameters": [{ "name": "status", "in": "query", "schema": { "type": "string" } }, { "name": "externalReferenceId", "in": "query", "schema": { "type": "string" } }, { "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/agreements/{id}": {
       "get": { "tags": ["Agreements"], "summary": "Get an app-scoped agreement", "parameters": [{ "$ref": "#/components/parameters/Id" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/agreements/{id}/accept": {
-      "post": { "tags": ["Agreements"], "summary": "Accept an agreement", "parameters": [{ "$ref": "#/components/parameters/Id" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
+      "post": { "tags": ["Agreements"], "summary": "Accept an agreement", "parameters": [{ "$ref": "#/components/parameters/Id" }, { "$ref": "#/components/parameters/IdempotencyKey" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "409": { "$ref": "#/components/responses/Conflict" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/agreements/{id}/funding-required": {
-      "post": { "tags": ["Agreements"], "summary": "Move an accepted agreement to funding required", "parameters": [{ "$ref": "#/components/parameters/Id" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
+      "post": { "tags": ["Agreements"], "summary": "Move an accepted agreement to funding required", "parameters": [{ "$ref": "#/components/parameters/Id" }, { "$ref": "#/components/parameters/IdempotencyKey" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "409": { "$ref": "#/components/responses/Conflict" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/agreements/{id}/cancel": {
-      "post": { "tags": ["Agreements"], "summary": "Cancel an agreement", "parameters": [{ "$ref": "#/components/parameters/Id" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
+      "post": { "tags": ["Agreements"], "summary": "Cancel an agreement", "parameters": [{ "$ref": "#/components/parameters/Id" }, { "$ref": "#/components/parameters/IdempotencyKey" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "409": { "$ref": "#/components/responses/Conflict" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/agreements/{id}/milestones": {
-      "post": { "tags": ["Milestones"], "summary": "Create a milestone under an agreement", "parameters": [{ "$ref": "#/components/parameters/Id" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MilestoneInput" } } } }, "responses": { "201": { "$ref": "#/components/responses/Created" }, "default": { "$ref": "#/components/responses/Error" } } },
+      "post": { "tags": ["Milestones"], "summary": "Create a milestone under an agreement", "description": "Locks the parent agreement and rejects an allocation that would exceed its total amount.", "parameters": [{ "$ref": "#/components/parameters/Id" }, { "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MilestoneInput" } } } }, "responses": { "201": { "$ref": "#/components/responses/Created" }, "409": { "$ref": "#/components/responses/Conflict" }, "default": { "$ref": "#/components/responses/Error" } } },
       "get": { "tags": ["Milestones"], "summary": "List milestones under an agreement", "parameters": [{ "$ref": "#/components/parameters/Id" }, { "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/milestones": {
@@ -366,46 +393,46 @@
       "get": { "tags": ["Milestones"], "summary": "Get an app-scoped milestone", "parameters": [{ "$ref": "#/components/parameters/Id" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/escrows": {
-      "post": { "tags": ["Escrows"], "summary": "Create a mock, manual, or CKB escrow record", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EscrowInput" } } } }, "responses": { "201": { "$ref": "#/components/responses/Created" }, "default": { "$ref": "#/components/responses/Error" } } },
+      "post": { "tags": ["Escrows"], "summary": "Create a mock, manual, or CKB escrow record", "description": "Only one active escrow is allowed per agreement or milestone settlement scope. failed and reconciliation_required remain active and block replacement creation until reconciliation establishes a safe state. CKB requires exact milestone allocation and persists its script/data commitments for reconciliation.", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EscrowInput" } } } }, "responses": { "201": { "$ref": "#/components/responses/Created" }, "409": { "$ref": "#/components/responses/Conflict" }, "default": { "$ref": "#/components/responses/Error" } } },
       "get": { "tags": ["Escrows"], "summary": "List app-scoped escrows", "parameters": [{ "name": "agreementId", "in": "query", "schema": { "type": "string", "format": "uuid" } }, { "name": "status", "in": "query", "schema": { "type": "string" } }, { "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/escrows/{id}": {
       "get": { "tags": ["Escrows"], "summary": "Get an app-scoped escrow", "parameters": [{ "$ref": "#/components/parameters/Id" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/escrows/{id}/mark-funded": {
-      "post": { "tags": ["Escrows"], "summary": "Mark a mock or manual escrow funded", "parameters": [{ "$ref": "#/components/parameters/Id" }], "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "txHash": { "type": "string", "maxLength": 200 } } } } } }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
+      "post": { "tags": ["Escrows"], "summary": "Confirm escrow funding", "description": "Mock/manual rails record the caller assertion. For CKB, txHash is only a hint: the service independently verifies the committed output, exact script/data/amount, and configured confirmation depth before funding.", "parameters": [{ "$ref": "#/components/parameters/Id" }, { "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "txHash": { "type": "string", "maxLength": 200 } } } } } }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "409": { "$ref": "#/components/responses/Conflict" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/escrows/{id}/release": {
-      "post": { "tags": ["Escrows"], "summary": "Release a funded escrow", "parameters": [{ "$ref": "#/components/parameters/Id" }, { "$ref": "#/components/parameters/IdempotencyKey" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
+      "post": { "tags": ["Escrows"], "summary": "Release a funded escrow", "description": "Reserves the release before external work. Ambiguous CKB broadcast results remain reconciliation_required and are never blindly resubmitted.", "parameters": [{ "$ref": "#/components/parameters/Id" }, { "$ref": "#/components/parameters/IdempotencyKey" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "409": { "$ref": "#/components/responses/Conflict" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/escrows/{id}/refund": {
-      "post": { "tags": ["Escrows"], "summary": "Refund a funded escrow", "parameters": [{ "$ref": "#/components/parameters/Id" }, { "$ref": "#/components/parameters/IdempotencyKey" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
+      "post": { "tags": ["Escrows"], "summary": "Refund a funded escrow", "description": "Reserves the refund before external work. CKB refunds enforce the persisted absolute block timeout and reconcile ambiguous broadcasts.", "parameters": [{ "$ref": "#/components/parameters/Id" }, { "$ref": "#/components/parameters/IdempotencyKey" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "409": { "$ref": "#/components/responses/Conflict" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/transactions": {
-      "get": { "tags": ["Transactions"], "summary": "List app-scoped transaction records", "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
+      "get": { "tags": ["Transactions"], "summary": "List app-scoped transaction records", "description": "CKB records expose pending, broadcast, committed, confirmed, rejected, reorged, and reconciliation_required status plus block, confirmation, observation, and reconciliation fields.", "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/proofs": {
-      "post": { "tags": ["Proofs"], "summary": "Submit proof for a milestone", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProofInput" } } } }, "responses": { "201": { "$ref": "#/components/responses/Created" }, "default": { "$ref": "#/components/responses/Error" } } },
+      "post": { "tags": ["Proofs"], "summary": "Submit proof for a milestone", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProofInput" } } } }, "responses": { "201": { "$ref": "#/components/responses/Created" }, "409": { "$ref": "#/components/responses/Conflict" }, "default": { "$ref": "#/components/responses/Error" } } },
       "get": { "tags": ["Proofs"], "summary": "List app-scoped proof submissions", "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/proofs/{id}": {
       "get": { "tags": ["Proofs"], "summary": "Get a proof submission", "parameters": [{ "$ref": "#/components/parameters/Id" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/proofs/{id}/review": {
-      "post": { "tags": ["Proofs"], "summary": "Record a proof review decision", "parameters": [{ "$ref": "#/components/parameters/Id" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProofReviewInput" } } } }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
+      "post": { "tags": ["Proofs"], "summary": "Record a proof review decision", "parameters": [{ "$ref": "#/components/parameters/Id" }, { "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProofReviewInput" } } } }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "409": { "$ref": "#/components/responses/Conflict" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/reviews": {
       "get": { "tags": ["Reviews"], "summary": "List app-scoped proof reviews", "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/disputes": {
-      "post": { "tags": ["Disputes"], "summary": "Open a dispute", "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DisputeInput" } } } }, "responses": { "201": { "$ref": "#/components/responses/Created" }, "default": { "$ref": "#/components/responses/Error" } } },
+      "post": { "tags": ["Disputes"], "summary": "Open a dispute", "description": "Only one unresolved dispute is permitted per milestone settlement scope.", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DisputeInput" } } } }, "responses": { "201": { "$ref": "#/components/responses/Created" }, "409": { "$ref": "#/components/responses/Conflict" }, "default": { "$ref": "#/components/responses/Error" } } },
       "get": { "tags": ["Disputes"], "summary": "List app-scoped disputes", "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/disputes/{id}": {
       "get": { "tags": ["Disputes"], "summary": "Get a dispute", "parameters": [{ "$ref": "#/components/parameters/Id" }], "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/disputes/{id}/resolve": {
-      "post": { "tags": ["Disputes"], "summary": "Resolve a dispute", "parameters": [{ "$ref": "#/components/parameters/Id" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DisputeResolutionInput" } } } }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "default": { "$ref": "#/components/responses/Error" } } }
+      "post": { "tags": ["Disputes"], "summary": "Resolve a dispute", "description": "Split resolution uses integer arithmetic and requires workerAmount plus clientAmount to equal the funded scope exactly; either share may be zero.", "parameters": [{ "$ref": "#/components/parameters/Id" }, { "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DisputeResolutionInput" } } } }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "409": { "$ref": "#/components/responses/Conflict" }, "default": { "$ref": "#/components/responses/Error" } } }
     },
     "/v1/events": {
       "get": { "tags": ["Events"], "summary": "List app-scoped lifecycle events", "parameters": [{ "name": "type", "in": "query", "schema": { "type": "string" } }, { "name": "agreementId", "in": "query", "schema": { "type": "string", "format": "uuid" } }, { "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "$ref": "#/components/responses/List" }, "default": { "$ref": "#/components/responses/Error" } } }

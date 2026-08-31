@@ -9,13 +9,8 @@ import {
 } from '@ckb-ccc/core';
 import { config, requireConfig } from '../config';
 import { isAdminAddress } from '../middleware/admin';
-
-type ChallengeRecord = {
-  message: string;
-  expiresAt: number;
-};
-
-const challengeStore = new Map<string, ChallengeRecord>();
+import { authChallengeFailures } from '../common/observability/metrics';
+import { getAuthChallengeStore } from './authChallengeStore';
 
 function jwtSigningKey() {
   return requireConfig(
@@ -58,19 +53,26 @@ function buildChallengeMessage(address: string, nonce: string) {
   ].join('\n');
 }
 
-export function createChallenge(address: string) {
+export async function createChallenge(address: string) {
   const normalized = normalizeWalletAddress(address);
   const nonce = crypto.randomUUID();
   const message = buildChallengeMessage(normalized, nonce);
-  challengeStore.set(normalized, {
+  const expiresAt = Date.now() + config.authChallengeTtlSecs * 1000;
+  await getAuthChallengeStore().put({
+    address: normalized,
     message,
-    expiresAt: Date.now() + config.authChallengeTtlSecs * 1000,
-  });
+    expiresAt,
+  }, config.authChallengeTtlSecs * 1000);
 
   return {
     message,
-    expiresAt: new Date(Date.now() + config.authChallengeTtlSecs * 1000).toISOString(),
+    expiresAt: new Date(expiresAt).toISOString(),
   };
+}
+
+function challengeFailure(reason: string, message: string): never {
+  authChallengeFailures.inc({ reason });
+  throw new Error(message);
 }
 
 async function deriveAddressFromSignatureIdentity(signature: {
@@ -131,19 +133,19 @@ export async function verifyChallenge(params: {
   };
 }) {
   const normalized = normalizeWalletAddress(params.address);
-  const challenge = challengeStore.get(normalized);
+  const challengeStore = getAuthChallengeStore();
+  const challenge = await challengeStore.get(normalized);
 
   if (!challenge) {
-    throw new Error('Authentication challenge not found. Please request a new one.');
+    challengeFailure('not_found', 'Authentication challenge not found. Please request a new one.');
   }
 
   if (challenge.expiresAt < Date.now()) {
-    challengeStore.delete(normalized);
-    throw new Error('Authentication challenge has expired. Please request a new one.');
+    challengeFailure('expired', 'Authentication challenge has expired. Please request a new one.');
   }
 
-  if (challenge.message !== params.message) {
-    throw new Error('Challenge message mismatch.');
+  if (challenge.address !== normalized || challenge.message !== params.message) {
+    challengeFailure('mismatch', 'Challenge message mismatch.');
   }
 
   const signature = new Signature(
@@ -154,7 +156,7 @@ export async function verifyChallenge(params: {
 
   const isValidSignature = await Signer.verifyMessage(params.message, signature);
   if (!isValidSignature) {
-    throw new Error('Wallet signature verification failed.');
+    challengeFailure('signature', 'Wallet signature verification failed.');
   }
 
   const derivedAddress = await deriveAddressFromSignatureIdentity({
@@ -162,10 +164,12 @@ export async function verifyChallenge(params: {
     requestedAddress: normalized,
   });
   if (normalizeWalletAddress(derivedAddress) !== normalized) {
-    throw new Error('Signed wallet address does not match the requested account.');
+    challengeFailure('address', 'Signed wallet address does not match the requested account.');
   }
 
-  challengeStore.delete(normalized);
+  if (!await challengeStore.consume(normalized, params.message)) {
+    challengeFailure('replay', 'Authentication challenge was already consumed. Please request a new one.');
+  }
 
   const token = jwt.sign(
     { address: normalized },

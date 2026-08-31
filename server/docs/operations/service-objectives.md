@@ -8,7 +8,7 @@ These objectives are initial engineering thresholds, not contractual commitments
 | API latency | Requests completed within 1 second | 95% | 30 days |
 | Durable jobs | Runnable jobs started within 5 minutes | 99% | 7 days |
 | Webhook delivery | Delivered within configured attempts | 99% | 7 days |
-| Worker continuity | Fresh webhook heartbeat within 60 seconds | 99.9% | 30 days |
+| Worker continuity | Fresh infrastructure worker heartbeat within 60 seconds | 99.9% | 30 days |
 
 Page immediately for worker loss, database saturation, a required provider circuit opening, or a sustained API error budget burn. Ticket non-urgent webhook/provider degradation. Dead letters always require ownership and disposition.
 

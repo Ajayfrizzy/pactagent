@@ -15,8 +15,8 @@ groups:
         expr: pactagent_worker_heartbeat_age_seconds > 60
         for: 2m
         labels: { severity: page }
-        annotations: { summary: "No fresh webhook worker heartbeat" }
-  - name: pactagent-webhook-jobs
+        annotations: { summary: "No fresh infrastructure worker heartbeat" }
+  - name: pactagent-infrastructure-jobs
     rules:
       - alert: PactAgentQueueTooOld
         expr: pactagent_oldest_queued_job_age_seconds > 300
@@ -33,6 +33,28 @@ groups:
         for: 2m
         labels: { severity: page }
         annotations: { summary: "Worker job lease renewal failed" }
+  - name: pactagent-ckb-settlement
+    rules:
+      - alert: PactAgentCkbReconciliationRequired
+        expr: pactagent_ckb_reconciliation_backlog{status=~"reconciliation_required|reorged"} > 0
+        for: 2m
+        labels: { severity: page }
+        annotations: { summary: "CKB transactions require reconciliation" }
+      - alert: PactAgentCkbTransactionsStale
+        expr: sum(pactagent_ckb_stale_transactions) > 0
+        for: 5m
+        labels: { severity: page }
+        annotations: { summary: "CKB transaction observations are stale" }
+      - alert: PactAgentCkbReorgObserved
+        expr: increase(pactagent_ckb_reorgs_total[10m]) > 0
+        for: 1m
+        labels: { severity: page }
+        annotations: { summary: "A previously confirmed CKB transaction was reorged" }
+      - alert: PactAgentCkbBroadcastAmbiguous
+        expr: increase(pactagent_ckb_broadcast_failures_total{outcome="ambiguous"}[10m]) > 0
+        for: 1m
+        labels: { severity: ticket }
+        annotations: { summary: "A CKB broadcast returned an ambiguous result" }
   - name: pactagent-dependencies
     rules:
       - alert: PactAgentDatabasePoolSaturated

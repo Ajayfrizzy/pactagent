@@ -14,6 +14,20 @@ x-server-environment: &server-environment
   CORS_ORIGIN: ${CORS_ORIGIN:-https://app.example.com}
   REDIS_URL: redis://redis:6379
   TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-0}
+  CKB_RAIL_ENABLED: ${CKB_RAIL_ENABLED:-false}
+  CKB_MAINNET_ENABLED: ${CKB_MAINNET_ENABLED:-false}
+  CKB_NODE_URL: ${CKB_NODE_URL:-https://testnet.ckb.dev/}
+  CKB_INDEXER_URL: ${CKB_INDEXER_URL:-https://testnet.ckb.dev/indexer}
+  CKB_NETWORK: ${CKB_NETWORK:-testnet}
+  CKB_CONTRACT_CODE_HASH: ${CKB_CONTRACT_CODE_HASH:-}
+  CKB_CONTRACT_HASH_TYPE: ${CKB_CONTRACT_HASH_TYPE:-type}
+  CKB_CONTRACT_DEPLOYMENT_TX_HASH: ${CKB_CONTRACT_DEPLOYMENT_TX_HASH:-}
+  CKB_CONTRACT_OUTPUT_INDEX: ${CKB_CONTRACT_OUTPUT_INDEX:-0}
+  CKB_CONTRACT_DEP_TYPE: ${CKB_CONTRACT_DEP_TYPE:-code}
+  CKB_CONFIRMATIONS: ${CKB_CONFIRMATIONS:-4}
+  CKB_STALE_TRANSACTION_MS: ${CKB_STALE_TRANSACTION_MS:-900000}
+  CKB_RECONCILIATION_POLL_MS: ${CKB_RECONCILIATION_POLL_MS:-15000}
+  CKB_SIGNER_MODE: ${CKB_SIGNER_MODE:-disabled}
 
 services:
   postgres:
@@ -75,7 +89,7 @@ services:
       - /tmp
     restart: unless-stopped
 
-  worker-webhook:
+  worker-infrastructure:
     build:
       context: .
       dockerfile: server/Dockerfile
@@ -84,9 +98,9 @@ services:
     environment:
       <<: *server-environment
       SERVICE_ROLE: worker
-      OTEL_SERVICE_NAME: pactagent-worker-webhook
-      WORKER_ID: webhook-worker
-      WORKER_QUEUES: webhook
+      OTEL_SERVICE_NAME: pactagent-worker-infrastructure
+      WORKER_ID: infrastructure-worker
+      WORKER_QUEUES: webhook,settlement
       WORKER_HEALTH_PORT: 4001
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4001/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]

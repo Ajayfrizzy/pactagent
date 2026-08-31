@@ -2,21 +2,22 @@ import { AgentJob, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { prisma } from '../db';
 
-export type AgentJobKind = 'DELIVER_WEBHOOK';
+export type AgentJobKind = 'DELIVER_WEBHOOK' | 'CKB_RECONCILE_TRANSACTION';
 
 export type AgentJobPayload = {
   agreementId?: string;
   deliveryId?: string;
+  transactionId?: string;
 };
 
 const DEFAULT_MAX_ATTEMPTS = 5;
 const RETRY_BASE_MS = 5_000;
 const RETRY_MAX_MS = 15 * 60_000;
 
-export type WorkerQueue = 'webhook';
+export type WorkerQueue = 'webhook' | 'settlement';
 
-export function queueForJobKind(_kind: AgentJobKind): WorkerQueue {
-  return 'webhook';
+export function queueForJobKind(kind: AgentJobKind): WorkerQueue {
+  return kind === 'CKB_RECONCILE_TRANSACTION' ? 'settlement' : 'webhook';
 }
 
 export function getJobRetryDelayMs(attempt: number, random = Math.random) {
@@ -36,11 +37,12 @@ export async function enqueueJob(params: {
   availableAt?: Date;
   maxAttempts?: number;
   dedupeKey?: string | null;
-}) {
+}, tx?: Prisma.TransactionClient) {
+  const client = tx ?? prisma;
   const dedupeKey = params.dedupeKey ?? null;
 
   if (dedupeKey) {
-    const existing = await prisma.agentJob.findFirst({
+    const existing = await client.agentJob.findFirst({
       where: {
         dedupeKey,
         status: { in: ['QUEUED', 'RUNNING', 'RETRY'] },
@@ -53,7 +55,7 @@ export async function enqueueJob(params: {
   }
 
   try {
-    return await prisma.agentJob.create({
+    return await client.agentJob.create({
       data: {
         id: randomUUID(),
         appId: params.appId,
@@ -69,7 +71,7 @@ export async function enqueueJob(params: {
     });
   } catch (error) {
     if (dedupeKey && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-      const existing = await prisma.agentJob.findUnique({
+      const existing = await client.agentJob.findUnique({
         where: { dedupeKey },
       });
 
@@ -78,12 +80,12 @@ export async function enqueueJob(params: {
       }
 
       if (existing && ['COMPLETED', 'DEAD_LETTER'].includes(existing.status)) {
-        await prisma.agentJob.update({
+        await client.agentJob.update({
           where: { id: existing.id },
           data: { dedupeKey: null },
         });
 
-        return prisma.agentJob.create({
+        return client.agentJob.create({
           data: {
             id: randomUUID(),
             appId: params.appId,
@@ -161,6 +163,23 @@ export async function completeJob(jobId: string, workerId: string) {
       lockedBy: null,
       leaseExpiresAt: null,
       completedAt: new Date(),
+      lastError: null,
+    },
+  });
+  if (result.count !== 1) throw new Error(`Job ${jobId} lease is no longer owned by ${workerId}.`);
+  return result;
+}
+
+export async function deferJob(jobId: string, workerId: string, delayMs: number) {
+  const boundedDelayMs = Math.min(Math.max(Math.trunc(delayMs), 1_000), 15 * 60_000);
+  const result = await prisma.agentJob.updateMany({
+    where: { id: jobId, status: 'RUNNING', lockedBy: workerId },
+    data: {
+      status: 'RETRY',
+      lockedAt: null,
+      lockedBy: null,
+      leaseExpiresAt: null,
+      availableAt: new Date(Date.now() + boundedDelayMs),
       lastError: null,
     },
   });
