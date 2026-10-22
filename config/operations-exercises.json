@@ -18,7 +18,7 @@
     {
       "id": "rolling-restart",
       "owner": "release-engineer",
-      "command": "kubectl -n pactagent rollout restart deployment/pactagent-api deployment/pactagent-worker-infrastructure deployment/pactagent-web",
+      "command": "docker compose --env-file /opt/pactagent/staging/.env -f /opt/pactagent/staging/docker-compose.yml up -d --force-recreate api worker web",
       "expectedEvidence": "All Deployments become ready and in-flight webhook jobs complete or recover without duplicate delivery records.",
       "abortCondition": "Readiness fails or queue age grows beyond five minutes."
     },
