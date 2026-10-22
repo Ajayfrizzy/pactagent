@@ -4,7 +4,7 @@ import { AGREEMENT_STATUSES } from './agreement.state-machine';
 const positiveIntegerString = z.string().regex(/^[1-9]\d*$/, 'Amount must be a positive integer string.');
 
 const metadataSchema = z
-  .record(z.unknown())
+  .record(z.string(), z.unknown())
   .default({})
   .refine((value) => Buffer.byteLength(JSON.stringify(value), 'utf8') <= 16 * 1024, {
     message: 'Metadata must be 16KB or smaller.',

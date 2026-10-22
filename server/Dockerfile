@@ -1,5 +1,11 @@
 # syntax=docker/dockerfile:1.7
-FROM node:24.18.1-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7 AS build
+FROM node:26.11.1-bookworm-slim@sha256:86f07bc9c5dce4578cf37e5a418b7bfc7f817cda25cde66e2b66e95ed86c4567 AS base
+# Apply Debian security fixes released after the pinned Node image was built.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends --only-upgrade perl-base \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM base AS build
 WORKDIR /app/server
 ENV CI=true
 COPY server/package.json server/package-lock.json ./
@@ -9,7 +15,7 @@ COPY server/prisma.config.ts server/tsconfig.json ./
 COPY server/src ./src
 RUN DATABASE_URL=postgresql://build:build@localhost:5432/build npx prisma generate && npm run build
 
-FROM node:24.18.1-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7 AS production-deps
+FROM base AS production-deps
 WORKDIR /app/server
 ENV NODE_ENV=production
 COPY server/package.json server/package-lock.json ./
@@ -17,7 +23,7 @@ COPY server/prisma ./prisma
 COPY server/prisma.config.ts ./
 RUN npm ci --omit=dev && npm cache clean --force
 
-FROM node:24.18.1-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7 AS runtime
+FROM base AS runtime
 ARG BUILD_VERSION=development
 ARG BUILD_COMMIT=unknown
 WORKDIR /app/server
@@ -27,7 +33,7 @@ LABEL org.opencontainers.image.title="PactAgent server" \
       org.opencontainers.image.revision=$BUILD_COMMIT \
       org.opencontainers.image.source="https://github.com/pactagent/pactagent"
 RUN groupadd --system --gid 1001 pactagent && useradd --system --uid 1001 --gid pactagent pactagent
-RUN corepack disable && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=production-deps --chown=pactagent:pactagent /app/server/node_modules ./node_modules
 COPY --from=build --chown=pactagent:pactagent /app/server/node_modules/.prisma ./node_modules/.prisma
 COPY --from=production-deps --chown=pactagent:pactagent /app/server/package.json ./package.json
@@ -47,8 +53,7 @@ LABEL org.opencontainers.image.title="PactAgent migrations" \
       org.opencontainers.image.version=$BUILD_VERSION \
       org.opencontainers.image.revision=$BUILD_COMMIT
 RUN groupadd --system --gid 1001 pactagent && useradd --system --uid 1001 --gid pactagent pactagent
-RUN corepack disable \
-    && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
     && rm -rf node_modules/@cyclonedx node_modules/.bin/cyclonedx-npm node_modules/brace-expansion package.json package-lock.json
 USER pactagent
 CMD ["sh", "-c", "node dist/scripts/auditTenantIntegrity.js && node node_modules/prisma/build/index.js migrate deploy"]

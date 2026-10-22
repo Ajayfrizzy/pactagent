@@ -7,11 +7,21 @@ import test from 'node:test';
 
 const script = resolve(import.meta.dirname, 'audit-dependencies.mjs');
 
-function runAuditReport(report) {
+const fixturePolicy = {
+  minimumSeverity: 'high',
+  exceptions: [{
+    id: 'GHSA-ggr8-5vv4-36mx', packages: ['deepmerge-ts'], owner: 'test',
+    expires: '2999-01-01', reason: 'Test fixture for advisory chain handling.',
+  }],
+};
+
+function runAuditReport(report, policy = fixturePolicy) {
   const directory = mkdtempSync(resolve(tmpdir(), 'pactagent-audit-'));
   const input = resolve(directory, 'audit.json');
   writeFileSync(input, JSON.stringify(report));
-  return spawnSync(process.execPath, [script, '--input', input], { encoding: 'utf8' });
+  const policyPath = resolve(directory, 'policy.json');
+  writeFileSync(policyPath, JSON.stringify(policy));
+  return spawnSync(process.execPath, [script, '--input', input, '--policy', policyPath], { encoding: 'utf8' });
 }
 
 function runAudit(vulnerabilities) {
@@ -55,4 +65,18 @@ test('an unavailable npm audit endpoint fails closed', () => {
 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /did not return a vulnerability report/);
+});
+
+test('expired exceptions fail even when the report is clean', () => {
+  const result = runAuditReport({ vulnerabilities: {} }, {
+    ...fixturePolicy,
+    exceptions: [{ ...fixturePolicy.exceptions[0], expires: '2000-01-01' }],
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /expired on 2000-01-01/);
+});
+
+test('a clean report passes without exceptions', () => {
+  const result = runAuditReport({ vulnerabilities: {} }, { minimumSeverity: 'high', exceptions: [] });
+  assert.equal(result.status, 0, result.stderr);
 });
