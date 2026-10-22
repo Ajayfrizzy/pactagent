@@ -10,6 +10,8 @@ function readJson(path) {
 
 function normalizeExpression(value) {
   return String(value || '')
+    // node-datachannel publishes the standard MPL-2.0 license with a space.
+    .replace(/\bMPL 2\.0\b/g, 'MPL-2.0')
     .replace(/[()]/g, ' ')
     .replace(/\s+(AND|OR|WITH)\s+/gi, '|')
     .split('|')

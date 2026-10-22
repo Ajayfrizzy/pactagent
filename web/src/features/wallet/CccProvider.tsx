@@ -6,18 +6,10 @@ import { getCkbClient } from '@/lib/ckb';
 
 export function CccProvider({ children }: { children: ReactNode }) {
   const client = useMemo(() => getCkbClient(), []);
-  const network = process.env.NEXT_PUBLIC_CKB_NETWORK || 'testnet';
 
   return (
     <ccc.Provider
       defaultClient={client}
-      preferredNetworks={[
-        {
-          signerType: ccc.SignerType.CKB,
-          addressPrefix: network === 'mainnet' ? 'ckb' : 'ckt',
-          network,
-        },
-      ]}
       connectorProps={{
         style: {
           '--background': '#0f172a',
