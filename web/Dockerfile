@@ -1,5 +1,11 @@
 # syntax=docker/dockerfile:1.7
-FROM node:26.11.1-bookworm-slim@sha256:86f07bc9c5dce4578cf37e5a418b7bfc7f817cda25cde66e2b66e95ed86c4567 AS build
+FROM node:26.11.1-bookworm-slim@sha256:86f07bc9c5dce4578cf37e5a418b7bfc7f817cda25cde66e2b66e95ed86c4567 AS base
+# Apply Debian security fixes released after the pinned Node image was built.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends --only-upgrade perl-base \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM base AS build
 WORKDIR /app/web
 ENV NEXT_TELEMETRY_DISABLED=1 CI=true
 COPY web/package.json web/package-lock.json ./
@@ -11,7 +17,7 @@ RUN find .next/standalone -type d \( -path '*/node_modules/sharp' -o -path '*/no
       -prune -exec rm -rf '{}' + \
     && test -z "$(find .next/standalone -path '*/node_modules/sharp/package.json' -print -quit)"
 
-FROM node:26.11.1-bookworm-slim@sha256:86f07bc9c5dce4578cf37e5a418b7bfc7f817cda25cde66e2b66e95ed86c4567 AS runtime
+FROM base AS runtime
 ARG BUILD_VERSION=development
 ARG BUILD_COMMIT=unknown
 WORKDIR /app

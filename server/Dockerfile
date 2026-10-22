@@ -1,5 +1,11 @@
 # syntax=docker/dockerfile:1.7
-FROM node:26.11.1-bookworm-slim@sha256:86f07bc9c5dce4578cf37e5a418b7bfc7f817cda25cde66e2b66e95ed86c4567 AS build
+FROM node:26.11.1-bookworm-slim@sha256:86f07bc9c5dce4578cf37e5a418b7bfc7f817cda25cde66e2b66e95ed86c4567 AS base
+# Apply Debian security fixes released after the pinned Node image was built.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends --only-upgrade perl-base \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM base AS build
 WORKDIR /app/server
 ENV CI=true
 COPY server/package.json server/package-lock.json ./
@@ -9,7 +15,7 @@ COPY server/prisma.config.ts server/tsconfig.json ./
 COPY server/src ./src
 RUN DATABASE_URL=postgresql://build:build@localhost:5432/build npx prisma generate && npm run build
 
-FROM node:26.11.1-bookworm-slim@sha256:86f07bc9c5dce4578cf37e5a418b7bfc7f817cda25cde66e2b66e95ed86c4567 AS production-deps
+FROM base AS production-deps
 WORKDIR /app/server
 ENV NODE_ENV=production
 COPY server/package.json server/package-lock.json ./
@@ -17,7 +23,7 @@ COPY server/prisma ./prisma
 COPY server/prisma.config.ts ./
 RUN npm ci --omit=dev && npm cache clean --force
 
-FROM node:26.11.1-bookworm-slim@sha256:86f07bc9c5dce4578cf37e5a418b7bfc7f817cda25cde66e2b66e95ed86c4567 AS runtime
+FROM base AS runtime
 ARG BUILD_VERSION=development
 ARG BUILD_COMMIT=unknown
 WORKDIR /app/server

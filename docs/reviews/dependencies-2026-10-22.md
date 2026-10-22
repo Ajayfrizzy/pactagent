@@ -7,13 +7,16 @@ This update integrates the seven open Dependabot pull requests: #62, #66,
 
 - Align development, CI, deployment tooling, and Docker on Node 26.11.1.
   Node 26 does not bundle Corepack; remove obsolete Corepack cleanup commands.
+  Apply Debian perl-base security fixes in a shared base stage; the pinned
+  Node image predates those high/critical CVE fixes.
 - Update Zod record schemas for the Zod 4 key/value API, with regression
   coverage for metadata defaults, nested JSON, invalid arrays, and byte limits.
 - Regenerate the root workspace and standalone Docker lockfiles. Configure
   Dependabot to group npm updates across all three manifests/lockfiles.
 - Advance Next.js beyond the original PR's 16.3.5 to patched 16.4.2.
 - Scope legacy YAML overrides below version 5 so Swagger Parser can use its
-  required YAML 5 API. Review the updated libvips 1.3.4 license entries.
+  required YAML 5 API. Review the updated libvips 1.3.4 license entries and
+  argparse's PSF-2.0 license identifier (Python Software Foundation License 2).
 - Upgrade CycloneDX npm to version 6 and refresh vulnerable transitive packages,
   including fast-uri, brace-expansion, js-yaml, sharp, and PostCSS dependencies.
 - Apply the deepmerge-ts fix in the root workspace and remove the expired
