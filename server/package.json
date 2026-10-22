@@ -47,7 +47,7 @@
   },
   "devDependencies": {
     "@apidevtools/swagger-parser": "^13.0.0",
-    "@cyclonedx/cyclonedx-npm": "^4.1.2",
+    "@cyclonedx/cyclonedx-npm": "^6.0.0",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.10",
@@ -60,12 +60,12 @@
   },
   "overrides": {
     "@prisma/dev": "0.24.16",
-    "brace-expansion": "5.0.8",
+    "brace-expansion": "5.0.12",
     "deepmerge-ts": "8.0.0",
-    "fast-uri": "3.1.5",
+    "fast-uri": "3.1.8",
     "gaxios": "7.3.0",
     "gcp-metadata": "8.1.4",
-    "js-yaml": "4.3.1",
-    "valibot": "1.4.2"
+    "valibot": "1.4.2",
+    "js-yaml@<5": "4.3.2"
   }
 }

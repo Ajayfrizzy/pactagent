@@ -1,18 +1,14 @@
 version: 2
 updates:
   - package-ecosystem: npm
-    directory: /server
+    directories:
+      - /
+      - /server
+      - /web
     schedule: { interval: weekly }
     open-pull-requests-limit: 5
     groups:
-      server-minor-patch:
-        update-types: [minor, patch]
-  - package-ecosystem: npm
-    directory: /web
-    schedule: { interval: weekly }
-    open-pull-requests-limit: 5
-    groups:
-      web-minor-patch:
+      workspace-minor-patch:
         update-types: [minor, patch]
   - package-ecosystem: cargo
     directory: /contracts

@@ -4,7 +4,9 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
-const policy = JSON.parse(readFileSync(resolve(root, 'config/dependency-audit-policy.json'), 'utf8'));
+const policyIndex = process.argv.indexOf('--policy');
+const policyPath = policyIndex >= 0 ? resolve(process.argv[policyIndex + 1]) : resolve(root, 'config/dependency-audit-policy.json');
+const policy = JSON.parse(readFileSync(policyPath, 'utf8'));
 const severityRank = { info: 0, low: 1, moderate: 2, high: 3, critical: 4 };
 const threshold = severityRank[policy.minimumSeverity];
 

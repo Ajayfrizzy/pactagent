@@ -27,7 +27,7 @@ LABEL org.opencontainers.image.title="PactAgent server" \
       org.opencontainers.image.revision=$BUILD_COMMIT \
       org.opencontainers.image.source="https://github.com/pactagent/pactagent"
 RUN groupadd --system --gid 1001 pactagent && useradd --system --uid 1001 --gid pactagent pactagent
-RUN corepack disable && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=production-deps --chown=pactagent:pactagent /app/server/node_modules ./node_modules
 COPY --from=build --chown=pactagent:pactagent /app/server/node_modules/.prisma ./node_modules/.prisma
 COPY --from=production-deps --chown=pactagent:pactagent /app/server/package.json ./package.json
@@ -47,8 +47,7 @@ LABEL org.opencontainers.image.title="PactAgent migrations" \
       org.opencontainers.image.version=$BUILD_VERSION \
       org.opencontainers.image.revision=$BUILD_COMMIT
 RUN groupadd --system --gid 1001 pactagent && useradd --system --uid 1001 --gid pactagent pactagent
-RUN corepack disable \
-    && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
     && rm -rf node_modules/@cyclonedx node_modules/.bin/cyclonedx-npm node_modules/brace-expansion package.json package-lock.json
 USER pactagent
 CMD ["sh", "-c", "node dist/scripts/auditTenantIntegrity.js && node node_modules/prisma/build/index.js migrate deploy"]

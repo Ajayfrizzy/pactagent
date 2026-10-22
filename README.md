@@ -31,7 +31,7 @@ The former standalone product, public profiles, reputation, invites, comments, D
 
 ## Local setup
 
-Prerequisites: Node.js 24, npm, Docker, and Docker Compose.
+Prerequisites: Node.js 26, npm, Docker, and Docker Compose.
 
 ```bash
 npm install

@@ -22,7 +22,7 @@ LABEL org.opencontainers.image.title="PactAgent web" \
       org.opencontainers.image.source="https://github.com/pactagent/pactagent"
 RUN groupadd --system --gid 1001 pactagent && useradd --system --uid 1001 --gid pactagent pactagent
 # The standalone runtime only needs Node; remove npm and its bundled dependencies.
-RUN corepack disable && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=build --chown=pactagent:pactagent /app/web/public ./public
 COPY --from=build --chown=pactagent:pactagent /app/web/.next/standalone ./
 COPY --from=build --chown=pactagent:pactagent /app/web/.next/static ./.next/static
