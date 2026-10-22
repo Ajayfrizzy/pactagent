@@ -1,7 +1,8 @@
 # Dependency review — 2026-10-22
 
 This update integrates the seven open Dependabot pull requests: #62, #66,
-#67, #68, #74, #78, and #79. Their commits are preserved in the merge history.
+#67, #68, #74, #78, and #79. Their changes are consolidated in PR #80; main requires a linear history, so
+the consolidated PR is squash-merged and the superseded PRs are closed.
 
 ## Compatibility and security fixes
 
