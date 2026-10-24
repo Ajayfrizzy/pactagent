@@ -56,7 +56,7 @@
     "express-list-endpoints": "^7.1.1",
     "prisma": "^7.10.0",
     "tsx": "^4.23.13",
-    "typescript": "^5.4.0"
+    "typescript": "^7.0.2"
   },
   "overrides": {
     "@prisma/dev": "0.24.16",
