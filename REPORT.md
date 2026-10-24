@@ -4,6 +4,14 @@ Date: 2026-08-30
 
 Baseline: `772af98` (`Phase 1: Infrastructure Cleanup (#47)`)
 
+## VPS Deployment Migration
+
+The active deployment architecture is GitHub Actions -> SSH -> separate DigitalOcean staging/production VPS -> Docker Compose -> external environment-specific Supabase PostgreSQL. GitHub Actions builds immutable server, migration, and web images and passes digest references in `release.env`; the VPS never builds source. Compose runs API, web, worker, Redis, and a one-off migration service.
+
+Staging deploys automatically after a successful CI run on `staging`. Production requires `workflow_dispatch` with the protected `production` GitHub Environment. Required environment secrets are `VPS_HOST`, `VPS_USER`, `VPS_SSH_PRIVATE_KEY`, optional `VPS_SSH_PORT`, and staging `SMOKE_API_KEY`; `SMOKE_API_URL` and `SMOKE_WEB_URL` are environment variables. Application and database secrets remain in VPS-side `.env` and keyring files.
+
+Rollout order is pull exact images, run `docker compose run --rm migrate`, stop on migration failure, start services, wait for health checks, then run external smoke checks. `previous-release.env` enables application-image rollback through `rollback-vps.sh`; database changes are forward-only. Local Compose/workflow/shell validation passed. Real DigitalOcean provisioning, SSH access, reverse proxy/DNS, firewall, backups, and a live deployment remain manual follow-up work.
+
 Scope: app-scoped `/v1` agreement and settlement infrastructure only
 
 ## 1. Executive Summary
