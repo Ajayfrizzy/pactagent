@@ -1,11 +1,6 @@
 name: Build and deploy immutable release
 
 on:
-  workflow_run:
-    workflows: [CI]
-    branches: [main]
-    types: [completed]
-
   workflow_dispatch:
     inputs:
       environment:
@@ -15,6 +10,12 @@ on:
           - staging
           - production
         default: staging
+        required: true
+      approve_production:
+        description: Explicitly approve this production deployment (main only)
+        type: boolean
+        default: false
+        required: true
 
 concurrency:
   group: deploy-${{ inputs.environment || 'staging' }}
@@ -26,13 +27,14 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  RELEASE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+  RELEASE_SHA: ${{ github.sha }}
 
 jobs:
   publish:
     if: >
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+      github.event_name == 'workflow_dispatch' &&
+      ((inputs.environment == 'staging' && github.ref == 'refs/heads/staging') ||
+       (inputs.environment == 'production' && github.ref == 'refs/heads/main' && inputs.approve_production))
 
     runs-on: ubuntu-24.04
 

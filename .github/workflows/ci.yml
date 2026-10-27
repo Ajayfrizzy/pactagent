@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [staging, main]
     tags: ['v*']
 
 concurrency:
@@ -14,6 +14,25 @@ permissions:
   contents: read
 
 jobs:
+  branch-policy:
+    name: Branch policy
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require production PRs to originate from staging
+        env:
+          BASE_BRANCH: ${{ github.base_ref }}
+          HEAD_BRANCH: ${{ github.head_ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ "$BASE_BRANCH" = main ]; then
+            test "$HEAD_BRANCH" = staging && test "$HEAD_REPOSITORY" = "$BASE_REPOSITORY" || {
+              echo 'Production PRs must originate from this repository staging branch.'
+              exit 1
+            }
+          fi
+
   secrets:
     name: Secret scanning
     runs-on: ubuntu-24.04

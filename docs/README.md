@@ -16,3 +16,7 @@ Start with the root `README.md` for setup and platform behavior, and
 Keep new repository-wide documentation here. Keep generated API specifications or
 documents that are loaded by server code under `server/docs/` until their runtime
 paths are deliberately migrated and validated.
+
+## M0 multi-rail blueprint
+
+The [M0 report](architecture/M0-REPORT.md) indexes the architecture/security deliverables, current-code audit and validation. Read the [authoritative specification](../M0_ARCHITECTURE_SPEC.md) and [decision register](architecture/M0-DECISIONS.md) before implementation. These describe proposed work; existing behavior documents are not evidence that the new capabilities are implemented.
