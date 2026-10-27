@@ -55,3 +55,11 @@ npm run openapi:check --workspace @pact-agent/server
 ```
 
 Database-backed integration tests require local PostgreSQL and run separately with `npm run test:integration`.
+
+## Permanent staging-first Git workflow
+
+`main` is production only. `staging` is the permanent integration and pre-production branch. Normally create feature, fix, architecture and milestone branches from an up-to-date `origin/staging`, and open their pull requests into `staging`. Do not commit directly to either permanent branch, force-push, rewrite history or merge development branches directly into `main`.
+
+Production promotion requires a reviewed PR from this repository's `staging` branch into `main`, all required checks passing, and explicit release approval. Branch policy CI rejects other PR sources for `main`. Configure branch rules to require that check as well as the existing CI/security checks; documentation alone is not branch protection.
+
+CI runs for pull requests (including targets staging/main) and pushes to staging/main. Deployment is a separate manually dispatched operation: staging deployments must run from staging; production deployments must run from main with `approve_production` explicitly selected and protected-environment approval configured. Ordinary integration pushes do not authorize deployment. See [workflow setup and remaining configuration](docs/operations/staging-workflow.md).

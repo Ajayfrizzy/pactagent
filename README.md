@@ -25,7 +25,7 @@ The former standalone product, public profiles, reputation, invites, comments, D
 | `contracts/` | CKB escrow contract source and deployment artifacts |
 | `docs/` | Architecture decisions and repository-wide operations guidance |
 | `server/docs/` | Runtime OpenAPI, integration examples, API policy, and server runbooks |
-| `deploy/` | VPS Docker Compose deployment assets |
+| `deploy/` | Kubernetes resources |
 | `observability/` | OpenTelemetry, Prometheus alerts, and Grafana dashboards |
 | `scripts/`, `config/`, `test/` | Environment tooling, controls, smoke checks, and load tests |
 

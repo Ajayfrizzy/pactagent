@@ -49,6 +49,8 @@
         "server/Dockerfile",
         "web/Dockerfile",
         ".github/workflows/deploy.yml",
+        "deploy/kubernetes/workloads.yaml",
+        "deploy/kubernetes/migration-job.yaml",
         "scripts/deployment-smoke.mjs",
         "server/docs/operations/container-release.md"
       ]
