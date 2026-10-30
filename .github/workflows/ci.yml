@@ -33,6 +33,26 @@ jobs:
             }
           fi
 
+  dependency-lockfiles:
+    name: Dependency lockfiles (${{ matrix.scope }})
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        scope: [root, server, web]
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 26.12.1
+      - run: node --test scripts/check-dependency-lockfiles.test.mjs
+      - run: node scripts/check-dependency-lockfiles.mjs "${{ matrix.scope }}"
+
   secrets:
     name: Secret scanning
     runs-on: ubuntu-24.04
