@@ -1,29 +1,40 @@
 version: 2
 updates:
   - package-ecosystem: npm
+    # Root workspace AND standalone Docker lockfiles are independent install inputs.
     directories:
       - /
       - /server
       - /web
+    target-branch: staging
     schedule: { interval: weekly }
     open-pull-requests-limit: 5
     groups:
-      react:
-        patterns: [react, react-dom, "@types/react", "@types/react-dom"]
-      workspace-minor-patch:
-        update-types: [minor, patch]
+      npm-across-installations:
+        applies-to: version-updates
+        patterns: ["*"]
+        group-by: dependency-name
+    # Version-update deferrals only. Security updates use the default branch;
+    # see docs/operations/dependabot-workspaces.md for urgent remediation routing.
+    ignore:
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
+      - dependency-name: tailwindcss
+        update-types: [version-update:semver-major]
   - package-ecosystem: cargo
     directory: /contracts
+    target-branch: staging
     schedule: { interval: weekly }
   - package-ecosystem: github-actions
     directory: /
+    target-branch: staging
     schedule: { interval: weekly }
   - package-ecosystem: docker
-    directory: /server
+    directories: [/, /server, /web]
+    target-branch: staging
     schedule: { interval: weekly }
-  - package-ecosystem: docker
-    directory: /web
-    schedule: { interval: weekly }
-  - package-ecosystem: docker
-    directory: /
-    schedule: { interval: weekly }
+    groups:
+      docker-across-images:
+        applies-to: version-updates
+        patterns: ["*"]
+        group-by: dependency-name
