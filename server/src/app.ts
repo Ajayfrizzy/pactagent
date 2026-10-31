@@ -1,4 +1,5 @@
 import cors from 'cors';
+import assetRoutes from './modules/assets/asset.routes';
 import express from 'express';
 import helmet from 'helmet';
 import { config } from './config';
@@ -72,6 +73,7 @@ export function createApp() {
     next();
   });
   app.use('/v1', v1IpRateLimit);
+  app.use('/v2', v1IpRateLimit, payloadLimit(16 * 1024), assetRoutes);
 
   app.use('/v1/apps', payloadLimit(64 * 1024));
   app.use('/v1/auth', payloadLimit(16 * 1024));

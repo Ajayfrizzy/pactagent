@@ -27,7 +27,7 @@ routes -> controllers -> services -> repositories
                          +-> common infrastructure
 ```
 
-Every external lifecycle route belongs under `/v1`. The `/api` mount is a terminal `410 Gone` compatibility response and must not acquire business logic.
+Existing external lifecycle routes remain under `/v1`. M1 authorizes only additive read-only registry/capability metadata under `/v2`; financial v2 writes require a later milestone. The `/api` mount is a terminal `410 Gone` compatibility response and must not acquire business logic.
 
 Tenant-owned repository operations must resolve an `appId` from authenticated context. Cross-tenant administrative queries stay in the admin module and require operator admin authorization.
 

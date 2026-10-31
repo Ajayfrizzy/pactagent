@@ -1,0 +1,10 @@
+import { Router } from 'express';
+import { requireApiKey } from '../api-keys/api-key.middleware';
+import { requireScope } from '../auth/rbac.middleware';
+import { asyncHandler } from '../../common/middleware/async-handler';
+import { registry, escrowCapabilities } from './asset.controller';
+const router = Router();
+router.use(requireApiKey, requireScope('escrows:read'));
+router.get('/metadata', registry);
+router.get('/escrows/:id/capabilities', asyncHandler(escrowCapabilities));
+export default router;

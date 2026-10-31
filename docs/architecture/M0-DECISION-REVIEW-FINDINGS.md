@@ -1,5 +1,7 @@
 # M0 architecture decision review findings
 
+Current status (2026-10-31): [product-direction approval](M0-PRODUCT-APPROVAL.md) supersedes historical pending product labels below. Specialized reviews remain OPEN. [M1 implementation](M1-IMPLEMENTATION.md) records the additive foundation and its limits; the original M0 design/review remains historical.
+
 Date: 2026-10-28. **PROPOSED — no policy approvals recorded; M1 remains blocked.**
 
 Reviewed from latest `origin/staging` at `57148cd98e6f97aad2f3e68e17e5ed33ac9b83c6`, on `architecture/m0-decision-review`. The supplied [review and sign-off worksheet](../../M0_DECISION_REVIEW.md) is retained unchanged at its supplied root name. Its SHA-256 is `544ec9111d12ce66ae303b82f8964b7e2123a14dc53846db8b8724b2a4138a5c`. This report supplements it; neither document accepts a decision.

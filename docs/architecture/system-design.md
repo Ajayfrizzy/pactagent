@@ -1,5 +1,7 @@
 # M0 system design
 
+Current status (2026-10-31): [product-direction approval](M0-PRODUCT-APPROVAL.md) supersedes historical pending product labels below. Specialized reviews remain OPEN. [M1 implementation](M1-IMPLEMENTATION.md) records the additive foundation and its limits; the original M0 design/review remains historical.
+
 Status: implementation blueprint, 2026-10-27. The [M0 specification](../../M0_ARCHITECTURE_SPEC.md) is authoritative. Existing implementation evidence is in [M0-REPORT](M0-REPORT.md); recommendations requiring acceptance are in [M0-DECISIONS](M0-DECISIONS.md). Nothing below claims deployed functionality.
 
 ## Context and trust boundaries

@@ -1,3 +1,4 @@
+import type { DeploymentBinding, RailCapabilities } from './rail-capabilities';
 export type EscrowAdapterCreateInput = {
   escrowId: string;
   appId: string;
@@ -45,6 +46,7 @@ export type EscrowAdapterContext = {
 };
 
 export interface EscrowAdapter {
+  describeCapabilities(binding: DeploymentBinding): RailCapabilities;
   createEscrowLock(input: EscrowAdapterCreateInput): Promise<EscrowAdapterResult>;
   checkFundingStatus(input: EscrowAdapterContext): Promise<EscrowAdapterResult>;
   markFunded(input: EscrowAdapterContext & { txHash?: string | null }): Promise<EscrowAdapterResult>;

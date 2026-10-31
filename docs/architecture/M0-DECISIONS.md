@@ -2,6 +2,12 @@
 
 Date: 2026-10-27. Accepted means mandated by the [authoritative specification](../../M0_ARCHITECTURE_SPEC.md), not a newly obtained stakeholder approval. Recommended choices below remain unconfirmed. Implementers must not silently treat these as commercial or security sign-off.
 
+## Current approval status — 2026-10-31
+
+The repository owner has accepted **product direction only** for D01, D03–D09 through the supplied [M0 product approval](M0-PRODUCT-APPROVAL.md). This includes 1,000 bps per party and 2,000 combined, W-based fees, individualized immutable fallback (eligible/competing on CKB), immutable arbitration verification dependencies, separate application billing and no finality downgrade. Historical proposals below are retained for traceability; their “unconfirmed” labels describe the original M0 review, not the current product approval.
+
+M1 development is authorized by [M1 scope](../../M1_MULTI_CHAIN_FOUNDATION_SPEC.md). Engineering interface acceptance before merge remains **OPEN**; D02, D10–D12 and specialized security, finance, legal, operations and release gates remain **OPEN**. See [implementation and deviations](M1-IMPLEMENTATION.md). Neither approval nor code activates Base, CKB v2, fee collection or mainnet.
+
 ## Accepted boundaries
 
 | ID | Decision | Rationale and implication |

@@ -1,5 +1,7 @@
 # Escrow authorization and settlement security
 
+Current status (2026-10-31): [product-direction approval](M0-PRODUCT-APPROVAL.md) supersedes historical pending product labels below. Specialized reviews remain OPEN. [M1 implementation](M1-IMPLEMENTATION.md) records the additive foundation and its limits; the original M0 design/review remains historical.
+
 Proposed M0 contract; see [decisions](M0-DECISIONS.md) for defaults requiring approval and [fee equations](fees-billing.md) for allocations. Existing CKB v1 is not described by these new capabilities.
 
 ## Unified state and authority

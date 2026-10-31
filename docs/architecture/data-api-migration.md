@@ -1,5 +1,7 @@
 # Data, API and compatibility migration plan
 
+Current status (2026-10-31): [product-direction approval](M0-PRODUCT-APPROVAL.md) supersedes historical pending product labels below. Specialized reviews remain OPEN. [M1 implementation](M1-IMPLEMENTATION.md) records the additive foundation and its limits; the original M0 design/review remains historical.
+
 This is a schema diff **on paper only**. No Prisma, SQL migration, API or runtime file changes are authorized in M0. [System design](system-design.md) defines AssetId and rail interfaces; [milestone contracts](milestone-contracts.md) assign implementation ownership.
 
 ## Proposed additive models and constraints

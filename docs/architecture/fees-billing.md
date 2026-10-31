@@ -1,5 +1,7 @@
 # App fees and independent infrastructure billing
 
+Current status (2026-10-31): [product-direction approval](M0-PRODUCT-APPROVAL.md) supersedes historical pending product labels below. Specialized reviews remain OPEN. [M1 implementation](M1-IMPLEMENTATION.md) records the additive foundation and its limits; the original M0 design/review remains historical.
+
 M0 proposal; commercial choices D05/D06 in [decisions](M0-DECISIONS.md) require confirmation. All equations use integer asset base units and checked wide intermediates, never floating point. [Settlement security](escrow-security.md) binds the algorithm and destinations on-chain.
 
 ## Escrow conservation

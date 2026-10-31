@@ -1,3 +1,4 @@
+import { describeRail, type DeploymentBinding } from './rail-capabilities';
 import { invalidRequest } from '../../../common/errors/app-error';
 import { getCkbRailConfig } from '../../../rails/ckb/network-config';
 import { CkbNodeRpcClient } from '../../../rails/ckb/rpc';
@@ -12,6 +13,9 @@ import type {
 } from './escrow-adapter.interface';
 
 export class CkbEscrowAdapter implements EscrowAdapter {
+  describeCapabilities(binding: DeploymentBinding) {
+    return describeRail(binding, 'ckb');
+  }
   private readonly railConfig;
   private readonly node;
   private readonly builder;
