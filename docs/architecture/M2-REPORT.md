@@ -27,10 +27,10 @@ Toolchain: Node **26.12.1**, Foundry **1.3.1** commit `08d3a4ad4d78b62bcb8973508
 
 | Command / suite | Result |
 | --- | --- |
-| `forge test --root contracts/evm -vv` | **46 passed**, 4 suites. Full and clone lifecycle cases; 512 cases per fuzz property per inherited suite; stateful invariants **128×32=4096 calls per full/clone form**, 8192 total |
+| `forge test --root contracts/evm -vv` | **48 passed**, 4 suites. Full and clone lifecycle cases; 512 cases per fuzz property per inherited suite; stateful invariants **128×32=4096 calls per full/clone form**, 8192 total |
 | Canonical vectors via `node --import tsx scripts/m2-vectors.ts` and Solidity vector test | Terms and four action digests match across TypeScript and Solidity; wrong action/chain/instance/expiry changes are tested |
-| `forge ... --match-test testBenchmarkFullAndEquivalentPinnedClone -vvvv` | Full **2,129,779 gas** vs clone plus equivalent atomic initialization **584,505 gas**, two-arbiter fixture; excludes one-time clone implementation deployment. Full remains provisional preference for simpler construction |
-| `forge build --root contracts/evm --sizes` | Full escrow runtime **7,406 bytes**, factory **11,797 bytes**, below EIP-170 limit; size is not security assurance |
+| `forge ... --match-test testBenchmarkFullAndEquivalentPinnedClone -vvvv` | Local full harness **2,129,818 gas** vs clone plus equivalent atomic initialization **584,505 gas**, two-arbiter fixture; excludes one-time clone implementation deployment. Full remains provisional preference for simpler construction |
+| `forge build --root contracts/evm --sizes` | Full escrow runtime **7,406 bytes**, factory **11,925 bytes**, below EIP-170 limit; size is not security assurance |
 | `node scripts/m2-contract-artifacts.mjs` | ABI and creation/runtime template hashes reproduce; not deployed-instance identity |
 | `node scripts/check-evm-dependencies.mjs` | 29 exact vendored source hashes verified |
 | `NODE_ENV=test REDIS_URL='' REDIS_URL_FILE='' npm test` | **115 passed**, including 12 new codec/crypto/observer cases |
@@ -44,6 +44,8 @@ Toolchain: Node **26.12.1**, Foundry **1.3.1** commit `08d3a4ad4d78b62bcb8973508
 | `node --test scripts/m2-network-probe.test.mjs` | **16 passed**; no new live probe or activation |
 | Controls/deploy/observability/performance/license/audit-policy/environment checks | Passed; no checks disabled |
 | Secret scan, authored whitespace, JSON and relative document links | Checked before commit; remote CI rechecks the complete branch |
+
+A final self-review tightened direct escrow construction to enforce the same Base Sepolia chain/issuer check as the factory. Arbitrary mock construction now lives only in LocalEscrow test harnesses sharing the financial core. Two additional negative/positive VM construction tests cover the boundary; no network identity was activated.
 
 The initial local DB fixture failed because milestone currency differed from its parent. Corrected the fixture to respect the existing constraint; no constraint weakened. Initial Paris compilation correctly rejected MCOPY from the pinned OZ version; target explicitly changed to Cancun. Clone initializer test initially placed `expectRevert` before an intervening getter; corrected the test ordering and verified both implementation/instance reinitialization rejection.
 

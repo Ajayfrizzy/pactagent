@@ -257,6 +257,7 @@ abstract contract PactEscrowCore is EIP712, ReentrancyGuard {
 /// @notice Full-deployment candidate: no externally callable initializer.
 contract PactEscrow is PactEscrowCore {
     constructor(Terms memory t, address[] memory signers) {
+        require(block.chainid == 84532 && t.token == 0x036CbD53842c5426634e7929541eC2318f3dCF7e, "unavailable_identity");
         _initialize(t, signers);
     }
 }

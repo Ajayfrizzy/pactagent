@@ -777,7 +777,7 @@
         }
       ],
       "abiSha256": "966972273da7de214226a07c775ca5015ce74e90768e1826f862d8ae846a6eab",
-      "creationTemplateSha256": "12b0b26d9c7ef4b27ea388db302b20f6a876ecd3c42745163c2b1b64d51ad3c8",
+      "creationTemplateSha256": "8386cae11181ecf6aedbcd42c189499468e8b035f8cc484a6a327cb35b4b7b67",
       "runtimeTemplateSha256": "cf9ec7d8c4246b699fdc6a4f8daec1049453fdd4440d5ba9a257195049acb49a",
       "runtimeTemplateBytes": 7406,
       "immutableReferences": {
@@ -985,9 +985,9 @@
         }
       ],
       "abiSha256": "6731c0f038a52ca45c39fdbde32d991060e1d77e42d13c0b4a77792acd41bf7c",
-      "creationTemplateSha256": "4305df01fb20272f41e1a60a2939141ca8a78ed28b07168a053472ab7e88072b",
-      "runtimeTemplateSha256": "59325cd15a8097b5204e7f5f46f1d346771fe8dfaf369332a00962e24797f519",
-      "runtimeTemplateBytes": 11797
+      "creationTemplateSha256": "f582bc4ff129c23d835dac2262917f966d4371368b8c820b9b72844d13e46475",
+      "runtimeTemplateSha256": "022775d5b21f853c1e5745483d911cf64764fbe517df229c4a961afdbf825123",
+      "runtimeTemplateBytes": 11925
     }
   ]
 }

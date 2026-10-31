@@ -106,9 +106,16 @@ contract Wallet1271 {
     }
 }
 
-contract LocalFactory is PactFactory {
-    function _identity(address) internal view override {
+contract LocalEscrow is PactEscrowCore {
+    constructor(Terms memory t, address[] memory signers) {
         require(block.chainid == 31337, "local_only");
+        _initialize(t, signers);
+    }
+}
+
+contract LocalFactory {
+    function create(PactEscrowCore.Terms memory t, address[] memory signers) external returns (PactEscrowCore) {
+        return new LocalEscrow(t, signers);
     }
 }
 
@@ -129,18 +136,18 @@ contract LocalCloneFactory {
         implementation = address(new CloneEscrowCandidate());
     }
 
-    function create(PactEscrowCore.Terms memory t, address[] memory signers) external returns (PactEscrow e) {
+    function create(PactEscrowCore.Terms memory t, address[] memory signers) external returns (PactEscrowCore e) {
         require(block.chainid == 31337, "local_only");
         address instance = Clones.clone(implementation);
         CloneEscrowCandidate(instance).initialize(t, signers);
-        return PactEscrow(instance);
+        return PactEscrowCore(instance);
     }
 }
 
 contract PactEscrowTest {
     Vm constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
     MockUSDC token;
-    PactEscrow escrow;
+    PactEscrowCore escrow;
     PactEscrowCore.Terms t;
     address client;
     address worker;
@@ -179,7 +186,7 @@ contract PactEscrowTest {
             300,
             2
         );
-        escrow = new PactEscrow(t, signers);
+        escrow = new LocalEscrow(t, signers);
         token.mint(client, 1100001);
         vm.prank(client);
         token.approve(address(escrow), type(uint256).max);
@@ -223,7 +230,7 @@ contract PactEscrowTest {
         vm.expectRevert();
         escrow.fund(EXPIRY + 1, c, w);
         t.treasury = address(0x56789);
-        PactEscrow other = new PactEscrow(t, signers);
+        PactEscrowCore other = new LocalEscrow(t, signers);
         vm.expectRevert();
         other.fund(EXPIRY, c, w);
         require(token.balanceOf(client) == 1100001 && uint256(escrow.state()) == 0);
@@ -233,7 +240,7 @@ contract PactEscrowTest {
         bytes32 d = escrow.fundingDigest(EXPIRY);
         bytes memory c = sig(11, d);
         bytes memory w = sig(22, d);
-        PactEscrow other = new PactEscrow(t, signers);
+        PactEscrowCore other = new LocalEscrow(t, signers);
         vm.expectRevert();
         other.fund(EXPIRY, c, w);
         vm.chainId(84532);
@@ -370,7 +377,7 @@ contract PactEscrowTest {
     function testContractWalletConsentAndMutation() public {
         Wallet1271 wallet = new Wallet1271(worker);
         t.worker = address(wallet);
-        escrow = new PactEscrow(t, signers);
+        escrow = new LocalEscrow(t, signers);
         vm.prank(client);
         token.approve(address(escrow), type(uint256).max);
         fund();
@@ -387,7 +394,7 @@ contract PactEscrowTest {
     function testDisabledArbitrationAndMutableArbiterRejected() public {
         address[] memory empty = new address[](0);
         t.threshold = 0;
-        escrow = new PactEscrow(t, empty);
+        escrow = new LocalEscrow(t, empty);
         vm.prank(client);
         token.approve(address(escrow), type(uint256).max);
         fund();
@@ -398,7 +405,21 @@ contract PactEscrowTest {
         address[] memory a = new address[](1);
         a[0] = address(new Wallet1271(worker));
         vm.expectRevert();
-        new PactEscrow(t, a);
+        new LocalEscrow(t, a);
+    }
+
+    function testDirectConstructionRejectsWrongChainAndIssuer() public {
+        vm.expectRevert();
+        new PactEscrow(t, signers);
+        vm.chainId(84532);
+        vm.expectRevert();
+        new PactEscrow(t, signers);
+        // Pinned address is mocked only inside the disposable VM; not a live identity.
+        address issuer = 0x036CbD53842c5426634e7929541eC2318f3dCF7e;
+        vm.etch(issuer, address(token).code);
+        t.token = issuer;
+        PactEscrow e = new PactEscrow(t, signers);
+        require(e.deploymentChainId() == 84532);
     }
 
     function testFactoryWrongIdentityAndNativeEther() public {
@@ -408,7 +429,7 @@ contract PactEscrowTest {
         (bool ok,) = address(escrow).call("");
         require(!ok);
         LocalFactory local = new LocalFactory();
-        PactEscrow e = local.create(t, signers);
+        PactEscrowCore e = local.create(t, signers);
         require(e.termsHash() == escrow.termsHash());
     }
 
@@ -421,7 +442,7 @@ contract PactEscrowTest {
         t.clientBps = bc;
         t.workerBps = bw;
         t.fallbackWorker = w;
-        PactEscrow e = new PactEscrow(t, signers);
+        PactEscrowCore e = new LocalEscrow(t, signers);
         (uint256 c, uint256 workerNet, uint256 fee) = e.allocation(w);
         // Independent quotient/remainder oracle avoids overflowing p*rate.
         uint256 r = (p / 10000) * bc + (p % 10000) * bc / 10000;
@@ -438,7 +459,7 @@ contract PactEscrowTest {
         t.workerBps = bw % 1001;
         uint256 w = uint256(workerShare) % t.principal;
         t.fallbackWorker = w;
-        escrow = new PactEscrow(t, signers);
+        escrow = new LocalEscrow(t, signers);
         token.mint(client, t.principal + escrow.reserve());
         vm.prank(client);
         token.approve(address(escrow), type(uint256).max);
@@ -460,21 +481,21 @@ contract PactEscrowTest {
     function testMaxOverflowAndInvalidTerms() public {
         t.principal = type(uint256).max;
         vm.expectRevert();
-        new PactEscrow(t, signers);
+        new LocalEscrow(t, signers);
         t.clientBps = 0;
-        PactEscrow e = new PactEscrow(t, signers);
+        PactEscrowCore e = new LocalEscrow(t, signers);
         (uint256 c, uint256 w, uint256 f) = e.allocation(t.principal);
         require(c + w + f == t.principal);
         t.workerBps = 1001;
         vm.expectRevert();
-        new PactEscrow(t, signers);
+        new LocalEscrow(t, signers);
     }
 
     function testAllFourFeeModesAtSplit() public {
         for (uint256 mode; mode < 4; mode++) {
             t.clientBps = mode % 2 == 1 ? 1000 : 0;
             t.workerBps = mode >= 2 ? 1000 : 0;
-            escrow = new PactEscrow(t, signers);
+            escrow = new LocalEscrow(t, signers);
             token.mint(client, t.principal + escrow.reserve());
             vm.prank(client);
             token.approve(address(escrow), type(uint256).max);
@@ -544,7 +565,7 @@ contract PactEscrowTest {
         address[] memory a = new address[](2);
         a[0] = address(0x55);
         a[1] = address(0x66);
-        PactEscrow e = new PactEscrow(t, a);
+        PactEscrowCore e = new LocalEscrow(t, a);
         address instance = address(0x999);
         vm.etch(instance, address(e).code);
         // Copy candidate storage to the synthetic vector address (in-memory EVM only).
@@ -553,8 +574,8 @@ contract PactEscrowTest {
             vm.store(instance, bytes32(i), vm.load(address(e), bytes32(i)));
         }
         require(e.termsHash() == vm.parseJsonBytes32(json, ".termsHash"));
-        require(PactEscrow(instance).fundingDigest(150) == vm.parseJsonBytes32(json, ".funding"));
-        require(PactEscrow(instance).disputeDigest(150) == vm.parseJsonBytes32(json, ".dispute"));
+        require(PactEscrowCore(instance).fundingDigest(150) == vm.parseJsonBytes32(json, ".funding"));
+        require(PactEscrowCore(instance).disputeDigest(150) == vm.parseJsonBytes32(json, ".dispute"));
         // Settlement helpers read principal; use the same ABI/type independently at the fixed domain.
         bytes32 domain = keccak256(
             abi.encode(
@@ -577,11 +598,11 @@ contract PactEscrowTest {
 
     function testBenchmarkFullAndEquivalentPinnedClone() public {
         uint256 before = gasleft();
-        PactEscrow full = new PactEscrow(t, signers);
+        PactEscrowCore full = new LocalEscrow(t, signers);
         emit GasBenchmark("full", before - gasleft());
         LocalCloneFactory factory = new LocalCloneFactory();
         before = gasleft();
-        PactEscrow clone = factory.create(t, signers);
+        PactEscrowCore clone = factory.create(t, signers);
         emit GasBenchmark("clone_with_same_terms_and_logic", before - gasleft());
         require(clone.termsHash() == full.termsHash());
         vm.expectRevert();
@@ -600,10 +621,10 @@ contract PactEscrowTest {
 
 contract TerminalHandler {
     Vm constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
-    PactEscrow public escrow;
+    PactEscrowCore public escrow;
     uint256 public successes;
 
-    constructor(PactEscrow e) {
+    constructor(PactEscrowCore e) {
         escrow = e;
     }
 
@@ -630,7 +651,7 @@ contract TerminalHandler {
 contract TerminalInvariantTest {
     Vm constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
     MockUSDC token;
-    PactEscrow escrow;
+    PactEscrowCore escrow;
     address client;
     address worker;
     address treasury = address(0x123456);
@@ -661,7 +682,7 @@ contract TerminalInvariantTest {
             300,
             0
         );
-        escrow = new PactEscrow(t, new address[](0));
+        escrow = new LocalEscrow(t, new address[](0));
         token.mint(client, 1100001);
         vm.prank(client);
         token.approve(address(escrow), 1100001);
