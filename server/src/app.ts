@@ -1,3 +1,4 @@
+import baseRoutes from './modules/base/base.routes';
 import cors from 'cors';
 import assetRoutes from './modules/assets/asset.routes';
 import express from 'express';
@@ -73,6 +74,7 @@ export function createApp() {
     next();
   });
   app.use('/v1', v1IpRateLimit);
+  app.use('/v2/base', v1IpRateLimit, payloadLimit(16 * 1024), baseRoutes);
   app.use('/v2', v1IpRateLimit, payloadLimit(16 * 1024), assetRoutes);
 
   app.use('/v1/apps', payloadLimit(64 * 1024));

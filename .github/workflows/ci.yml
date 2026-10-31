@@ -87,6 +87,10 @@ jobs:
       - run: npm run audit:test
       - name: Test M2 read-only network evidence collection
         run: node --test scripts/m2-network-probe.test.mjs
+      - name: Verify M2 codec vectors and vendored sources
+        run: |
+          node --import tsx scripts/m2-vectors.ts
+          node scripts/check-evm-dependencies.mjs
       - run: npm run lint
       - run: npm run build
       - name: Verify build does not modify tracked files
@@ -205,6 +209,30 @@ jobs:
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
       # contracts/.cargo/config.toml defaults builds to RISC-V; unit tests run on the CI host.
       - run: cargo test --manifest-path Cargo.toml -p pact-escrow-lock --lib --target x86_64-unknown-linux-gnu
+
+  evm:
+    name: M2 local EVM and invariants
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 26.12.1
+      - name: Install pinned Foundry archive
+        run: |
+          curl --fail --location --retry 3 https://github.com/foundry-rs/foundry/releases/download/v1.3.1/foundry_v1.3.1_linux_amd64.tar.gz -o /tmp/foundry.tar.gz
+          echo 'baad3e1b06d6f310d210c93e95258a03d923fe610f8d0742138f2245f94abd7c  /tmp/foundry.tar.gz' | sha256sum --check
+          mkdir -p /tmp/pact-foundry
+          tar -xzf /tmp/foundry.tar.gz -C /tmp/pact-foundry
+      - run: node scripts/check-evm-dependencies.mjs
+      - name: Execute only in-process EVM tests; no RPC or broadcast
+        run: /tmp/pact-foundry/forge test --root contracts/evm -vv
+      - run: node scripts/m2-contract-artifacts.mjs
 
   containers:
     name: Container images

@@ -563,3 +563,54 @@ model ChainObservation {
   @@unique([id, appId])
   @@index([appId, operationId, createdAt])
 }
+
+// M2 isolated local evidence. Composite tenant/parent FKs and append-only guards
+// are maintained in migration SQL; these tables cannot represent live deposits.
+model BaseLocalEscrow {
+  id             String   @id
+  appId          String
+  agreementId    String
+  milestoneId    String
+  termsHash      String
+  canonicalTerms String
+  chainId        Int      @default(31337)
+  instance       String
+  createdAt      DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([id, appId])
+  @@unique([appId, milestoneId])
+  @@unique([chainId, instance])
+}
+
+model BaseLocalOperation {
+  id                String   @id
+  appId             String
+  escrowId          String
+  idempotencyKey    String
+  slot              String
+  action            String
+  requestHash       String
+  artifactHash      String
+  transactionId     String
+  encryptedArtifact String
+  keyVersion        String
+  createdAt         DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([id, appId])
+  @@unique([appId, idempotencyKey])
+  @@unique([escrowId, slot])
+  @@index([appId, createdAt])
+}
+
+model BaseLocalEvidence {
+  id           String   @id
+  appId        String
+  operationId  String
+  sequence     Int
+  state        String
+  evidenceJson String
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([operationId, sequence])
+  @@index([appId, operationId])
+}

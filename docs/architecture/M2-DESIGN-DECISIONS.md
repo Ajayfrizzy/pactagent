@@ -1,105 +1,91 @@
-# M2 design review — Base Sepolia USDC
+# M2 design register — conditional direction accepted, interfaces provisional
 
-Status: **proposed, G0 incomplete; not an approved ABI or financial implementation**.
-Prepared 2026-10-31 against staging `5e30d6eb336087b65dde3ffdb880abf07d7c0c78`, including corrective PR #118. Scope: [M2 specification](../../M2_NATIVE_USDC_BASE_SEPOLIA_SPEC.md). Product approval remains [M0-PRODUCT-APPROVAL](M0-PRODUCT-APPROVAL.md); it is not specialist security approval.
+Recorded 2026-11-01. Branch `feature/m2-base-usdc-escrow`, PR #119. Baseline staging `5e30d6eb336087b65dde3ffdb880abf07d7c0c78` includes PR #118. [M2 specification](../../M2_NATIVE_USDC_BASE_SEPOLIA_SPEC.md) and [M0 product approval](M0-PRODUCT-APPROVAL.md) remain authoritative.
 
-## Decisions for review
+## Acceptance record and authority limits
 
-| Decision | Proposed choice and alternatives | Evidence / remaining gate |
+The repository owner, in the explicit continuation instruction for this task, reviewed the eight prior proposals and granted **conditional architecture-direction acceptance for M2.1**. The instruction authorizes deterministic local M2.2–M2.6 implementation using mock tokens and a local EVM while network verification is incomplete. It expressly does **not** grant independent engineering, contract-security, legal, financial or deployment approval. No independent reviewer/sign-off is recorded. No deployment, network broadcast, funds, merge, main changes or M3 are authorized.
+
+Independent provider agreement and verified token implementation/provenance are activation gates, not blockers to this authorized local work. The prior G0-only pause is superseded by this instruction; the remaining gates are not waived. Solidity interfaces remain `2-local-review-1` and **unfrozen**.
+
+| # | Accepted direction | Local realization / outstanding review |
 | --- | --- | --- |
-| 1. Deployment | Full non-upgradeable escrow per milestone; factory only constructs/indexes, no owner/admin. Prefer simpler constructor binding over clones and initializer races. No CREATE2 address serves as proof of deployed code. | No gas comparison yet: measure full deployment against pinned clones in local EVM before selecting/finalizing. No bytecode/deployed address exists. |
-| 2. Funding | Two steps: deploy unfunded immutable terms; `fund` verifies both parties' complete EIP-712 approvals and atomically transfers the exact principal plus client reserve from the pinned client. Invalid/missing approval reverts without transfer. Funding approval has expiry strictly before T. No participant seeds/server signing. | Predictable instance domain and no trapped funds on absent consent. Approval/permit alone is not terms consent. EOA and ERC-1271 must be executed, not inferred from signature bytes. |
-| 3. Settlement | Separate typed actions for funding, mutual settlement and arbitration; instance EIP-712 domain, full immutable terms hash, nonce, W/C, validity. Both original participant identities must validate the same mutual intent. | Draft schema below; not implemented, no canonical cross-language digest vectors yet. M1 SHA-256 is only an application commitment. |
-| 4. Arbitration | Optional fixed EOA signer list and threshold, directly checked by escrow; canonical sorted unique recovered signers, no external mutable verifier. Bind list/threshold to funding terms. An app selects the proposal; both participants accept. | Reject contract accounts as arbitral authorities initially. Contract-wallet participants can use ERC-1271, but mutable participant wallet ownership is an explicit consent risk; architecture review must accept this distinction. No Safe-address-only threshold. No post-funding rotation or recovery override. |
-| 5. Liveness | Arbitration invocation by either original participant with explicit signed invocation before D; D < T. Mutual and invoked arbitral settlement only while timestamp < T. Permissionless fallback at timestamp >= T, with precommitted W/C. | At D invocation fails; at T mutual/arbitration fail, fallback succeeds. Existing invoked dispute may settle between D and T. All terminal branches share one transition guard; no extension or pause admin. D/T and fallback allocations are per-escrow mutually accepted terms, not platform-imposed commercial defaults. |
-| 6. Token | Only reviewed Circle test token on 84532. SafeERC20 semantics plus balance-delta checks on funding and every recipient transfer; reject non-exact movement. Nonreentrant terminal path, state-before-external-call and whole-transaction rollback. | Issuer proxy upgrades/blacklists/pause remain external trust. Token address/hash alone cannot prove implementation immutability. Track implementation evidence and fail closed on changes. No operator sweep. Direct token donations remain unaccounted surplus; forced native ETH is stranded, ordinary payable calls rejected. |
-| 7. Fees | All approved fee modes, each rate <= 1000 bps. Freeze treasury/version, reserve and rates at funding; settle W-based fees. No B2B billing. | Solidity use reviewed full-precision floor mulDiv (or equivalent proved quotient decomposition); do not multiply uint256 then divide unchecked. Bound P + reserve <= uint256 max. See conservation below. |
-| 8. Finality | Separate submitted/included/finalized evidence. Require independent agreeing providers, canonical finalized ancestry, expected emitter/state/token/amounts and pinned policy. Historical sweeps detect changed/absent receipts. | Single-provider finalized and hash-pinned reads observed; independent agreement and L1 anchoring remain unverified. No fixed elapsed-time or block-count substitute. No fallback to latest. Finalized projection remains correctable and never authorizes another payout. |
+| 1 | Immutable per-milestone instances; benchmark full deployment versus pinned minimal clones before factory freeze | Constructor-only full escrow/factory implemented. Equivalent shared-logic benchmark (two EOA arbiters) measured full 2,129,779 gas and atomically initialized pinned clone 584,505 gas, excluding one-time implementation deployment. Both execute the lifecycle suite. Prefer full deployment for the initial candidate to avoid external initializer/delegatecall complexity; final independent review and ABI freeze remain open. |
+| 2 | Both participants cryptographically approve identical immutable terms; exact atomic funding | EOA/ERC-1271 participant verification, client debit and escrow credit checked exactly; invalid approval/transfer reverts all state. No API key authority. |
+| 3 | Distinct EIP-712 funding/mutual/dispute/arbitration authorizations; vectors before ABI freeze | TypeScript codec and Solidity cross-check four canonical digests plus terms hash. Chain/instance/domain/action binding; explicit fixed zero nonce per single-use action. ABI not frozen. |
+| 4 | Immutable directly verified EOA arbiter set/threshold; no mutable verifier/admin override | Sorted unique set, threshold in signed terms, exactly threshold distinct signatures; code-bearing/delegated arbiters rejected at creation/execution. No default threshold, rotation or recovery. Disabled arbitration requires empty set/zero threshold. |
+| 5 | D < T; signed invocation before D; settlement before T; committed permissionless fallback from T | Exact `< D`, `< T`, `>= T`; one terminal guard across mutual/arbitral/fallback. Failed transfers revert terminal state. |
+| 6 | Pinned Base Sepolia test USDC; exact accounting, safe transfers, reentrancy guard, no sweep; external issuer/proxy trust explicit | Provisional factory checks chain/address. Local factory/mock are separate test classes. No registry activation. SafeERC20 + sender/recipient deltas; donations remain surplus. Proxy implementation/provenance remains unverified. |
+| 7 | W-based approved fee algorithm, per-party <=1000 bps, checked arithmetic/conservation; no B2B billing | OZ Math.mulDiv floor; P+reserve bounded, four fee modes, dust/max and fuzz assertions. No billing implementation. |
+| 8 | Durable evidence, fail-closed finality; independent provider/provenance activation gates | Local-only encrypted immutable artifact and evidence tables; two-provider receipt verifier; sticky historical correction. No live broadcaster/observer/activation. Single-provider manifest remains evidence only. |
 
-## Network evidence and activation boundary
+## Explicit technical review of provisional details
 
-[Versioned evidence manifest](evidence/m2/network-manifest.json) records official source URLs, retrieval dates, document SHA-256, expected identity and unknown observations. Base's old `/chain/connect` URL returned 404; current official [connection page](https://docs.base.org/get-started/connect-to-base) lists 84532 and `https://sepolia.base.org`. [Circle](https://developers.circle.com/stablecoins/usdc-contract-addresses) lists `0x036CbD53842c5426634e7929541eC2318f3dCF7e` for Base Sepolia. This is **test USDC**, not the escrow address, not verified token code and not a deployment permission.
+This is an **author self-review**, not independent engineering/security verification. The following choices are documented so they cannot silently become policy through an ABI freeze:
 
-Initial public RPC attempts for chain ID, finalized block, code and decimals returned HTTP 403. A later Node fetch retry succeeded; see [raw observation](evidence/m2/rpc-observation.json): chain 84532, decimals 6, code and canonical finalized block `0x3257e05`. The manifest records the observed code Keccak-256 computed with installed @noble/hashes 2.4.0. This verifies only what one provider reported at that block, not independent provider agreement, proxy implementation or deployment provenance. Those remain unverified. Factory/escrow addresses remain null. Do not manufacture these fields from expected values. A successful single-provider read would still not close G0/G2.
+| Question | Technical disposition | Acceptance needed before freeze |
+| --- | --- | --- |
+| Exact threshold/recovery | Each escrow explicitly supplies 1..N threshold and sorted set (N<=16 implementation bound); participants sign both. No platform default. No replacement/rotation; loss uses committed fallback. ECDSA recovery remains fixed even if accounts later delegate code; delegated accounts are rejected, leaving fallback. | Owner/security review of per-escrow threshold flexibility and 16-member bound; no assumed organizational threshold. |
+| Funding window | Candidate requires funding expiry <=D and execution <D, preserving an invocation window. A signature expiring at D is unusable at D. | This is stricter than merely funding before T. Owner acceptance required before freeze. |
+| Address aliases | Candidate rejects client=worker, treasury=participant, and token/escrow addresses as recipients to keep exact-delta accounting and identities unambiguous. | Owner acceptance of treasury/participant alias restriction or implementation of rigorously aggregated outputs. |
+| Participant ERC-1271 mutability | Signature checked onchain at execution. Same contract address can change human owners; old signatures can become invalid. This does not freeze wallet internals. Arbiters use stricter direct ECDSA. | Specialist review and explicit participant-facing disclosure before a real signing flow. |
+| Nonce and replacement | Action-specific nonce fixed at zero; funding and dispute each execute once; all allocations share a terminal guard. Revised offchain mutual signatures remain executable until expiry/terminal state. No cancellation or promise of latest-signature-wins. | Owner/security acceptance of no revocation/replacement before freeze. |
+| Clone comparison | Both candidates share the same core; full contract has constructor-only initialization, clone implementation is locked and the local clone factory initializes atomically. Equivalent initialization costs are measured; full remains the simpler proposed deployment. | Independent initializer/delegatecall and full-factory review still needed; no production clone path is supplied. |
+| Durable operation replacement | Local model reserves one terminal slot permanently across idempotency keys, conservatively retaining ambiguous identity. It cannot release the slot for expired/rejected proposals. | Live replacement/recovery workflow unresolved. Never unblock it by deleting signed evidence. |
+| Persistence ownership | New explicitly LOCAL aggregate references app/agreement/milestone and enforces chain 31337; no legacy Escrow relabeling or M1 constraint changes. | Live EVM aggregate, event/outbox and API design still require review and forward migrations. |
+| Finality sources | Local two-provider adapter tests canonical/receipt/state matching. Provider independence must be trusted reviewed configuration, not an app-supplied label. | Actual independent Base operator agreement, finalized/L1 semantics and historical sweep operations remain activation work. |
 
-[Base finality documentation](https://docs.base.org/specifications/transactions/transaction-finality) distinguishes Flashblock (~200ms), L2 inclusion (~2s), L1 batch inclusion (~2m), and L1 batch finality (~20m). These are descriptive approximations, not escrow confirmation policy or demonstrated Sepolia RPC behavior. L1 withdrawal challenge periods are not payment finality. Establish finalized-tag semantics and provider independence before implementation is treated as verified.
+No material commercial choice above is marked accepted merely because code/tests exist. Proceeding with local candidates does not freeze them.
 
-M1 `BASE_SEPOLIA_CANDIDATE` remains unavailable and unchanged. Future verified Base identities need a new versioned asset and deployment record, never mutation of existing asset IDs to grant capabilities. SHA-256 evidence digests are not EVM Keccak code hashes. The read-only probe cannot approve a manifest or activate anything.
-
-## Proposed state and authority
+## Local state and authority model
 
 ```mermaid
 stateDiagram-v2
   [*] --> Unfunded
-  Unfunded --> Funded: both funding signatures + exact deposit before expiry/T
-  Funded --> Disputed: participant invocation before D
-  Funded --> Terminal: both mutual signatures before T
-  Disputed --> Terminal: both mutual signatures or immutable arbitral threshold before T
-  Funded --> Terminal: anyone invokes pinned fallback at/after T
-  Disputed --> Terminal: anyone invokes pinned fallback at/after T
+  Unfunded --> Funded: both funding approvals + exact deposit before D/expiry
+  Funded --> Disputed: participant signature before D
+  Funded --> Terminal: mutual signatures before T
+  Disputed --> Terminal: mutual signatures or fixed arbiter threshold before T
+  Funded --> Terminal: permissionless fallback at or after T
+  Disputed --> Terminal: permissionless fallback at or after T
 ```
 
-Failed token/signature calls revert the entire transition. Unfunded instances expire without accepting deposits; directly transferred tokens cannot be prevented by escrow code and are not recognized funding.
+No terminal transition can run twice; state changes precede external token calls under nonreentrancy, and transfer failure rolls back the transaction. Direct donations are not funding. Ordinary native ETH calls revert; forced ETH/token donations are stranded surplus without an operator sweep. Chain outage, gas, token blacklist/pause and compromised/lost keys can still impair receipt.
 
-| Actor | May authorize | Must never authorize |
-| --- | --- | --- |
-| Client + worker | Identical funding terms; identical mutual allocation | Redirect to new recipients/treasury after funding |
-| Either participant | Cryptographic dispute invocation before D | Unilateral arbitrary allocation |
-| Fixed arbiter threshold | Allocation after valid invocation and before T | Change participants, fees, deadline, signer set or recipients |
-| Any submitter | Relay valid intent or invoke fallback at T | Derive authority from relayer identity |
-| App API key | Tenant-scoped proposals/status/artifact submission | Transfer funds, forge signatures, mark paid |
-| Operator/factory | Deploy/index only when separately authorized | Upgrade, sweep principal, extend deadline or override verdict |
-| Observer | Evidence-derived projection and correction | Trigger second payout following ambiguous/reorg result |
+| Actor | Authority |
+| --- | --- |
+| Both original participants | Identical complete funding terms and mutual allocations, verified EOA/ERC-1271 |
+| Either original participant | Signed dispute invocation before D |
+| Immutable EOA arbiter threshold | Allocation after invocation and before T, no recipient/fee/deadline changes |
+| Any relayer | Submit valid authorizations or invoke fixed fallback at/after T; relayer identity grants nothing |
+| Application API key | Read capability metadata; proposal route currently rejects as unavailable |
+| Factory/operator | No funds authority, upgrade, owner, sweep or deadline extension |
 
-ERC-1271 participant validation is evaluated on chain at execution. Changing a wallet's owners can revoke old signatures or change who controls the same wallet; terms cannot freeze arbitrary wallet internals. Do not claim both human individuals remain identical over time. Reject unsupported wallet semantics; document this limitation in the signing preview. Arbitrators require stricter fixed EOA identity because the specification requires frozen authority/dependencies. Key loss/compromise uses only the precommitted fallback, with no operator remedy.
+## Exact codec and conservation
 
-## Proposed signing codec (not an ABI commitment)
+Canonical source: [Solidity](../../contracts/evm/src/PactEscrow.sol), [TypeScript](../../server/src/modules/base/codec.ts), [vectors](../../contracts/evm/test/vectors.json). Domain: `PactAgentEscrow`, version `2-local-review-1`, execution chain ID, verifying instance. Application/M1 SHA-256 commitments are opaque terms fields, **not** the EIP-712 digest.
 
-EIP-712 domain: `name = PactAgentEscrow`, `version = 2-draft`, `chainId = 84532`, `verifyingContract = instance`. The draft version must not appear in funded instances. Use canonical ABI encoding and Ethereum Keccak-256, not JSON serialization or M1 application hashing.
+Terms encode bytes32 app/agreement/milestone/escrow/application commitments; token, original client/worker and treasury; uint256 principal, client/worker bps, fallback worker share, D/T and threshold; bytes32 fee policy and arbiter set hash. Set hash is Keccak of Solidity `abi.encode(address[])` (offset, count, ordered padded addresses). Client fallback share is derived as P minus committed worker share. Contract version is bound by the domain. Action type strings and field widths are checked into both codecs; all uint256 strings must be canonical nonnegative decimal.
 
-Draft `Terms` binds `termsVersion`, `appCommitment`, `agreementCommitment`, `milestoneCommitment`, `escrowId`, `token`, `client`, `worker`, `principal`, `clientFeeBps`, `workerFeeBps`, `treasury`, `feePolicyVersion`, `fallbackWorker`, `fallbackClient`, `disputeDeadline`, `finalDeadline`, `arbiterSetHash`, `arbiterThreshold`, and `applicationCommitment`. Commitments are bytes32 opaque IDs without personal data. Amounts/times are uint256; rates/thresholds use explicit reviewed widths before ABI freeze. All dynamic list hashes require documented element order/encoding.
+Distinct actions: `FundingApproval`, `MutualSettlement`, `DisputeInvocation`, `ArbitralSettlement`. Every action binds termsHash, nonce zero and validUntil; settlement adds W and C. Validity is exclusive (`timestamp < validUntil`). State guards consume each action. Reordered, repeated, malformed or wrong identities do not become distinct approvals.
 
-Draft distinct type names:
+`W+C=P`; `R=floor(P*bc/10000)`; `Fc=floor(W*bc/10000)`; `Fw=floor(W*bw/10000)`.
 
-- `FundingApproval(bytes32 termsHash,uint256 nonce,uint256 validUntil)`
-- `MutualSettlement(bytes32 termsHash,uint256 workerAmount,uint256 clientAmount,uint256 nonce,uint256 validUntil)`
-- `DisputeInvocation(bytes32 termsHash,uint256 nonce,uint256 validUntil)`
-- `ArbitralSettlement(bytes32 termsHash,uint256 workerAmount,uint256 clientAmount,uint256 nonce,uint256 validUntil)`
+`clientNet=C+R-Fc`; `workerNet=W-Fw`; `treasuryNet=Fc+Fw`; sum=`P+R`.
 
-Separate nonce namespaces by action, consume on success; terminal state prevents all subsequent settlement. Validate signer identities rather than positions or signature-byte distinctness. Reject zero/same participant identities; review recipient/treasury alias behavior explicitly (recommend distinct recipients for initial exact-delta accounting). Expiry semantics proposed: executable only `timestamp < validUntil`, with all nonfallback financial actions also `< T`.
+Since W<=P, Fc<=R; rates<=1000 ensure Fw<=W. Full refund earns no fee and returns reserve. Full worker payment earns all client reserve. Every path uses the same allocation function. Checked Math.mulDiv avoids intermediate multiplication overflow; funding must fit uint256. PostgreSQL M1 exact `div` and serialization correction remain unchanged.
 
-Before finalization, produce cross-language vectors for every type/domain/term, malformed signatures, compact/canonical ECDSA rules, ERC-1271 revert/bad magic value, list ordering, and domain/nonce replay. No vector/hash/ABI has been invented in this design document. These are outstanding M2.1 deliverables.
+## Network evidence and release gates
 
-## Conservation and integer boundaries
+[Manifest](evidence/m2/network-manifest.json) and [RPC observation](evidence/m2/rpc-observation.json) retain the original source/retrieval/code evidence. Circle lists `0x036CbD53842c5426634e7929541eC2318f3dCF7e`; Base's current [connection page](https://docs.base.org/get-started/connect-to-base) lists 84532. Initial HTTP403 attempts were followed by a successful single-provider observation of code, six decimals and canonical finalized block `0x3257e05`. No independent agreement/proxy implementation/deployment provenance is claimed. Factory/escrow deployment addresses remain null. No code template hash grants a capability.
 
-For principal P > 0, W >= 0, C >= 0 and W + C = P:
+[Base finality documentation](https://docs.base.org/specifications/transactions/transaction-finality) distinguishes Flashblock, L2 inclusion, L1 batch inclusion and L1 batch finality. Approximate timings are not policy constants. L1 withdrawal windows are not escrow payment finality. No fallback to latest or inferred paid status is allowed.
 
-`R = floor(P * bc / 10000)`; `Fc = floor(W * bc / 10000)`; `Fw = floor(W * bw / 10000)`.
-
-`clientNet = C + R - Fc`; `workerNet = W - Fw`; `treasuryNet = Fc + Fw`.
-
-Since W <= P and rates <= 1000, Fc <= R and Fw <= W. All outputs are nonnegative. Summing cancels Fc/Fw and yields P + R. Full refund W=0 returns all R, no fee; full payment W=P earns all client reserve. Arbitrary split earns fees only on W, including fallback/arbitration. Overflow checks apply to reserve+principal, every sum, and recipient balance differences. Zero-value transfers should be skipped. Surplus donations never increase P or allocation.
-
-This is an algebraic design proof, not an EVM arithmetic/security result. PostgreSQL must retain PR #118's `div` semantics; do not reintroduce rounded numeric `/` followed by floor. Test Solidity mulDiv at uint256 extremes with independent bigint expectations and real EVM execution.
-
-## Proposed persistence and API evolution
-
-M1 Foundation/Operation/Attempt/Observation tables are append-only, SettlementOperation is constrained to unauthorized, and foundation scope only admits existing CKB/sandbox rails. Do not weaken checks or reinterpret historical rows. Propose new versioned EVM terms/operation/artifact/projection tables and explicit composite app/agreement/milestone ownership, with forward migrations and populated legacy fixtures. Review whether independent EVM escrow aggregate is preferable to extending legacy Escrow before schema coding; this is unresolved, not approved.
-
-Store encrypted recoverable signed bytes, content digest, key version and transaction identity atomically with operation/outbox before any submission. Separate immutable artifacts/attempts/observations from mutable derived projection. Enforce persistent `(appId, operationKind, idempotencyKey)` uniqueness, reject different payload on same key. Worker leases do not replace operation uniqueness. Lost response retains unknown state; re-submit only the identical signed transaction/authorization after reconciling its identity, never generate a new nonce/payout blindly. No unsigned service verdict is admissible.
-
-Observer must verify successful receipt, pinned emitter/code/terms/token, full amounts, state at canonical block, and finalized ancestry across independent sources. Duplicate events cannot duplicate ledger/webhook effects. Correction event IDs are distinct from original finalized events. A deep reorg moves projection to reconciliation_required, retains all artifacts and blocks fresh payouts; sweeps must revisit previously finalized history, not only the observer head.
-
-Proposed `/v2` resources: terms/initiation, signing payload, funding proposal, settlement proposal and operation status. Separate scopes such as `escrows:v2:read` and `escrows:v2:propose`; exact paths/scopes remain unfinalized. Fail closed before serving executable signing payload if manifest/terms/domain cannot be verified. Never reuse v1 release/refund endpoint semantics as Base authorization. Status vocabulary follows the spec; HTTP acceptance is not funded/finalized. Extend existing transactional webhook outbox with signed deduplicated notifications only after schema/API review.
-
-## Reviews and gates
-
-| Gate | Reviewer / evidence | Current result |
-| --- | --- | --- |
-| M0 product policy | Recorded in M0 approval | Existing accepted commercial/security constraints preserved |
-| G0 architecture/network/authority | No M2 reviewer acceptance supplied | **Open**; eight proposals above need review; independent identity/implementation evidence incomplete |
-| G1 contract/backend review + actual EVM/integration | No implementation/test evidence yet | **Not reached** |
-| G2 faucet-only deployment | User expressly forbids deployment in this task | **Not authorized** |
-| G3 production | Out of M2 | **Unavailable** |
-
-The [specification](../../M2_NATIVE_USDC_BASE_SEPOLIA_SPEC.md) §7 says: “where unproved, continue non-financial scaffolding only and flag the affected contract work.” Section 3 requires approval before immutable bytecode or API assumptions are finalized. Therefore this branch provides a reviewable G0 package and read-only evidence tooling; it does not claim completion of M2 or silently finalize contract/API choices. Resume affected implementation only after the unresolved identity/authority assumptions have evidence and architecture review accepts the design; deployment remains separately prohibited.
+| Gate | Evidence / status |
+| --- | --- |
+| M2.1 direction | Owner conditional acceptance recorded above; local work authorized |
+| ABI/factory/policy freeze | Open questions above; no independent technical acceptance |
+| G1 local implementation review | Local tests exist; independent engineering and contract-security review still absent |
+| Network activation | Independent sources, proxy implementation/provenance, deployment identity, reliable observer/storage/incident policy still incomplete |
+| G2 deployment | Explicitly forbidden by current instruction |
+| G3 production / M3 | Outside scope; no legal/financial/production approval |

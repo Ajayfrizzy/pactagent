@@ -39,3 +39,5 @@ mock-price.js
 FORUM_FEEDBACK_POST.md
 
 infrastructure-transition-summary.md
+contracts/evm/cache/
+contracts/evm/broadcast/

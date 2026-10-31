@@ -3,7 +3,7 @@
   "info": {
     "title": "PactAgent M1 read-only foundation",
     "version": "2.0.0",
-    "description": "No financial writes. Base Sepolia candidate has no verified token/deployment. CKB semantics are code documentation, not a verified historical deployment or v2 capability."
+    "description": "No financial writes. Base Sepolia candidate has no verified token/deployment. CKB semantics are code documentation, not a verified historical deployment or v2 capability. M2 local prototypes do not activate Base; read/propose scopes are distinct."
   },
   "components": {
     "securitySchemes": {
@@ -122,6 +122,69 @@
           "codeSemantics": {
             "type": "object",
             "description": "Repository CKB v1 semantics; not verified deployment capabilities."
+          }
+        }
+      },
+      "BaseUnavailableCapability": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rail",
+          "network",
+          "status",
+          "contractVersion",
+          "deploymentId",
+          "financialWrites",
+          "signingPayloads",
+          "reason"
+        ],
+        "properties": {
+          "rail": {
+            "type": "string",
+            "enum": [
+              "base"
+            ]
+          },
+          "network": {
+            "type": "string",
+            "enum": [
+              "eip155:84532"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "unavailable"
+            ]
+          },
+          "contractVersion": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              null
+            ]
+          },
+          "deploymentId": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              null
+            ]
+          },
+          "financialWrites": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "signingPayloads": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "reason": {
+            "type": "string"
           }
         }
       }
@@ -326,6 +389,65 @@
             "description": "Optional capability probe; unsupported actions return 400 unsupported_rail_capability."
           }
         ]
+      }
+    },
+    "/v2/base/capabilities": {
+      "get": {
+        "summary": "Base execution remains unavailable pending activation gates",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "x-required-scope": "escrows:v2:read",
+        "responses": {
+          "200": {
+            "description": "Unavailable capability metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BaseUnavailableCapability"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Missing scope"
+          }
+        }
+      }
+    },
+    "/v2/base/proposals": {
+      "post": {
+        "summary": "Base execution remains unavailable pending activation gates",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "x-required-scope": "escrows:v2:propose",
+        "responses": {
+          "400": {
+            "description": "unsupported_capability; no signing or financial side effect"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Missing scope"
+          }
+        }
       }
     }
   }
