@@ -85,6 +85,8 @@ jobs:
       - run: npm run licenses:test
       - run: npm run licenses:check
       - run: npm run audit:test
+      - name: Test M2 read-only network evidence collection
+        run: node --test scripts/m2-network-probe.test.mjs
       - run: npm run lint
       - run: npm run build
       - name: Verify build does not modify tracked files
