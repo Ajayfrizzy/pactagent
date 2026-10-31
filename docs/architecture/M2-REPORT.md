@@ -44,12 +44,20 @@ Local Node: **26.12.1**, macOS arm64. Commands run with that Node on PATH:
 | `npm run controls:check`, `deploy:check`, `observability:check`, `phase7:check` | Passed; 27 controls, 10 manifest resources, 2 deployment validator tests, 12 alerts/6 dashboards and performance policy |
 | `npm run licenses:test`, `licenses:check`, `audit:test`, `env:check` | Passed; 4 license tests, 826 installed packages, 5 audit-policy tests, 88 environment variables |
 | `npm run audit:dependencies` | Passed; no high+ vulnerability records required exceptions |
-| Markdown relative links, JSON parsing, `git diff --check` | Checked before commit |
+| Markdown relative links, JSON parsing, authored-file `git diff --check` | Passed; supplied specification retains its intentional Markdown hard-break spaces |
 | Migrations, populated upgrades, CKB host tests, clean lockfile installs, image scans | Existing required CI retained; remote result recorded separately below. Not claimed as locally rerun |
 | EVM/backend Base integration | Not run: no financial implementation exists |
 
-CI adds only the offline probe test invocation to the existing workspace job. Permissions remain read-only, no live RPC test, secrets, auto-merge or deployment step was added. Passing these checks is not financial security assurance.
+CI adds the offline probe test invocation to the existing workspace job. Initial secret scanning flagged five occurrences of the public Circle address and public code digests as generic API keys. `.gitleaks.toml` retains every default rule and adds three exact-value AND exact-path exceptions for that public evidence; no credential pattern or entire path is exempt. Permissions remain read-only, no live RPC test, secrets, auto-merge or deployment step was added. Passing these checks is not financial security assurance.
 
 ## Handoff / decisions needed
 
 Review the eight proposed decisions in [M2-DESIGN-DECISIONS](M2-DESIGN-DECISIONS.md), especially immutable arbitral EOA threshold versus ERC-1271 participant mutability, full deployment versus measured pinned-clone alternative, D/T invocation semantics, exact signing codec and versioned EVM persistence. Supply named architecture acceptance and resolve remaining independent identity/proxy provenance evidence before treating G0 as passed. Implement and independently review the still-outstanding work packages locally, then rerun the entire mandatory adversarial matrix. G2 needs separate faucet-only deployment approval; this task expressly prohibits deployment. G3 and M3 remain out of scope.
+
+## Remote validation and scanner correction
+
+Draft PR: https://github.com/Ajayfrizzy/pactagent/pull/119. Initial implementation commit: `bc67848bedcacb9d17698aad67e2d7876238cd59`.
+
+Initial [CI run 41242399360](https://github.com/Ajayfrizzy/pactagent/actions/runs/41242399360) passed **11 of 12 jobs**, including all three clean lockfile installs, server/database migrations and populated upgrades, CKB host tests, builds and all three container vulnerability scans. Secret scanning alone reported the five public-evidence matches described above; this was a real failed check, not treated as a pass.
+
+The correction was validated using the same Gitleaks **8.24.3** as CI: scanning the full branch commit range with the new config reports no leaks. Three isolated fixture checks show the exact public address is allowed only at its designated evidence path, a different synthetic credential at that same path is still detected, and the same public address at an unrelated credentials path is still detected. No history was rewritten, no check disabled, no blanket address/hash/file exemption added. The follow-up commit runs the full required CI again; consult the PR's latest-head checks for the result.

@@ -1,0 +1,30 @@
+title = "PactAgent secret scanning"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+
+# These exact public chain values are evidence, not API credentials. Retain all
+# default detection rules; each exception requires BOTH a value and a file path.
+[[rules.allowlists]]
+description = "Circle's published Base Sepolia test USDC address"
+condition = "AND"
+regexTarget = "secret"
+regexes = ['''^0x036CbD53842c5426634e7929541eC2318f3dCF7e$''']
+paths = ['''^scripts/m2-network-probe\.mjs$''', '''^docs/architecture/evidence/m2/(network-manifest|rpc-observation)\.json$''']
+
+[[rules.allowlists]]
+description = "Keccak-256 of public token code observed at block 0x3257e05"
+condition = "AND"
+regexTarget = "secret"
+regexes = ['''^0xedc5281a85c0efecd49999a1ef668390c59b88702f2d4a07029d7f5d63059d6c$''']
+paths = ['''^docs/architecture/evidence/m2/network-manifest\.json$''']
+
+[[rules.allowlists]]
+description = "SHA-256 evidence digest of the same public token code"
+condition = "AND"
+regexTarget = "secret"
+regexes = ['''^e878b99fc0c17354c86c7edeb999c70c18cfd925abb0958496f027cbad996d28$''']
+paths = ['''^docs/architecture/evidence/m2/rpc-observation\.json$''']
