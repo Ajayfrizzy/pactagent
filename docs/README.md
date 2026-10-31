@@ -22,3 +22,9 @@ paths are deliberately migrated and validated.
 The [M0 report](architecture/M0-REPORT.md) indexes the architecture/security deliverables, current-code audit and validation. Read the [authoritative specification](../M0_ARCHITECTURE_SPEC.md) and [decision register](architecture/M0-DECISIONS.md) before implementation. These describe proposed work; existing behavior documents are not evidence that the new capabilities are implemented.
 
 The [M0 decision review](../M0_DECISION_REVIEW.md) and [evidence-linked findings](architecture/M0-DECISION-REVIEW-FINDINGS.md) record proposed choices and outstanding approval gates. They do not authorize M1 or amend the accepted decision register.
+
+## M1 foundation (review required)
+
+- [M0 product-direction approval](architecture/M0-PRODUCT-APPROVAL.md); specialized approvals remain open.
+- [M1 implementation](architecture/M1-IMPLEMENTATION.md) and [validation report](architecture/M1-REPORT.md).
+- [Authoritative M1 scope](../M1_MULTI_CHAIN_FOUNDATION_SPEC.md).

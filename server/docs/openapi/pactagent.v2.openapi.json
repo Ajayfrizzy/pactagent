@@ -1,0 +1,332 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "PactAgent M1 read-only foundation",
+    "version": "2.0.0",
+    "description": "No financial writes. Base Sepolia candidate has no verified token/deployment. CKB semantics are code documentation, not a verified historical deployment or v2 capability."
+  },
+  "components": {
+    "securitySchemes": {
+      "apiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key"
+      }
+    },
+    "schemas": {
+      "Asset": {
+        "type": "object",
+        "required": [
+          "version",
+          "id",
+          "chain",
+          "network",
+          "deployment",
+          "kind",
+          "token",
+          "decimals",
+          "maxBaseUnits",
+          "symbol"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "chain": {
+            "type": "string"
+          },
+          "network": {
+            "type": "string"
+          },
+          "deployment": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          },
+          "maxBaseUnits": {
+            "type": "string"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "decimals": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          }
+        }
+      },
+      "Capabilities": {
+        "type": "object",
+        "required": [
+          "version",
+          "binding",
+          "kind",
+          "actions"
+        ],
+        "properties": {
+          "version": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "binding": {
+            "type": "object",
+            "description": "Escrow-persisted identity only; unknown deployment remains null."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "unavailable",
+              "synthetic",
+              "ckb-v1-unverified"
+            ]
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "fund",
+                "release",
+                "refund"
+              ]
+            }
+          },
+          "reason": {
+            "type": "string"
+          },
+          "signatureMode": {
+            "type": "string",
+            "enum": [
+              "none"
+            ]
+          },
+          "finality": {
+            "type": "string",
+            "enum": [
+              "synthetic-only"
+            ]
+          },
+          "codeSemantics": {
+            "type": "object",
+            "description": "Repository CKB v1 semantics; not verified deployment capabilities."
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/v2/metadata": {
+      "get": {
+        "operationId": "getFoundationMetadata",
+        "summary": "getFoundationMetadata",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "description": "Requires escrows:read scope. Authenticated tenant only. Read-only metadata does not enable funding.",
+        "responses": {
+          "200": {
+            "description": "Foundation metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "version",
+                        "mode",
+                        "assets",
+                        "candidates",
+                        "ckbV1CodeSemantics",
+                        "financialWrites"
+                      ],
+                      "properties": {
+                        "version": {
+                          "type": "integer",
+                          "enum": [
+                            1
+                          ]
+                        },
+                        "mode": {
+                          "type": "string",
+                          "enum": [
+                            "read-only-foundation"
+                          ]
+                        },
+                        "assets": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/Asset"
+                          }
+                        },
+                        "candidates": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "description": "Unavailable Base Sepolia USDC candidate. assetId/token/deployment are null."
+                          }
+                        },
+                        "ckbV1CodeSemantics": {
+                          "type": "object",
+                          "description": "Lower-bound competing full-client refund; no exclusive cutoff, split or arbitration."
+                        },
+                        "financialWrites": {
+                          "type": "string",
+                          "enum": [
+                            "unavailable"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected. Unsupported action returns code unsupported_rail_capability; an app key never authorizes funds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                },
+                "example": {
+                  "error": {
+                    "type": "invalid_request_error",
+                    "code": "unsupported_rail_capability",
+                    "message": "Capability is not supported by this escrow deployment."
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key required"
+          },
+          "403": {
+            "description": "Scope missing"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/v2/escrows/{id}/capabilities": {
+      "get": {
+        "operationId": "getEscrowCapabilities",
+        "summary": "getEscrowCapabilities",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "description": "Requires escrows:read scope. Authenticated tenant only. Read-only metadata does not enable funding.",
+        "responses": {
+          "200": {
+            "description": "Foundation metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "escrowId",
+                        "metadata",
+                        "capabilities"
+                      ],
+                      "properties": {
+                        "escrowId": {
+                          "type": "string"
+                        },
+                        "metadata": {
+                          "type": "object",
+                          "description": "Explicit legacy translation. Unknown/mainnet/synthetic currency is not promoted to a real asset. No historical backfill."
+                        },
+                        "capabilities": {
+                          "$ref": "#/components/schemas/Capabilities"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected. Unsupported action returns code unsupported_rail_capability; an app key never authorizes funds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                },
+                "example": {
+                  "error": {
+                    "type": "invalid_request_error",
+                    "code": "unsupported_rail_capability",
+                    "message": "Capability is not supported by this escrow deployment."
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key required"
+          },
+          "403": {
+            "description": "Scope missing"
+          },
+          "429": {
+            "description": "Rate limited"
+          },
+          "404": {
+            "description": "Escrow absent or belongs to another tenant"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional capability probe; unsupported actions return 400 unsupported_rail_capability."
+          }
+        ]
+      }
+    }
+  }
+}

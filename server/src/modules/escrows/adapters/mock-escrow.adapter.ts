@@ -1,3 +1,4 @@
+import { describeRail, type DeploymentBinding } from './rail-capabilities';
 import { createHash } from 'crypto';
 import type { EscrowAdapter, EscrowAdapterCreateInput } from './escrow-adapter.interface';
 
@@ -6,6 +7,9 @@ function mockHash(parts: string[]) {
 }
 
 export class MockEscrowAdapter implements EscrowAdapter {
+  describeCapabilities(binding: DeploymentBinding) {
+    return describeRail(binding, 'mock');
+  }
   async createEscrowLock(input: EscrowAdapterCreateInput) {
     return {
       status: 'awaiting_funding',

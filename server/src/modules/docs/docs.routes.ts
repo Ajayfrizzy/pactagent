@@ -72,6 +72,10 @@ router.get('/openapi.json', (req, res) => {
   return res.send(openApiJson);
 });
 
+router.get('/openapi.v2.json', (_req, res) => {
+  res.type('application/json').send(readFileSync(join(process.cwd(), 'docs/openapi/pactagent.v2.openapi.json'), 'utf8'));
+});
+
 router.get('/docs', (_req, res) => {
   res.setHeader('Cache-Control', 'public, max-age=300');
   res.type('html').send(renderDocsHtml());

@@ -482,3 +482,84 @@ model WorkerHeartbeat {
   @@index([service, lastHeartbeatAt])
   @@index([status, lastHeartbeatAt])
 }
+
+// M1 prospective commitments only; no backfill or change to legacy Escrow.
+// Full parent-scope FKs, numeric CHECKs and immutability are custom SQL.
+model EscrowFoundation {
+  id                    String   @id @default(uuid())
+  appId                 String
+  escrowId              String
+  agreementId           String
+  milestoneId           String?
+  version               Int      @default(1)
+  assetId               String
+  network               String
+  deploymentId          String
+  termsHash             String
+  canonicalTerms        String
+  principal             String
+  clientFeeDeposit      String
+  clientFeeBps          Int
+  workerFeeBps          Int
+  maxBaseUnits          String
+  finalityPolicyVersion String
+  createdAt             DateTime @default(now())
+
+  @@unique([id, appId])
+  @@unique([escrowId, appId])
+}
+
+model SettlementOperation {
+  id              String   @id @default(uuid())
+  appId           String
+  foundationId    String
+  idempotencyKey  String
+  requestHash     String
+  intentHash      String
+  canonicalIntent String
+  nonce           String   @default("0")
+  principalWorker String
+  principalClient String
+  state           String   @default("unauthorized")
+  createdAt       DateTime @default(now())
+
+  @@unique([id, appId])
+  @@unique([appId, idempotencyKey])
+  @@unique([foundationId, nonce])
+}
+
+// Append-only recoverable artifacts/attempts; no private signing keys.
+model BroadcastAttempt {
+  id                     String   @id @default(uuid())
+  appId                  String
+  operationId            String
+  attempt                Int
+  transactionId          String
+  artifactHash           String
+  artifactReference      String
+  authorizationProofHash String
+  outcome                String // prepared | accepted | unknown | rejected
+  createdAt              DateTime @default(now())
+
+  @@unique([id, appId])
+  @@unique([operationId, attempt])
+}
+
+model ChainObservation {
+  id            String   @id @default(uuid())
+  appId         String
+  operationId   String
+  attemptId     String
+  policyVersion String
+  transactionId String
+  blockHash     String?
+  blockNumber   String?
+  logIndex      String?
+  canonical     String // verified | unknown | removed | disagreeing
+  evidenceJson  String
+  correctionOf  String?
+  createdAt     DateTime @default(now())
+
+  @@unique([id, appId])
+  @@index([appId, operationId, createdAt])
+}
