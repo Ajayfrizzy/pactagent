@@ -156,6 +156,8 @@ jobs:
         run: |
           createdb -h 127.0.0.1 -U pactagent pactagent_m1_upgrade
           M1_TEST_DATABASE_URL=postgresql://pactagent:pactagent@127.0.0.1:5432/pactagent_m1_upgrade node ../scripts/test-m1-upgrade.mjs
+          createdb -h 127.0.0.1 -U pactagent pactagent_m1_review_upgrade
+          M1_TEST_DATABASE_URL=postgresql://pactagent:pactagent@127.0.0.1:5432/pactagent_m1_review_upgrade node ../scripts/test-m1-upgrade.mjs --review-correction
       - run: npm test
       - run: npm run env:check --prefix ..
       - run: npm run test:integration

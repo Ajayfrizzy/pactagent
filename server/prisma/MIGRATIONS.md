@@ -39,3 +39,25 @@ Run `node scripts/test-m1-upgrade.mjs` from the repository root with
 `M1_TEST_DATABASE_URL` pointing to an empty disposable local `pactagent_m1_upgrade`
 database. See [M1 implementation](../../docs/architecture/M1-IMPLEMENTATION.md) for
 compatibility, lock-window review, old-reader rollback and additive repair policy.
+
+### M1 review correction
+
+`20261031000200_foundation_exact_fees_and_locking` preserves the already-merged
+M1 migration checksum. It replaces the fee CHECK with exact numeric `div` and
+strengthens foundation insertion to `FOR UPDATE` on its parent. After validation,
+an `id = id` update advances only the unfunded parent's MVCC row version; no
+column value or timestamp changes. This also forces stale repeatable-read parent
+writers to abort with SQLSTATE 40001 instead of missing a newly inserted foundation.
+Retry a serialization failure only by restarting the whole transaction and
+revalidating scope; never reuse stale terms or weaken isolation.
+
+The correction validates existing fee data and rejects pre-existing scope
+mismatches. If it fails, stop and investigate using reviewed authoritative records;
+do not mutate immutable fees, retarget funded escrows or disable constraints.
+DDL requires a brief table-lock window. This is a forward schema correction, not
+an on-chain migration, backfill or deployment authorization.
+
+The original pre-M1 fixture now applies all forward migrations. Additionally run
+`node scripts/test-m1-upgrade.mjs --review-correction` with `M1_TEST_DATABASE_URL`
+pointing to an empty local `pactagent_m1_review_upgrade` database; this upgrades
+populated merged-M1 records and verifies every stored field remains unchanged.

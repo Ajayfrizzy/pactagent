@@ -105,3 +105,7 @@ Documentation validation: byte-exact approval import, local link existence, bala
 [GitHub Actions run 41215662431](https://github.com/Ajayfrizzy/pactagent/actions/runs/41215662431) passed all 12 CI jobs: branch policy, secret scanning, root/server/web isolated lockfiles, workspace/supply-chain policy, server/migrations, web, CKB host contract and all three container builds/Grype scans. This includes fresh migrations, the original baseline upgrade fixture, the new populated pre-M1 upgrade, Linux application tests and OpenAPI compatibility. No scan/check was bypassed or weakened. External Vercel status also reported success; no deployment workflow was dispatched by this task.
 
 Both disposable local test containers were removed after validation. Working branch tracks `origin/feature/m1-multichain-foundation`. Staging/main refs and PR-unmerged status are rechecked in the final handoff. Specialized engineering/cryptographic/finance/legal approval remains OPEN despite green CI.
+
+## Subsequent database code review
+
+PR #109 was subsequently merged by another actor at `6e6d241918aff685b40e351f5f0c30b663b202a2`. Its original status above is historical. The two fee-arithmetic and parent-locking findings, forward-only fixes, reproductions and correction validation are documented in [M1 review corrections](M1-REVIEW-CORRECTIONS.md). This corrective work does not merge or deploy anything and does not close specialist launch gates.
