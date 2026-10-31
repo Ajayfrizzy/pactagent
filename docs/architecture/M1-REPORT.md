@@ -1,6 +1,6 @@
 # M1 implementation and validation report
 
-Date: 2026-10-31. Branch: `feature/m1-multichain-foundation`, based on freshly fetched `origin/staging` **`43b9dcc9e3cc4d1de6a5074008dcb3b9a22002fe`**. Status: implementation prepared for engineering review; **not merge, deployment, production or M2 approval**. Pull request: [#109](https://github.com/Ajayfrizzy/pactagent/pull/109), **open and unmerged**, targeting protected staging. Implementation head: **`c7e7a645666c1b5dda5195659a0f0b75ef2ebf3e`** (the report is updated in a subsequent documentation-only commit). Remote checks are pending at this report update; the final handoff reports their latest status. [Implementation decisions, compatibility and recovery](M1-IMPLEMENTATION.md) are part of this report.
+Date: 2026-10-31. Branch: `feature/m1-multichain-foundation`, based on freshly fetched `origin/staging` **`43b9dcc9e3cc4d1de6a5074008dcb3b9a22002fe`**. Status: implementation prepared for engineering review; **not merge, deployment, production or M2 approval**. Pull request: [#109](https://github.com/Ajayfrizzy/pactagent/pull/109), **open and unmerged**, targeting protected staging. Implementation head: **`c7e7a645666c1b5dda5195659a0f0b75ef2ebf3e`** (the report is updated in a subsequent documentation-only commit). The complete remote CI run passed on report snapshot `7d2480f1395a9a74253be9b55c025ee39f448c36`; this subsequent documentation-only commit records that evidence. The PR shows checks for its current head. [Implementation decisions, compatibility and recovery](M1-IMPLEMENTATION.md) are part of this report.
 
 ## Delivered scope
 
@@ -99,3 +99,9 @@ Review the complete PR, the byte-preserved approval and [implementation ADR](M1-
 - [web/package-lock.json](../../web/package-lock.json)
 
 Documentation validation: byte-exact approval import, local link existence, balanced fences and authored whitespace checks passed. Supplied Markdown retains intentional two-space hard line breaks. A focused immutability test was made portable across root/server module strictness using `Reflect.set`; both execution contexts preserve the frozen recipient. No private credentials or generated build outputs are committed.
+
+## Remote CI completion
+
+[GitHub Actions run 41215662431](https://github.com/Ajayfrizzy/pactagent/actions/runs/41215662431) passed all 12 CI jobs: branch policy, secret scanning, root/server/web isolated lockfiles, workspace/supply-chain policy, server/migrations, web, CKB host contract and all three container builds/Grype scans. This includes fresh migrations, the original baseline upgrade fixture, the new populated pre-M1 upgrade, Linux application tests and OpenAPI compatibility. No scan/check was bypassed or weakened. External Vercel status also reported success; no deployment workflow was dispatched by this task.
+
+Both disposable local test containers were removed after validation. Working branch tracks `origin/feature/m1-multichain-foundation`. Staging/main refs and PR-unmerged status are rechecked in the final handoff. Specialized engineering/cryptographic/finance/legal approval remains OPEN despite green CI.
