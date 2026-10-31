@@ -50,7 +50,8 @@ test('application commitments bind all terms, scope, arbitrary allocation and ca
   assert.throws(() => freezeTerms(sampleTerms({ network: 'mainnet' })));
   assert.throws(() => freezeTerms(sampleTerms({ clientFeeDeposit: '21' })));
   assert.throws(() => freezeTerms({ ...sampleTerms(), unknown: true }));
-  assert.throws(() => { original.terms.client.recipient = 'tampered'; });
+  assert.equal(Reflect.set(original.terms.client, 'recipient', 'tampered'), false);
+  assert.equal(original.terms.client.recipient, 'synthetic-client');
   assert.throws(() => freezeTerms(sampleTerms({ assetId: CKB_TESTNET.id, network: CKB_TESTNET.network })));
   for (const w of ['0', '1', '370', '1000']) assert.equal(mutualIntent(sampleTerms(), w, String(1000 - Number(w)), '0').intent.authorization, 'unauthorized');
   assert.throws(() => mutualIntent(sampleTerms(), '370', '631', '0'));
