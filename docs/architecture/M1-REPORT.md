@@ -1,6 +1,6 @@
 # M1 implementation and validation report
 
-Date: 2026-10-31. Branch: `feature/m1-multichain-foundation`, based on freshly fetched `origin/staging` **`43b9dcc9e3cc4d1de6a5074008dcb3b9a22002fe`**. Status: implementation prepared for engineering review; **not merge, deployment, production or M2 approval**. PR/head and remote-check results will be recorded after publication. [Implementation decisions, compatibility and recovery](M1-IMPLEMENTATION.md) are part of this report.
+Date: 2026-10-31. Branch: `feature/m1-multichain-foundation`, based on freshly fetched `origin/staging` **`43b9dcc9e3cc4d1de6a5074008dcb3b9a22002fe`**. Status: implementation prepared for engineering review; **not merge, deployment, production or M2 approval**. Pull request: [#109](https://github.com/Ajayfrizzy/pactagent/pull/109), **open and unmerged**, targeting protected staging. Implementation head: **`c7e7a645666c1b5dda5195659a0f0b75ef2ebf3e`** (the report is updated in a subsequent documentation-only commit). Remote checks are pending at this report update; the final handoff reports their latest status. [Implementation decisions, compatibility and recovery](M1-IMPLEMENTATION.md) are part of this report.
 
 ## Delivered scope
 
@@ -53,3 +53,49 @@ Initial fixture validation rejected malformed synthetic CKB cell data under an e
 Review the complete PR, the byte-preserved approval and [implementation ADR](M1-IMPLEMENTATION.md). Resolve engineering findings, ensure required CI is green, and obtain qualified interface acceptance before an independently authorized merge to staging. This task leaves the PR open. Any later M2 task requires explicit owner authorization, official Base Sepolia/native-USDC deployment verification, reviewed consent/arbiter/deadline and factory design, approved testnet finality assumptions and actual transaction-level adversarial tests. CI success does not close specialist or launch gates.
 
 `main` was independently verified unchanged at **`a526b78a1fb2f7282be366c0bd0bf29f4af702b2`**. `staging` remains at the recorded baseline. No merge was performed.
+
+## Changed-file inventory
+
+- [.github/workflows/ci.yml](../../.github/workflows/ci.yml)
+- [CONTRIBUTING.md](../../CONTRIBUTING.md)
+- [M0_PRODUCT_APPROVAL.md](../../M0_PRODUCT_APPROVAL.md)
+- [M1_MULTI_CHAIN_FOUNDATION_SPEC.md](../../M1_MULTI_CHAIN_FOUNDATION_SPEC.md)
+- [docs/README.md](../README.md)
+- [docs/architecture/M0-DECISION-REVIEW-FINDINGS.md](M0-DECISION-REVIEW-FINDINGS.md)
+- [docs/architecture/M0-DECISIONS.md](M0-DECISIONS.md)
+- [docs/architecture/M0-PRODUCT-APPROVAL.md](M0-PRODUCT-APPROVAL.md)
+- [docs/architecture/M1-IMPLEMENTATION.md](M1-IMPLEMENTATION.md)
+- [docs/architecture/M1-REPORT.md](M1-REPORT.md)
+- [docs/architecture/data-api-migration.md](data-api-migration.md)
+- [docs/architecture/escrow-security.md](escrow-security.md)
+- [docs/architecture/fees-billing.md](fees-billing.md)
+- [docs/architecture/system-design.md](system-design.md)
+- [package-lock.json](../../package-lock.json)
+- [scripts/test-m1-upgrade.mjs](../../scripts/test-m1-upgrade.mjs)
+- [server/docs/openapi/pactagent.v2.openapi.json](../../server/docs/openapi/pactagent.v2.openapi.json)
+- [server/prisma/MIGRATIONS.md](../../server/prisma/MIGRATIONS.md)
+- [server/prisma/fixtures/m1-upgrade-verify.sql](../../server/prisma/fixtures/m1-upgrade-verify.sql)
+- [server/prisma/fixtures/m1-upgrade.sql](../../server/prisma/fixtures/m1-upgrade.sql)
+- [server/prisma/migrations/20261031000100_multichain_foundation/migration.sql](../../server/prisma/migrations/20261031000100_multichain_foundation/migration.sql)
+- [server/prisma/schema.prisma](../../server/prisma/schema.prisma)
+- [server/src/app.ts](../../server/src/app.ts)
+- [server/src/modules/assets/asset-registry.ts](../../server/src/modules/assets/asset-registry.ts)
+- [server/src/modules/assets/asset.controller.ts](../../server/src/modules/assets/asset.controller.ts)
+- [server/src/modules/assets/asset.integration.test.ts](../../server/src/modules/assets/asset.integration.test.ts)
+- [server/src/modules/assets/asset.routes.ts](../../server/src/modules/assets/asset.routes.ts)
+- [server/src/modules/docs/docs.routes.ts](../../server/src/modules/docs/docs.routes.ts)
+- [server/src/modules/escrows/adapters/ckb-escrow.adapter.ts](../../server/src/modules/escrows/adapters/ckb-escrow.adapter.ts)
+- [server/src/modules/escrows/adapters/escrow-adapter.interface.ts](../../server/src/modules/escrows/adapters/escrow-adapter.interface.ts)
+- [server/src/modules/escrows/adapters/manual-escrow.adapter.ts](../../server/src/modules/escrows/adapters/manual-escrow.adapter.ts)
+- [server/src/modules/escrows/adapters/mock-escrow.adapter.ts](../../server/src/modules/escrows/adapters/mock-escrow.adapter.ts)
+- [server/src/modules/escrows/adapters/rail-capabilities.ts](../../server/src/modules/escrows/adapters/rail-capabilities.ts)
+- [server/src/modules/escrows/foundation.integration.test.ts](../../server/src/modules/escrows/foundation.integration.test.ts)
+- [server/src/modules/escrows/foundation.repository.ts](../../server/src/modules/escrows/foundation.repository.ts)
+- [server/src/modules/escrows/foundation.test-fixture.ts](../../server/src/modules/escrows/foundation.test-fixture.ts)
+- [server/src/modules/escrows/foundation.test.ts](../../server/src/modules/escrows/foundation.test.ts)
+- [server/src/modules/escrows/funding-terms.ts](../../server/src/modules/escrows/funding-terms.ts)
+- [server/src/modules/escrows/operation-lifecycle.ts](../../server/src/modules/escrows/operation-lifecycle.ts)
+- [server/src/scripts/validateOpenApi.ts](../../server/src/scripts/validateOpenApi.ts)
+- [web/package-lock.json](../../web/package-lock.json)
+
+Documentation validation: byte-exact approval import, local link existence, balanced fences and authored whitespace checks passed. Supplied Markdown retains intentional two-space hard line breaks. A focused immutability test was made portable across root/server module strictness using `Reflect.set`; both execution contexts preserve the frozen recipient. No private credentials or generated build outputs are committed.
