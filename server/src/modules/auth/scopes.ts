@@ -1,5 +1,7 @@
 export const API_KEY_SCOPES = [
   'apps:read',
+  'escrows:v2:read',
+  'escrows:v2:propose',
   'agreements:create',
   'agreements:read',
   'agreements:update',

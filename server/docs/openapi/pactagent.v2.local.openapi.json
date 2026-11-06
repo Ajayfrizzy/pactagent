@@ -1,0 +1,356 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "PactAgent LOCAL M2 harness only",
+    "version": "2-local-review-2",
+    "description": "Not mounted in the production application. Chain 31337, literal loopback Anvil only. No Base network activation or independent finality claim. All financial proposals require signed raw transactions and verified onchain participant authority."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:3001/v2/local/base"
+    }
+  ],
+  "security": [
+    {
+      "apiKey": []
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "apiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key"
+      }
+    },
+    "schemas": {
+      "Terms": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "appId",
+          "agreementId",
+          "milestoneId",
+          "escrowId",
+          "applicationCommitment",
+          "token",
+          "client",
+          "worker",
+          "treasury",
+          "principal",
+          "clientBps",
+          "workerBps",
+          "feePolicy",
+          "fallbackWorker",
+          "disputeDeadline",
+          "finalDeadline",
+          "threshold",
+          "intervalPolicy",
+          "minDisputeInterval",
+          "arbiters"
+        ],
+        "properties": {
+          "appId": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{64}$"
+          },
+          "agreementId": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{64}$"
+          },
+          "milestoneId": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{64}$"
+          },
+          "escrowId": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{64}$"
+          },
+          "applicationCommitment": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{64}$"
+          },
+          "token": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$"
+          },
+          "client": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$"
+          },
+          "worker": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$"
+          },
+          "treasury": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$"
+          },
+          "principal": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,77})$"
+          },
+          "clientBps": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,77})$"
+          },
+          "workerBps": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,77})$"
+          },
+          "feePolicy": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{64}$"
+          },
+          "fallbackWorker": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,77})$"
+          },
+          "disputeDeadline": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,77})$"
+          },
+          "finalDeadline": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,77})$"
+          },
+          "threshold": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,77})$"
+          },
+          "intervalPolicy": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,77})$"
+          },
+          "minDisputeInterval": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,77})$"
+          },
+          "arbiters": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{40}$"
+            }
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/escrows": {
+      "post": {
+        "x-required-scope": "escrows:v2:propose",
+        "responses": {
+          "201": {
+            "description": "Local-only terms/signing payload or operation status; never live paid confirmation"
+          },
+          "401": {
+            "description": "API key required"
+          },
+          "403": {
+            "description": "Missing scope or non-loopback caller"
+          },
+          "404": {
+            "description": "Tenant-scoped record not found"
+          },
+          "409": {
+            "description": "Invalid participant consent, idempotency or execution state"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "agreementId",
+                  "milestoneId",
+                  "instance",
+                  "terms"
+                ],
+                "properties": {
+                  "agreementId": {
+                    "type": "string"
+                  },
+                  "milestoneId": {
+                    "type": "string"
+                  },
+                  "instance": {
+                    "type": "string"
+                  },
+                  "terms": {
+                    "$ref": "#/components/schemas/Terms"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/escrows/{id}/signing-payload": {
+      "post": {
+        "x-required-scope": "escrows:v2:read",
+        "responses": {
+          "200": {
+            "description": "Local-only terms/signing payload or operation status; never live paid confirmation"
+          },
+          "401": {
+            "description": "API key required"
+          },
+          "403": {
+            "description": "Missing scope or non-loopback caller"
+          },
+          "404": {
+            "description": "Tenant-scoped record not found"
+          },
+          "409": {
+            "description": "Invalid participant consent, idempotency or execution state"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "action",
+                  "validUntil"
+                ],
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "funding",
+                      "mutual",
+                      "dispute",
+                      "arbitration",
+                      "cancel:0",
+                      "cancel:1",
+                      "cancel:2"
+                    ]
+                  },
+                  "validUntil": {
+                    "type": "string"
+                  },
+                  "workerAmount": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/escrows/{id}/proposals": {
+      "post": {
+        "x-required-scope": "escrows:v2:propose",
+        "responses": {
+          "202": {
+            "description": "Local-only terms/signing payload or operation status; never live paid confirmation"
+          },
+          "401": {
+            "description": "API key required"
+          },
+          "403": {
+            "description": "Missing scope or non-loopback caller"
+          },
+          "404": {
+            "description": "Tenant-scoped record not found"
+          },
+          "409": {
+            "description": "Invalid participant consent, idempotency or execution state"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "idempotencyKey",
+                  "signedTransaction"
+                ],
+                "properties": {
+                  "idempotencyKey": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "signedTransaction": {
+                    "type": "string",
+                    "maxLength": 262144
+                  },
+                  "replacesTransactionId": {
+                    "type": "string",
+                    "pattern": "^0x[0-9a-f]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/operations/{id}": {
+      "get": {
+        "x-required-scope": "escrows:v2:read",
+        "responses": {
+          "200": {
+            "description": "Local-only terms/signing payload or operation status; never live paid confirmation"
+          },
+          "401": {
+            "description": "API key required"
+          },
+          "403": {
+            "description": "Missing scope or non-loopback caller"
+          },
+          "404": {
+            "description": "Tenant-scoped record not found"
+          },
+          "409": {
+            "description": "Invalid participant consent, idempotency or execution state"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

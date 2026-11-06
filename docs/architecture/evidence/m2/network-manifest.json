@@ -1,0 +1,125 @@
+{
+  "configurationVersion": "m2-design-1",
+  "status": "unavailable",
+  "activationAuthorized": false,
+  "expected": {
+    "chainId": 84532,
+    "token": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    "decimals": 6
+  },
+  "observed": {
+    "chainId": 84532,
+    "tokenCodeKeccak256": "0xedc5281a85c0efecd49999a1ef668390c59b88702f2d4a07029d7f5d63059d6c",
+    "tokenImplementationCodeKeccak256": null,
+    "decimals": 6,
+    "blockNumber": "0x3257e05",
+    "blockHash": "0x7e67ffe87909a93bc276823783eafb278ce345bfb94e6aadf0409c1518c00554",
+    "tokenDeploymentTransaction": null,
+    "tokenDeploymentBlock": null
+  },
+  "factory": {
+    "address": null,
+    "codeKeccak256": null
+  },
+  "escrow": {
+    "address": null,
+    "codeKeccak256": null
+  },
+  "reviewers": [],
+  "sources": [
+    {
+      "name": "base-connect",
+      "url": "https://docs.base.org/chain/connect",
+      "error": "HTTP Error 404: Not Found"
+    },
+    {
+      "name": "circle-usdc",
+      "url": "https://developers.circle.com/stablecoins/usdc-contract-addresses",
+      "finalUrl": "https://developers.circle.com/stablecoins/usdc-contract-addresses",
+      "retrievedAt": "2026-10-31T20:59:22.971984+00:00",
+      "sha256": "edd438d6bc6cec5e1694aa78651304610a7612b5d17d59659b3e4f6798561d68",
+      "bytes": 220591
+    },
+    {
+      "name": "base-finality",
+      "url": "https://docs.base.org/base-chain/network-information/transaction-finality",
+      "error": "HTTP Error 308: Permanent Redirect"
+    },
+    {
+      "name": "eip712",
+      "url": "https://eips.ethereum.org/EIPS/eip-712",
+      "finalUrl": "https://eips.ethereum.org/EIPS/eip-712",
+      "retrievedAt": "2026-10-31T20:59:22.060342+00:00",
+      "sha256": "0951c36c432c48e281bd131331bdd5f4426706417e0d38fa3e667c0b7f84a530",
+      "bytes": 49852
+    },
+    {
+      "name": "eip1271",
+      "url": "https://eips.ethereum.org/EIPS/eip-1271",
+      "finalUrl": "https://eips.ethereum.org/EIPS/eip-1271",
+      "retrievedAt": "2026-10-31T20:59:21.854788+00:00",
+      "sha256": "0bddb311d456082cd8fc58e713e2e4da756e51e2658aa06ad1780c9776232eac",
+      "bytes": 27917
+    },
+    {
+      "name": "oz-crypto",
+      "url": "https://docs.openzeppelin.com/contracts/5.x/api/utils/cryptography",
+      "finalUrl": "https://docs.openzeppelin.com/contracts/5.x/api/utils/cryptography",
+      "retrievedAt": "2026-10-31T20:59:25.430949+00:00",
+      "sha256": "914f056e919e6c2db2913961263ec01c1d82c2d172422c6a981299f67c060976",
+      "bytes": 928492
+    },
+    {
+      "name": "oz-token",
+      "url": "https://docs.openzeppelin.com/contracts/5.x/api/token/erc20",
+      "finalUrl": "https://docs.openzeppelin.com/contracts/5.x/api/token/erc20",
+      "retrievedAt": "2026-10-31T20:59:25.864435+00:00",
+      "sha256": "8cbb3acc1e2d61bbf774e3b31a149d332d6cb9e96724c4f1962a0cd087fedbe1",
+      "bytes": 853875
+    },
+    {
+      "name": "base-connect",
+      "url": "https://docs.base.org/get-started/connect-to-base",
+      "retrievalDate": "2026-10-31",
+      "sha256": "82c15e79defe7ab29151f86a34813847c00391fde71382a83a7b2218845171eb",
+      "bytes": 156672
+    },
+    {
+      "name": "base-finality",
+      "url": "https://docs.base.org/specifications/transactions/transaction-finality",
+      "retrievalDate": "2026-10-31",
+      "sha256": "1ec55e8903a43c5a3e51dfd837ede350d9140a6a6ea75216926f7e7559ec2174",
+      "bytes": 203634
+    }
+  ],
+  "initialRpcAttempts": [
+    {
+      "name": "chain",
+      "method": "eth_chainId",
+      "error": "HTTP Error 403: Forbidden"
+    },
+    {
+      "name": "finalized",
+      "method": "eth_getBlockByNumber",
+      "error": "HTTP Error 403: Forbidden"
+    },
+    {
+      "name": "code",
+      "method": "eth_getCode",
+      "error": "HTTP Error 403: Forbidden"
+    },
+    {
+      "name": "decimals",
+      "method": "eth_call",
+      "error": "HTTP Error 403: Forbidden"
+    }
+  ],
+  "observationEvidence": "rpc-observation.json",
+  "hashComputation": {
+    "library": "@noble/hashes",
+    "version": "2.4.0",
+    "function": "keccak_256",
+    "input": "decoded observation.tokenCode bytes",
+    "scope": "single provider token address code; not proxy implementation verification"
+  }
+}
