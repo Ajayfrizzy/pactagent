@@ -36,7 +36,7 @@ async function inspect(rpc: Rpc, b: LocalBinding) {
     || await rpc('eth_call', [{ to: b.instance, data: selector('state()') }, at]) !== `0x${hexWord('3')}`) throw new Error('wrong_state');
   // Pinned termsHash binds token and all destinations; independently inspect token from terms().
   const terms = await rpc('eth_call', [{ to: b.instance, data: selector('terms()') }, at]);
-  if (typeof terms !== 'string' || !/^0x[0-9a-f]+$/.test(terms) || terms.length !== 2 + 17 * 64
+  if (typeof terms !== 'string' || !/^0x[0-9a-f]+$/.test(terms) || terms.length !== 2 + 19 * 64
     || terms.slice(2 + 5 * 64, 2 + 6 * 64) !== addressWord(b.token)) throw new Error('wrong_token');
   if (!Array.isArray(r.logs)) throw new Error('missing_logs');
   const matching = r.logs.map(record).filter(l => typeof l.address === 'string' && l.address.toLowerCase() === b.instance.toLowerCase() && l.topics?.[0] === eventTopic);

@@ -1,8 +1,8 @@
 import { keccak_256 } from '@noble/hashes/sha3.js';
 
 // Provisional local-review codec; must not be served as an activated signing API.
-export const DOMAIN_VERSION = '2-local-review-1';
-export const TERMS_TYPE = 'Terms(bytes32 appId,bytes32 agreementId,bytes32 milestoneId,bytes32 escrowId,bytes32 applicationCommitment,address token,address client,address worker,address treasury,uint256 principal,uint256 clientBps,uint256 workerBps,bytes32 feePolicy,uint256 fallbackWorker,uint256 disputeDeadline,uint256 finalDeadline,uint256 threshold,bytes32 arbiterSetHash)';
+export const DOMAIN_VERSION = '2-local-review-2';
+export const TERMS_TYPE = 'Terms(bytes32 appId,bytes32 agreementId,bytes32 milestoneId,bytes32 escrowId,bytes32 applicationCommitment,address token,address client,address worker,address treasury,uint256 principal,uint256 clientBps,uint256 workerBps,bytes32 feePolicy,uint256 fallbackWorker,uint256 disputeDeadline,uint256 finalDeadline,uint256 threshold,uint256 intervalPolicy,uint256 minDisputeInterval,bytes32 arbiterSetHash)';
 export const ACTION_TYPES = {
   funding: 'FundingApproval(bytes32 termsHash,uint256 nonce,uint256 validUntil)',
   mutual: 'MutualSettlement(bytes32 termsHash,uint256 workerAmount,uint256 clientAmount,uint256 nonce,uint256 validUntil)',
@@ -14,7 +14,7 @@ export type Terms = {
   appId: string; agreementId: string; milestoneId: string; escrowId: string; applicationCommitment: string;
   token: string; client: string; worker: string; treasury: string; principal: string;
   clientBps: string; workerBps: string; feePolicy: string; fallbackWorker: string;
-  disputeDeadline: string; finalDeadline: string; threshold: string; arbiters: string[];
+  disputeDeadline: string; finalDeadline: string; threshold: string; intervalPolicy: string; minDisputeInterval: string; arbiters: string[];
 };
 export const hash = (bytes: Uint8Array): string => `0x${Buffer.from(keccak_256(bytes)).toString('hex')}`;
 const typeHash = (s: string) => hash(Buffer.from(s));
@@ -38,7 +38,8 @@ export function termsHash(t: Terms): string {
   const token = addressWord(t.token);
   if (new Set(recipients).size !== 3 || recipients.includes(token) || p === 0n || bc > 1000n || bw > 1000n
     || p + p * bc / 10000n >= 1n << 256n || uint(t.fallbackWorker) > p
-    || uint(t.disputeDeadline) >= uint(t.finalDeadline) || t.arbiters.length > 16) throw new Error('invalid_terms');
+    || t.intervalPolicy !== '1' || uint(t.minDisputeInterval) < 30n || uint(t.minDisputeInterval) > 604800n
+    || uint(t.disputeDeadline) < uint(t.minDisputeInterval) || uint(t.disputeDeadline) >= uint(t.finalDeadline) || t.arbiters.length > 16) throw new Error('invalid_terms');
   const threshold = uint(t.threshold);
   if (t.arbiters.length === 0 ? threshold !== 0n : threshold === 0n || threshold > BigInt(t.arbiters.length)) throw new Error('invalid_threshold');
   const arbiters = t.arbiters.map(addressWord);
@@ -47,9 +48,9 @@ export function termsHash(t: Terms): string {
   const arbiterSetHash = digestWords(word('32'), word(String(arbiters.length)), ...arbiters);
   return digestWords(bytes32(typeHash(TERMS_TYPE)), ...[t.appId, t.agreementId, t.milestoneId, t.escrowId, t.applicationCommitment].map(bytes32),
     token, ...recipients, word(t.principal), word(t.clientBps), word(t.workerBps), bytes32(t.feePolicy),
-    word(t.fallbackWorker), word(t.disputeDeadline), word(t.finalDeadline), word(t.threshold), bytes32(arbiterSetHash));
+    word(t.fallbackWorker), word(t.disputeDeadline), word(t.finalDeadline), word(t.threshold), word(t.intervalPolicy), word(t.minDisputeInterval), bytes32(arbiterSetHash));
 }
-export function authorizationDigest(input: { action: Action; terms: Terms; chainId: string; instance: string; validUntil: string; workerAmount?: string }): string {
+export function authorizationDigest(input: { action: Action; terms: Terms; chainId: string; instance: string; validUntil: string; workerAmount?: string; epoch?: string }): string {
   const domain = digestWords(bytes32(typeHash('EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)')),
     bytes32(typeHash('PactAgentEscrow')), bytes32(typeHash(DOMAIN_VERSION)), word(input.chainId), addressWord(input.instance));
   const fields = [bytes32(typeHash(ACTION_TYPES[input.action])), bytes32(termsHash(input.terms))];
@@ -58,6 +59,14 @@ export function authorizationDigest(input: { action: Action; terms: Terms; chain
     if (w > p) throw new Error('invalid_allocation');
     fields.push(word(w.toString()), word((p - w).toString()));
   } else if (input.workerAmount !== undefined) throw new Error('unexpected_allocation');
-  fields.push(word('0'), word(input.validUntil));
+  fields.push(word(input.action === 'dispute' ? '0' : (input.epoch ?? '0')), word(input.validUntil));
   return hash(Buffer.from(`1901${bytes32(domain)}${bytes32(digestWords(...fields))}`, 'hex'));
+}
+
+export function cancellationDigest(t: Terms, instance: string, chainId: string, action: 0|1|2, epoch: string, validUntil: string): string {
+  const domain = digestWords(bytes32(typeHash('EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)')),
+    bytes32(typeHash('PactAgentEscrow')), bytes32(typeHash(DOMAIN_VERSION)), word(chainId), addressWord(instance));
+  const data = digestWords(bytes32(typeHash('CancelIntent(bytes32 termsHash,uint8 action,uint256 epoch,uint256 validUntil)')),
+    bytes32(termsHash(t)), word(String(action)), word(epoch), word(validUntil));
+  return hash(Buffer.from(`1901${bytes32(domain)}${bytes32(data)}`, 'hex'));
 }

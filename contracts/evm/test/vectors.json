@@ -1,5 +1,5 @@
 {
-  "version": "2-local-review-1",
+  "version": "2-local-review-2",
   "chainId": "31337",
   "instance": "0x0000000000000000000000000000000000000999",
   "terms": {
@@ -20,14 +20,17 @@
     "disputeDeadline": "200",
     "finalDeadline": "300",
     "threshold": "2",
+    "intervalPolicy": "1",
+    "minDisputeInterval": "30",
     "arbiters": [
       "0x0000000000000000000000000000000000000055",
       "0x0000000000000000000000000000000000000066"
     ]
   },
-  "termsHash": "0x83b584c40009d22ef2ba22505f810acb521d83515671fc9e7623b78660847e92",
-  "funding": "0xc78454997e5cb9995e2f17171c6afbf12bbe15118c96424a10e37d1a5652b2b0",
-  "mutual": "0x6f900e465c80922bcacbed06c11fb05a56f243ed3fea1919cef21de3926c3fb6",
-  "dispute": "0xb273728c87fa0197023869b19c16ed9edf4114557404a9bfdf91ae14679c803b",
-  "arbitration": "0x0d33d60bcc7e55439dd473f379d21af0858f14c85aa391e58450b81e9dc04980"
+  "termsHash": "0xbe7295a1fbcf7d8084f33078cf8302a4a7c0f48401a9cc6e930c8ebde34143b2",
+  "cancellation": "0xe4a49cdffe3134d2a48d2088d3ca830144a70a034287ab6269b318dd642899d9",
+  "funding": "0x367eb086db1c4c6ec4ef2b609fbf8e45bfdf575fac5c40ac3e6458aff7c678ae",
+  "mutual": "0xc02ba1d101bb187452e11d4e4d92355ca5268b9e02c4c9c603c0b49ca4a0be19",
+  "dispute": "0xeabd06473d679e47ab42d146380cb3b95955f46cb7d3df50ff3c51ea9497f68f",
+  "arbitration": "0x25e48e35caf1ba14d5aa085ea816825d26fdd84d00456d63ca97237449980297"
 }

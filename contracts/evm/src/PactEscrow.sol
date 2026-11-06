@@ -33,6 +33,8 @@ abstract contract PactEscrowCore is EIP712, ReentrancyGuard {
         uint256 disputeDeadline;
         uint256 finalDeadline;
         uint256 threshold;
+        uint256 intervalPolicy;
+        uint256 minDisputeInterval;
     }
 
     enum State {
@@ -49,8 +51,15 @@ abstract contract PactEscrowCore is EIP712, ReentrancyGuard {
     uint256 public deploymentChainId;
     bool internal initialized;
     State public state;
+    // 0 funding, 1 mutual settlement, 2 arbitration. Dispute invocation is deliberately irrevocable.
+    mapping(uint8 => uint256) public intentEpoch;
+    bytes32 public constant CANCEL_TYPEHASH =
+        keccak256("CancelIntent(bytes32 termsHash,uint8 action,uint256 epoch,uint256 validUntil)");
+
+    event IntentCancelled(bytes32 indexed termsHash, uint8 indexed action, uint256 oldEpoch, uint256 newEpoch);
+
     bytes32 public constant TERMS_TYPEHASH = keccak256(
-        "Terms(bytes32 appId,bytes32 agreementId,bytes32 milestoneId,bytes32 escrowId,bytes32 applicationCommitment,address token,address client,address worker,address treasury,uint256 principal,uint256 clientBps,uint256 workerBps,bytes32 feePolicy,uint256 fallbackWorker,uint256 disputeDeadline,uint256 finalDeadline,uint256 threshold,bytes32 arbiterSetHash)"
+        "Terms(bytes32 appId,bytes32 agreementId,bytes32 milestoneId,bytes32 escrowId,bytes32 applicationCommitment,address token,address client,address worker,address treasury,uint256 principal,uint256 clientBps,uint256 workerBps,bytes32 feePolicy,uint256 fallbackWorker,uint256 disputeDeadline,uint256 finalDeadline,uint256 threshold,uint256 intervalPolicy,uint256 minDisputeInterval,bytes32 arbiterSetHash)"
     );
     bytes32 public constant FUND_TYPEHASH =
         keccak256("FundingApproval(bytes32 termsHash,uint256 nonce,uint256 validUntil)");
@@ -82,7 +91,7 @@ abstract contract PactEscrowCore is EIP712, ReentrancyGuard {
         uint256 treasuryNet
     );
 
-    constructor() EIP712("PactAgentEscrow", "2-local-review-1") {}
+    constructor() EIP712("PactAgentEscrow", "2-local-review-2") {}
     // Full instances call this only in their constructor. A test-only clone
     // candidate exposes an atomic factory initializer; each instance is write-once.
 
@@ -95,6 +104,8 @@ abstract contract PactEscrowCore is EIP712, ReentrancyGuard {
                 || t.worker == t.treasury || t.client == address(this) || t.worker == address(this)
                 || t.treasury == address(this) || t.client == t.token || t.worker == t.token || t.treasury == t.token
                 || t.principal == 0 || t.clientBps > 1000 || t.workerBps > 1000 || t.fallbackWorker > t.principal
+                || t.intervalPolicy != 1 || t.minDisputeInterval < 30 || t.minDisputeInterval > 7 days
+                || t.disputeDeadline < t.minDisputeInterval || block.timestamp > t.disputeDeadline - t.minDisputeInterval
                 || t.disputeDeadline <= block.timestamp || t.disputeDeadline >= t.finalDeadline || signers.length > 16
                 || (signers.length == 0 ? t.threshold != 0 : t.threshold == 0 || t.threshold > signers.length)
         ) revert InvalidTerms();
@@ -118,11 +129,11 @@ abstract contract PactEscrowCore is EIP712, ReentrancyGuard {
     function arbiters() external view returns (address[] memory) {
         return _arbiters;
     }
-    // Each action can occur at most once; nonce is explicitly fixed to zero by the codec.
-    // State transitions consume that action without a mutable shared nonce invalidating others.
+    // Funding/mutual/arbitral epochs advance only through cryptographic onchain cancellation.
+    // Dispute invocation is single-use and intentionally cannot be cancelled.
 
     function fundingDigest(uint256 expiry) public view returns (bytes32) {
-        return _hashTypedDataV4(keccak256(abi.encode(FUND_TYPEHASH, termsHash, uint256(0), expiry)));
+        return _hashTypedDataV4(keccak256(abi.encode(FUND_TYPEHASH, termsHash, intentEpoch[0], expiry)));
     }
 
     function disputeDigest(uint256 expiry) public view returns (bytes32) {
@@ -138,7 +149,7 @@ abstract contract PactEscrowCore is EIP712, ReentrancyGuard {
                     termsHash,
                     w,
                     _terms.principal - w,
-                    uint256(0),
+                    intentEpoch[arbitration ? 2 : 1],
                     expiry
                 )
             )
@@ -163,7 +174,9 @@ abstract contract PactEscrowCore is EIP712, ReentrancyGuard {
         if (state != State.Unfunded) revert InvalidState();
         _live(expiry);
         // Funding must leave the mutually accepted dispute invocation window available.
-        if (expiry > _terms.disputeDeadline || block.timestamp >= _terms.disputeDeadline) revert InvalidTime();
+        if (expiry > _terms.disputeDeadline || block.timestamp > _terms.disputeDeadline - _terms.minDisputeInterval) {
+            revert InvalidTime();
+        }
         _both(fundingDigest(expiry), clientSig, workerSig);
         state = State.Funded;
         IERC20 token = IERC20(_terms.token);
@@ -205,6 +218,43 @@ abstract contract PactEscrowCore is EIP712, ReentrancyGuard {
         }
         _live(expiry);
         bytes32 digest = settlementDigest(true, w, expiry);
+        _threshold(digest, signatures);
+        _settle(w, 1);
+    }
+
+    function cancellationDigest(uint8 action, uint256 epoch, uint256 expiry) public view returns (bytes32) {
+        return _hashTypedDataV4(keccak256(abi.encode(CANCEL_TYPEHASH, termsHash, action, epoch, expiry)));
+    }
+    /// @notice Cancellation is effective only when mined before a competing execution.
+    /// It never changes funded terms, dispute invocation or the committed fallback.
+
+    function cancelIntent(uint8 action, uint256 epoch, uint256 expiry, address participant, bytes[] calldata signatures)
+        external
+        nonReentrant
+    {
+        _live(expiry);
+        if (action > 2 || epoch != intentEpoch[action] || state == State.Terminal) revert InvalidState();
+        bytes32 digest = cancellationDigest(action, epoch, expiry);
+        if (action == 2) {
+            if (state != State.Disputed || _terms.threshold == 0 || signatures.length != _terms.threshold) {
+                revert InvalidState();
+            }
+            _threshold(digest, signatures);
+        } else {
+            if (
+                (action == 0 && state != State.Unfunded)
+                    || (action == 1 && state != State.Funded && state != State.Disputed)
+            ) revert InvalidState();
+            if (
+                signatures.length != 1 || (participant != _terms.client && participant != _terms.worker)
+                    || !SignatureChecker.isValidSignatureNow(participant, digest, signatures[0])
+            ) revert Unauthorized();
+        }
+        intentEpoch[action] = epoch + 1;
+        emit IntentCancelled(termsHash, action, epoch, epoch + 1);
+    }
+
+    function _threshold(bytes32 digest, bytes[] calldata signatures) private view {
         address previous;
         for (uint256 i; i < signatures.length; ++i) {
             address signer = ECDSA.recover(digest, signatures[i]);
@@ -217,7 +267,6 @@ abstract contract PactEscrowCore is EIP712, ReentrancyGuard {
             if (!found) revert Unauthorized();
             previous = signer;
         }
-        _settle(w, 1);
     }
 
     function settleFallback() external nonReentrant {

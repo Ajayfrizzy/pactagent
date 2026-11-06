@@ -77,3 +77,17 @@ Run fresh migration deploy, the full integration suite and both populated M1
 upgrade fixtures. Existing readers ignore the added tables. Roll back application
 code without dropping evidence tables; any future live model requires another
 reviewed forward migration, not alteration of these historical checks.
+
+### M2 local dispatch and replacement continuation
+
+`20261106000100_m2_local_dispatch` adds scoped immutable commands/encrypted artifacts,
+append-only evidence and a mutable leased outbox. `20261106000200_m2_local_nonce_replacement`
+adds explicit predecessor links and replaces sender/nonce uniqueness with a serialized
+higher-epoch replacement guard. It preserves old commands and all earlier migrations.
+Only the separate loopback harness broadcasts these commands; chain 31337 remains
+required. The older single-terminal-slot evidence prototype stays immutable and is
+not the new dispatch queue. SQL establishes scope, never cryptographic cancellation.
+
+Run the opt-in Anvil/PostgreSQL lifecycle test as well as both populated upgrades.
+Application rollback leaves these additive tables intact. No funded CKB field,
+M1 fee constraint, reader, or existing escrow is rewritten.

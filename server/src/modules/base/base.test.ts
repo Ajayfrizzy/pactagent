@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import { authorizationDigest, termsHash, type Action, hash } from './codec';
+import { authorizationDigest, cancellationDigest, termsHash, type Action, hash } from './codec';
 import { localTerms, wordId } from './fixtures';
 import { sealArtifact, openArtifact } from './artifacts';
 import { observeLocalSettlement, type LocalBinding, type Rpc } from './observer';
@@ -45,7 +45,7 @@ function rpcFixture(mode = 'valid'): Rpc {
       const data = (params[0] as { data: string }).data;
       if (data === hash(Buffer.from('termsHash()')).slice(0,10)) return binding.termsHash;
       if (data === hash(Buffer.from('state()')).slice(0,10)) return `0x${w(mode === 'wrong-state' ? '1' : '3')}`;
-      return `0x${'0'.repeat(5*64)}${w(binding.token)}${'0'.repeat(11*64)}`;
+      return `0x${'0'.repeat(5*64)}${w(binding.token)}${'0'.repeat(13*64)}`;
     }
     if (method === 'eth_getTransactionReceipt') {
       if (mode === 'missing') return null;
@@ -67,3 +67,21 @@ test('M2 local receipt verifier checks both providers and reconciles previously 
 for (const mode of ['wrong-chain','wrong-code','no-finalized','reorg','wrong-state','missing','wrong-amount','failed','duplicate-log']) {
   test(`M2 observer fails closed: ${mode}`, async () => assert.equal((await observeLocalSettlement(binding, providers(mode))).state, 'unknown'));
 }
+
+test('minimum interval policy is versioned and cannot be omitted or weakened', () => {
+  const t=localTerms();
+  for(const value of ['0','29','604801'])assert.throws(()=>termsHash({...t,minDisputeInterval:value}));
+  assert.throws(()=>termsHash({...t,intervalPolicy:'2'}));
+  assert.notEqual(termsHash({...t,minDisputeInterval:'31'}),termsHash(t));
+});
+
+test('cancellation binds action, epoch, chain and instance without changing funded terms', () => {
+  const t=localTerms(),instance='0x0000000000000000000000000000000000000999';
+  const digest=cancellationDigest(t,instance,'31337',1,'0','150');
+  assert.notEqual(digest,cancellationDigest(t,instance,'31337',0,'0','150'));
+  assert.notEqual(digest,cancellationDigest(t,instance,'31337',1,'1','150'));
+  assert.notEqual(digest,cancellationDigest(t,instance,'84532',1,'0','150'));
+  assert.notEqual(digest,cancellationDigest(t,t.worker,'31337',1,'0','150'));
+  const intent={action:'mutual' as const,terms:t,instance,chainId:'31337',validUntil:'150',workerAmount:'370001'};
+  assert.notEqual(authorizationDigest({...intent,epoch:'0'}),authorizationDigest({...intent,epoch:'1'}));
+});

@@ -102,6 +102,16 @@
                   "name": "threshold",
                   "type": "uint256",
                   "internalType": "uint256"
+                },
+                {
+                  "name": "intervalPolicy",
+                  "type": "uint256",
+                  "internalType": "uint256"
+                },
+                {
+                  "name": "minDisputeInterval",
+                  "type": "uint256",
+                  "internalType": "uint256"
                 }
               ]
             },
@@ -116,6 +126,19 @@
         {
           "type": "function",
           "name": "ARBITRAL_TYPEHASH",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "",
+              "type": "bytes32",
+              "internalType": "bytes32"
+            }
+          ],
+          "stateMutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "CANCEL_TYPEHASH",
           "inputs": [],
           "outputs": [
             {
@@ -216,6 +239,68 @@
               "name": "",
               "type": "address[]",
               "internalType": "address[]"
+            }
+          ],
+          "stateMutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "cancelIntent",
+          "inputs": [
+            {
+              "name": "action",
+              "type": "uint8",
+              "internalType": "uint8"
+            },
+            {
+              "name": "epoch",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "expiry",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "participant",
+              "type": "address",
+              "internalType": "address"
+            },
+            {
+              "name": "signatures",
+              "type": "bytes[]",
+              "internalType": "bytes[]"
+            }
+          ],
+          "outputs": [],
+          "stateMutability": "nonpayable"
+        },
+        {
+          "type": "function",
+          "name": "cancellationDigest",
+          "inputs": [
+            {
+              "name": "action",
+              "type": "uint8",
+              "internalType": "uint8"
+            },
+            {
+              "name": "epoch",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "expiry",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "",
+              "type": "bytes32",
+              "internalType": "bytes32"
             }
           ],
           "stateMutability": "view"
@@ -333,6 +418,25 @@
               "name": "",
               "type": "bytes32",
               "internalType": "bytes32"
+            }
+          ],
+          "stateMutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "intentEpoch",
+          "inputs": [
+            {
+              "name": "",
+              "type": "uint8",
+              "internalType": "uint8"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "",
+              "type": "uint256",
+              "internalType": "uint256"
             }
           ],
           "stateMutability": "view"
@@ -567,6 +671,16 @@
                   "name": "threshold",
                   "type": "uint256",
                   "internalType": "uint256"
+                },
+                {
+                  "name": "intervalPolicy",
+                  "type": "uint256",
+                  "internalType": "uint256"
+                },
+                {
+                  "name": "minDisputeInterval",
+                  "type": "uint256",
+                  "internalType": "uint256"
                 }
               ]
             }
@@ -629,6 +743,37 @@
             },
             {
               "name": "deposit",
+              "type": "uint256",
+              "indexed": false,
+              "internalType": "uint256"
+            }
+          ],
+          "anonymous": false
+        },
+        {
+          "type": "event",
+          "name": "IntentCancelled",
+          "inputs": [
+            {
+              "name": "termsHash",
+              "type": "bytes32",
+              "indexed": true,
+              "internalType": "bytes32"
+            },
+            {
+              "name": "action",
+              "type": "uint8",
+              "indexed": true,
+              "internalType": "uint8"
+            },
+            {
+              "name": "oldEpoch",
+              "type": "uint256",
+              "indexed": false,
+              "internalType": "uint256"
+            },
+            {
+              "name": "newEpoch",
               "type": "uint256",
               "indexed": false,
               "internalType": "uint256"
@@ -776,50 +921,50 @@
           "inputs": []
         }
       ],
-      "abiSha256": "966972273da7de214226a07c775ca5015ce74e90768e1826f862d8ae846a6eab",
-      "creationTemplateSha256": "8386cae11181ecf6aedbcd42c189499468e8b035f8cc484a6a327cb35b4b7b67",
-      "runtimeTemplateSha256": "cf9ec7d8c4246b699fdc6a4f8daec1049453fdd4440d5ba9a257195049acb49a",
-      "runtimeTemplateBytes": 7406,
+      "abiSha256": "b951cce172d901cf130cbf8c968093aae2d5c1f04e55925c197062df271eb70a",
+      "creationTemplateSha256": "4ac289a827f8d07492d556d0467ec78e71b13171a120f185024706ed7fee2667",
+      "runtimeTemplateSha256": "88ce7d9819673b5a18ed8fbdfadf71f60ba3108a29ba44b937ec96ef875b9507",
+      "runtimeTemplateBytes": 8950,
       "immutableReferences": {
         "4378": [
           {
-            "start": 6779,
+            "start": 8381,
             "length": 32
           }
         ],
         "4380": [
           {
-            "start": 6968,
+            "start": 8570,
             "length": 32
           }
         ],
         "4382": [
           {
-            "start": 6725,
+            "start": 8327,
             "length": 32
           }
         ],
         "4384": [
           {
-            "start": 6858,
+            "start": 8460,
             "length": 32
           }
         ],
         "4386": [
           {
-            "start": 6896,
+            "start": 8498,
             "length": 32
           }
         ],
         "4389": [
           {
-            "start": 3574,
+            "start": 3582,
             "length": 32
           }
         ],
         "4392": [
           {
-            "start": 3615,
+            "start": 3624,
             "length": 32
           }
         ]
@@ -934,6 +1079,16 @@
                   "name": "threshold",
                   "type": "uint256",
                   "internalType": "uint256"
+                },
+                {
+                  "name": "intervalPolicy",
+                  "type": "uint256",
+                  "internalType": "uint256"
+                },
+                {
+                  "name": "minDisputeInterval",
+                  "type": "uint256",
+                  "internalType": "uint256"
                 }
               ]
             },
@@ -984,10 +1139,10 @@
           "anonymous": false
         }
       ],
-      "abiSha256": "6731c0f038a52ca45c39fdbde32d991060e1d77e42d13c0b4a77792acd41bf7c",
-      "creationTemplateSha256": "f582bc4ff129c23d835dac2262917f966d4371368b8c820b9b72844d13e46475",
-      "runtimeTemplateSha256": "022775d5b21f853c1e5745483d911cf64764fbe517df229c4a961afdbf825123",
-      "runtimeTemplateBytes": 11925
+      "abiSha256": "d0dd16927f840e7e20d699aabd1d8bacb31bbb0e1a20fb2fd3ab7959f9157c29",
+      "creationTemplateSha256": "0e26aa415a328d16861eeda6dcf11b06a202ec6bea50211bd07a955cc9e7b0a7",
+      "runtimeTemplateSha256": "abe3d918f2d9db914beb333408d0e5d35e6440a543496497ab3fefa8d1fbfea0",
+      "runtimeTemplateBytes": 13682
     }
   ]
 }

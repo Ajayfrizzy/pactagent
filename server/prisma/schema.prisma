@@ -614,3 +614,53 @@ model BaseLocalEvidence {
   @@unique([operationId, sequence])
   @@index([appId, operationId])
 }
+
+model BaseLocalCommand {
+  id                    String   @id
+  appId                 String
+  escrowId              String
+  idempotencyKey        String
+  action                String
+  epoch                 String
+  transactionId         String   @unique
+  replacesTransactionId String?  @unique
+  sender                String
+  nonce                 Int
+  requestHash           String
+  encryptedArtifact     String
+  keyVersion            String
+  codeHash              String
+  createdAt             DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([id, appId])
+  @@unique([appId, idempotencyKey])
+  @@unique([escrowId, action, epoch])
+  @@unique([transactionId, appId])
+  @@index([sender, nonce])
+}
+
+model BaseLocalDispatch {
+  commandId        String    @id
+  appId            String
+  status           String    @default("queued")
+  leaseOwner       String?
+  leaseUntil       DateTime? @db.Timestamptz(6)
+  attempts         Int       @default(0)
+  blockHash        String?
+  blockNumber      String?
+  lastEvidenceHash String?
+  availableAt      DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([availableAt])
+}
+
+model BaseLocalCommandEvidence {
+  id           String   @id
+  commandId    String
+  appId        String
+  sequence     Int
+  evidenceJson String
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([commandId, sequence])
+}

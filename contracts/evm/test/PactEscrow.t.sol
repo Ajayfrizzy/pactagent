@@ -184,7 +184,9 @@ contract PactEscrowTest {
             370001,
             200,
             300,
-            2
+            2,
+            1,
+            30
         );
         escrow = new LocalEscrow(t, signers);
         token.mint(client, 1100001);
@@ -554,6 +556,115 @@ contract PactEscrowTest {
         escrow.settleFallback();
     }
 
+    function testMinimumIntervalExactBoundary() public {
+        vm.warp(170);
+        bytes32 d = escrow.fundingDigest(200);
+        escrow.fund(200, sig(11, d), sig(22, d));
+        require(uint256(escrow.state()) == 1);
+    }
+
+    function testMinimumIntervalTooLateAndPolicyBounds() public {
+        bytes32 d = escrow.fundingDigest(200);
+        bytes memory c = sig(11, d);
+        bytes memory w = sig(22, d);
+        vm.warp(171);
+        vm.expectRevert();
+        escrow.fund(200, c, w);
+        vm.warp(100);
+        t.minDisputeInterval = 29;
+        vm.expectRevert();
+        new LocalEscrow(t, signers);
+        t.disputeDeadline = 100 + 604801;
+        t.finalDeadline = t.disputeDeadline + 100;
+        t.minDisputeInterval = 604800;
+        new LocalEscrow(t, signers); // exact upper bound is valid, with enough time
+        t.minDisputeInterval = 604801;
+        vm.expectRevert();
+        new LocalEscrow(t, signers);
+        t.minDisputeInterval = 30;
+        t.intervalPolicy = 2;
+        vm.expectRevert();
+        new LocalEscrow(t, signers);
+    }
+
+    function cancel(uint8 action, uint256 epoch, uint256 key) internal {
+        bytes[] memory ss = new bytes[](1);
+        ss[0] = sig(key, escrow.cancellationDigest(action, epoch, 299));
+        escrow.cancelIntent(action, epoch, 299, vm.addr(key), ss);
+    }
+
+    function testFundingCancellationAndReplacement() public {
+        bytes32 d = escrow.fundingDigest(150);
+        bytes memory c = sig(11, d);
+        bytes memory w = sig(22, d);
+        cancel(0, 0, 22);
+        vm.expectRevert();
+        escrow.fund(150, c, w);
+        fund();
+        require(escrow.intentEpoch(0) == 1 && uint256(escrow.state()) == 1);
+    }
+
+    function testMutualCancellationReplayAndSettlementRace() public {
+        fund();
+        bytes32 d = escrow.settlementDigest(false, 37, 299);
+        bytes memory c = sig(11, d);
+        bytes memory w = sig(22, d);
+        cancel(1, 0, 11);
+        vm.expectRevert();
+        escrow.settleMutual(37, 299, c, w);
+        bytes[] memory ss = new bytes[](1);
+        ss[0] = sig(11, escrow.cancellationDigest(1, 0, 299));
+        vm.expectRevert();
+        escrow.cancelIntent(1, 0, 299, client, ss);
+        mutual(370001);
+        ss[0] = sig(11, escrow.cancellationDigest(1, 1, 299));
+        vm.expectRevert();
+        escrow.cancelIntent(1, 1, 299, client, ss);
+    }
+
+    function testCancellationCannotStopArbitrationOrFallback() public {
+        fund();
+        dispute();
+        cancel(1, 0, 11);
+        arb(370001);
+        require(uint256(escrow.state()) == 3);
+    }
+
+    function testArbitralCancellationRequiresThresholdAndNewEpoch() public {
+        fund();
+        dispute();
+        bytes32 old = escrow.settlementDigest(true, 37, 299);
+        bytes[] memory verdict = new bytes[](2);
+        verdict[0] = sig(signers[0] == vm.addr(33) ? 33 : 44, old);
+        verdict[1] = sig(signers[1] == vm.addr(33) ? 33 : 44, old);
+        bytes32 d = escrow.cancellationDigest(2, 0, 299);
+        bytes[] memory ss = new bytes[](2);
+        ss[0] = sig(11, d);
+        ss[1] = sig(22, d);
+        vm.expectRevert();
+        escrow.cancelIntent(2, 0, 299, client, ss);
+        ss[0] = sig(signers[0] == vm.addr(33) ? 33 : 44, d);
+        ss[1] = sig(signers[1] == vm.addr(33) ? 33 : 44, d);
+        escrow.cancelIntent(2, 0, 299, address(0), ss);
+        vm.expectRevert();
+        escrow.settleArbitral(37, 299, verdict);
+        arb(370001);
+    }
+
+    function testCancellationCannotExtendDeadlineOrRedirectTerms() public {
+        fund();
+        bytes32 original = escrow.termsHash();
+        cancel(1, 0, 22);
+        cancel(1, 1, 11);
+        vm.warp(300);
+        bytes[] memory ss = new bytes[](1);
+        ss[0] = sig(11, escrow.cancellationDigest(1, 2, 400));
+        vm.expectRevert();
+        escrow.cancelIntent(1, 2, 400, client, ss);
+        escrow.settleFallback();
+        require(escrow.termsHash() == original && uint256(escrow.state()) == 3);
+    }
+
     function testCanonicalTypeScriptVectors() public {
         string memory json = vm.readFile("test/vectors.json");
         address fixedToken = address(0x111);
@@ -574,6 +685,7 @@ contract PactEscrowTest {
             vm.store(instance, bytes32(i), vm.load(address(e), bytes32(i)));
         }
         require(e.termsHash() == vm.parseJsonBytes32(json, ".termsHash"));
+        require(PactEscrowCore(instance).cancellationDigest(1, 0, 150) == vm.parseJsonBytes32(json, ".cancellation"));
         require(PactEscrowCore(instance).fundingDigest(150) == vm.parseJsonBytes32(json, ".funding"));
         require(PactEscrowCore(instance).disputeDigest(150) == vm.parseJsonBytes32(json, ".dispute"));
         // Settlement helpers read principal; use the same ABI/type independently at the fixed domain.
@@ -581,7 +693,7 @@ contract PactEscrowTest {
             abi.encode(
                 keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
                 keccak256("PactAgentEscrow"),
-                keccak256("2-local-review-1"),
+                keccak256("2-local-review-2"),
                 uint256(31337),
                 instance
             )
@@ -626,6 +738,16 @@ contract TerminalHandler {
 
     constructor(PactEscrowCore e) {
         escrow = e;
+    }
+
+    function cancelMutual(uint256 choice) external {
+        uint256 key = choice % 2 == 0 ? 11 : 22;
+        uint256 epoch = escrow.intentEpoch(1);
+        bytes32 d = escrow.cancellationDigest(1, epoch, 299);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, d);
+        bytes[] memory signatures = new bytes[](1);
+        signatures[0] = abi.encodePacked(r, s, v);
+        try escrow.cancelIntent(1, epoch, 299, vm.addr(key), signatures) {} catch {}
     }
 
     function attempt(uint256 workerAmount, bool fallbackPath) external {
@@ -680,7 +802,9 @@ contract TerminalInvariantTest {
             370001,
             200,
             300,
-            0
+            0,
+            1,
+            30
         );
         escrow = new LocalEscrow(t, new address[](0));
         token.mint(client, 1100001);

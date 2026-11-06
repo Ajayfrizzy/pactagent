@@ -19,17 +19,52 @@ Owner conditional architecture-direction acceptance is recorded in [M2 design de
 
 Fresh deployment and both populated upgrade paths preserve existing rows. On code rollback, leave additive evidence tables intact. Future live evolution needs reviewed forward migrations, not removal of local-only checks. Signed artifact encryption keys are supplied to internal test functions; no production key provisioning, secret config or rotation service is introduced. Version mismatch/tampering/wrong scope prevents recovery. Never log/decrypt artifacts into public responses.
 
-Durable pending-operation storage and observation correction are implemented locally. An actual broadcast worker, outbox integration, artifact signature/transaction verification, replaced-transaction recovery, historical scan scheduling, key-rotation operations, paid projection and notification delivery are **not** implemented. Holding a permanent terminal slot is deliberately conservative but cannot handle expired/replaced proposals yet. This is an open live-pipeline design constraint, not proof of complete crash-safe payments.
+### Local command lifecycle added 2026-11-06
+
+[Consent verification](../../server/src/modules/base/local-consent.ts) validates
+trusted fixture code/terms, canonical signed EIP-1559 transactions, chain 31337,
+zero native value, exact escrow destination, EOA/ERC-1271 participant consent or
+immutable arbiter threshold and current action epochs. It simulates full execution;
+the contract rechecks authority at execution. API keys cannot sign for participants.
+
+[Lifecycle](../../server/src/modules/base/local-lifecycle.ts) persists encrypted
+immutable signed bytes, command identity, dispatch outbox and existing event/webhook
+jobs in one database transaction. SKIP LOCKED leases permit competing workers.
+Unknown status is committed before submission. Restart checks the receipt first;
+ambiguous retries submit only identical bytes. Consumed nonces without receipts,
+changed epochs or invalid binding require reconciliation. No operator signing keys
+or automatic fee bumping are introduced.
+
+[Local worker](../../server/src/modules/base/local-worker.ts) polls pending and
+historical rows, including finalized records. Receipt/block/code/terms/event checks
+produce append-only evidence and transactional local-status events. Corrections are
+sticky and duplicate evidence is suppressed. These events never mark legacy escrow
+paid. The worker is an explicit harness dependency, not registered in production.
+Continuous-loop supervision, monitoring, sweep scaling and key rotation remain
+operational work; integration tests exercise durable ticks/restarts directly.
+
+[Local API](../../server/src/modules/base/local-api.ts) offers registration, signing
+payload, proposal and status with real API-key scopes/tenant isolation. It requires
+loopback peers and is not imported by production app.ts. A separate [local OpenAPI](../../server/docs/openapi/pactagent.v2.local.openapi.json)
+describes it. Registration cannot add trusted bytecode; trust comes from harness
+configuration. Public Base financial routes remain unavailable.
+
+Forward migrations `20261106000100_m2_local_dispatch` and
+`20261106000200_m2_local_nonce_replacement` add immutable commands/evidence and a
+leased outbox, then permit explicitly linked same-tenant/escrow/action/sender/nonce
+successors at higher epochs. Both artifacts survive. SQL enforces structural scope;
+onchain cancellation and signatures establish authority. No historical SQL is edited.
+Ordinary gas-price replacement at the same epoch is deliberately unsupported.
 
 ## EVM and integration validation
 
-See [contract instructions](../../contracts/evm/README.md). Foundry 1.3.1, Solidity 0.8.30, Cancun, via-IR, optimizer 200 and OpenZeppelin 5.4.0 are pinned. Vendored imports are byte-identical to the archived npm package and checked by SHA-256. The separate CI EVM job verifies its Foundry download hash, runs local tests and reproduces [ABI/bytecode-template evidence](evidence/m2/local-contract-artifacts.json). No deploy/broadcast step exists.
+See [contract instructions](../../contracts/evm/README.md). Foundry 1.3.1, Solidity 0.8.30, Cancun, via-IR, optimizer 200 and OpenZeppelin 5.4.0 are pinned. Vendored imports are byte-identical to the archived npm package and checked by SHA-256. The separate CI EVM job verifies its Foundry download hash, runs local tests and reproduces [ABI/bytecode-template evidence](evidence/m2/local-contract-artifacts.json). CI also starts disposable Anvil on loopback and executes the backend lifecycle; no public deploy/broadcast step exists.
 
 The unit/fuzz suite covers funding/replay/chain/instance/action binding, ERC-1271 mutation, direct arbiter code changes, threshold duplicates, exact D/T boundaries, token pause/tax/false/empty returns, reentrancy, allowance underfunding, donations, all four fee modes, uint256 limits and rollback. Two fuzz properties run 512 cases each. Stateful terminal invariants execute 128 sequences ×32 calls on each full and clone candidate with at most one successful terminal transition and conserved balances.
 
-The benchmark compares full constructor deployment (2,129,818 gas) with an atomically initialized pinned clone using the same core and two-arbiter terms (584,505 gas, excluding implementation deployment). Clone is test-only. Full deployment remains preferred for the initial candidate despite its gas cost because it has no external initializer/delegatecall path; independent review is still required before freezing the choice.
+The benchmark compares full constructor deployment (2,488,411 gas) with an atomically initialized pinned clone using the same core and two-arbiter terms (630,726 gas, excluding implementation deployment). Clone is test-only. Full deployment remains preferred for the initial candidate despite its gas cost because it has no external initializer/delegatecall path; independent review is still required before freezing the choice.
 
-Backend tests use actual PostgreSQL for artifact/idempotency races, rollback/recovery, tenant/parent integrity, immutable rows, duplicate observations and reorg correction. API tests exercise real authenticated loopback requests. RPC-verifier tests use deterministic raw receipt fixtures; these are not real independent Base providers. Per user prohibition, no local RPC transactions are broadcast and no network contracts are deployed; backend-to-real-local-node lifecycle validation remains outstanding.
+Backend tests use actual PostgreSQL for artifact/idempotency races, rollback/recovery, tenant/parent integrity, immutable rows, duplicate observations and reorg correction. API tests exercise real authenticated loopback requests. RPC-verifier tests use deterministic raw receipt fixtures; these are not real independent Base providers. The authorized loopback Anvil suite executes actual signed local transactions through authenticated HTTP, PostgreSQL outbox and worker: funding, mutual split, refund, dispute/arbitration and fallback; crash/lost response, cancellation/nonce replacement, concurrent workers and snapshot/revert sweeps. Fixture bytecode is installed through local Anvil controls, never registered as a Base deployment. Both observer views use that same node and do not establish independent network finality.
 
 ## Capability map and remaining work
 
@@ -38,8 +73,8 @@ Backend tests use actual PostgreSQL for artifact/idempotency races, rollback/rec
 | M2.1 | Acceptance register, technical questions, threat model, codecs/vectors, pinned tools, equivalent full/clone measurement | Independent deployment-choice review, policy decisions, independent technical review, ABI freeze |
 | M2.2 | Factory/escrow candidate, full financial branches, EVM tests/fuzz/invariants | Independent review, expanded adversarial matrix and production-quality artifacts/deployment plan |
 | M2.3 | Separate local adapter and unavailable live metadata | Independent token/proxy/provenance and deployed-bytecode binding; no activated Base asset |
-| M2.4 | Local additive immutable encrypted evidence and deterministic observer | Actual broadcaster, signature/tx verification, outbox/worker, historical scan scheduler, replacements and operational recovery |
-| M2.5 | Scope-separated authenticated unavailable gates and OpenAPI | Real initiation/terms/signing/proposal/status workflow, signed webhooks/SDK example |
-| M2.6 | In-process EVM, TypeScript, PostgreSQL, compatibility and CI | Real local-node backend integration without violating no-broadcast instruction; optional testnet remains forbidden |
+| M2.4 | Local additive immutable encrypted evidence and deterministic observer | Local broadcaster, consent verification, outbox/worker, historical sweeps and epoch replacement now implemented; live operations, key rotation, paid projection remain gated |
+| M2.5 | Scope-separated authenticated unavailable gates and OpenAPI | Local terms/signing/proposal/status implemented with webhook outbox; live API/SDK, delivery operations and participant UX remain gated |
+| M2.6 | In-process EVM, TypeScript, PostgreSQL, compatibility and CI | Real local-node backend lifecycle now tested; independent review and public network validation remain absent/forbidden |
 
 No unsupported behavior is mapped to a live v1 release/refund path. `BASE_SEPOLIA_CANDIDATE` remains unchanged. No operator-held participant signing keys, B2B billing, mainnet, M3, merge or deployment is introduced.
