@@ -39,3 +39,12 @@ clone deployment and the evidence/nonce model. Forced-native-ETH behavior, broad
 wallet adversaries, operational recovery and the complete specification matrix must
 be reviewed rather than inferred from test counts. Numerical interval/participant UX
 policy changes require additional owner acceptance. No independent approval is recorded.
+
+The local command queue intentionally keeps one immutable command per action/epoch.
+This limits liveness: expired dispute intents (which have no cancellable epoch),
+underpriced fallback transactions and same-epoch gas replacements need a separately
+reviewed attempt model before production use. Cancellation of a queued intent must
+be submitted with a usable independent relayer nonce; a blocked lower nonce cannot
+be bypassed by merely queuing cancellation behind it. Direct onchain participant
+rights and committed fallback are unaffected. Do not clear these constraints by
+deleting artifacts, claiming database revocation or silently signing new transactions.
