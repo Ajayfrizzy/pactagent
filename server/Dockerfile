@@ -2,7 +2,7 @@
 FROM node:26.12.1-bookworm-slim@sha256:88e480776c6149ff1d098cd304f44bf18057fb5d284a3329b78162d29821e28c AS base
 # Apply Debian security fixes released after the pinned Node image was built.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends --only-upgrade perl-base \
+    && apt-get install -y --no-install-recommends --only-upgrade perl-base apt libapt-pkg6.0 \
     && rm -rf /var/lib/apt/lists/*
 
 FROM base AS build

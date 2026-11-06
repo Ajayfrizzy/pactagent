@@ -78,3 +78,13 @@ security assertion was weakened.
 The prior documentation-only head `1cd325e` passed all 12 jobs in [run 41242777325](https://github.com/Ajayfrizzy/pactagent/actions/runs/41242777325). This is historical evidence only, not validation of the new implementation. The continuation extends the read-only, checksum-pinned local EVM job with PostgreSQL and disposable Anvil lifecycle validation and retains every existing CI/security/migration/image check. The latest-head run/result is recorded in PR #119 after pushing; no failing check is bypassed and no auto-merge is enabled.
 
 Next: resolve the explicit policy/interface questions, obtain independent engineering and contract-security review, and complete remaining operational/SDK/adversarial acceptance work before claiming M2 complete. Live activation additionally requires verified independent network/issuer/deployment/finality evidence and a separate reviewed deployment decision. Current authorization still forbids deployment, funds, main promotion, merge and M3.
+
+
+### Container scan correction
+
+The November 6 CI scan found **CVE-2026-109518** in Debian `apt` and
+`libapt-pkg6.0` 2.6.1 (fixed in 2.6.2), inherited from the pinned Node base.
+Both Dockerfiles now include these packages in their existing targeted Debian
+security-upgrade step. The image digest, Node version, non-root runtime and Grype
+high-severity gate remain unchanged. Latest-head container builds/scans must verify
+this correction; no advisory suppression or deployment is authorized.
