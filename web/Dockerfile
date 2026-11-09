@@ -1,8 +1,10 @@
 # syntax=docker/dockerfile:1.7
 FROM node:26.12.1-bookworm-slim@sha256:88e480776c6149ff1d098cd304f44bf18057fb5d284a3329b78162d29821e28c AS base
-# Apply Debian security fixes released after the pinned Node image was built.
+# Patch Debian packages in the pinned Node image; fail closed if the apt CVE fix is unavailable.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends --only-upgrade perl-base \
+    && apt-get install -y --no-install-recommends --only-upgrade apt libapt-pkg6.0 perl-base \
+    && dpkg --compare-versions "$(dpkg-query -W -f='\${Version}' apt)" ge 2.6.2 \
+    && dpkg --compare-versions "$(dpkg-query -W -f='\${Version}' libapt-pkg6.0)" ge 2.6.2 \
     && rm -rf /var/lib/apt/lists/*
 
 FROM base AS build
