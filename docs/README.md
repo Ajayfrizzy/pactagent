@@ -28,3 +28,11 @@ The [M0 decision review](../M0_DECISION_REVIEW.md) and [evidence-linked findings
 - [M0 product-direction approval](architecture/M0-PRODUCT-APPROVAL.md); specialized approvals remain open.
 - [M1 implementation](architecture/M1-IMPLEMENTATION.md) and [validation report](architecture/M1-REPORT.md).
 - [Authoritative M1 scope](../M1_MULTI_CHAIN_FOUNDATION_SPEC.md).
+
+## Approved internal governance, pricing and future CKB record scope (2026-11-09)
+
+- [Internal PactAgent staff roles, dual-control finance and active–standby deputy](architecture/internal-staff-governance.md).
+- [Per-asset/per-application PactAgent B2B platform fee policy](architecture/platform-fee-policies.md).
+- [M14 — CKB record commitments, batched audit verification and reusable PactAgent-funded cell capacity](architecture/M14-CKB-ONCHAIN-RECORDS.md).
+
+These are accepted product directions, **not implemented features, independent security approval or permission to deploy**. Internal staff administration does not include managing integrating applications' employees. Existing M2 draft work and M8 settlement scope remain separate.

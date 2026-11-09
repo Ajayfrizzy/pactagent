@@ -47,6 +47,17 @@ Milestone numbers are labels, not a strict sequential dependency. M7's CKB execu
 | M12 | Optional provider-neutral CKB↔USDC swaps. Depends M10 and verified compatible routes. Interface: quote(provider, assets, exact/min output, slippage, expiry), execute, observe, refund/recover. | Dated route/provider verification, fees/price risk disclosure, partial fill/timeout/wrong asset/failure recovery tests; output must independently fund an escrow. If no viable route, remain deferred; direct USDC/CKB continues. |
 | M13 | Demand-led future rails and optimizations. Depends measured demand and M10 governance. Interface: existing capability registry/observation contracts with explicit deviations. | Independent chain/security review, capability test suite, migration/rollback design and per-rail launch gate. No generalized token acceptance or pooling without review. |
 
+## Newly approved product scope (2026-11-09)
+
+The original milestone table above predates these product decisions. Read the approved [internal staff governance](internal-staff-governance.md) and [platform fee policies](platform-fee-policies.md) when specifying M3–M5:
+
+- **M3:** PactAgent's own multi-role staff console, identity, permissions, internal invitations and distinct-person controls. Integrating applications independently manage their own employees and end-user authentication; avoid interpreting the historical "app membership" text as a new obligation to build their team-management product.
+- **M4:** Privileged treasury verification and two-person financial controls. Super Admin + active Finance Manager must jointly approve sensitive finance; activation of a standby Deputy requires Super Admin + Security Manager. Super Admin may suspend any compromised internal account without independently moving funds.
+- **M5:** PactAgent B2B fees configurable by asset/network and integrating application, including potential 0% CKB incentives; independent app client/worker fees remain distinct and are not collected by PactAgent. Freeze rates on funding commitments; never charge participants directly.
+- **M14:** [CKB on-chain records and capacity recycling](M14-CKB-ONCHAIN-RECORDS.md) is a separately governed future milestone following the M1–M13 numbered plan. Four record groups: agreements, milestones, dispute outcomes and batched financial/admin audit roots. Escrow on-chain execution stays in M8. PactAgent pays for **its record-attestation** capacity/fees, while integrating apps cover CKB **payment/escrow** chain costs.
+
+These product decisions do not rewrite historical implementation reports, grant specialist approvals or automatically start work. M14 planning can occur separately from the numbered sequence and should not gate Base or Bitcoin settlement.
+
 ## Shared implementation acceptance
 
 Every money change includes positive and adversarial tests for authorization, conservation, replay, timeout races and tenant scope, appropriate to its implementation layer. Record exact commands and outcomes; skipped tests are not passes. Runtime changes follow repository lint/test/build/OpenAPI checks, DB integration/upgrade checks when applicable, and actual chain VM/transaction tests for contract authorization. Update API examples and decision/threat registers alongside changes.
