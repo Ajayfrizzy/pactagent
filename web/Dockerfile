@@ -3,8 +3,8 @@ FROM node:26.12.1-bookworm-slim@sha256:88e480776c6149ff1d098cd304f44bf18057fb5d2
 # Patch Debian packages in the pinned Node image; fail closed if the apt CVE fix is unavailable.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends --only-upgrade apt libapt-pkg6.0 perl-base \
-    && dpkg --compare-versions "$(dpkg-query -W -f='\${Version}' apt)" ge 2.6.2 \
-    && dpkg --compare-versions "$(dpkg-query -W -f='\${Version}' libapt-pkg6.0)" ge 2.6.2 \
+    && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' apt)" ge 2.6.2 \
+    && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libapt-pkg6.0)" ge 2.6.2 \
     && rm -rf /var/lib/apt/lists/*
 
 FROM base AS build
