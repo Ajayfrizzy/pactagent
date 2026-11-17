@@ -36,3 +36,7 @@ The [M0 decision review](../M0_DECISION_REVIEW.md) and [evidence-linked findings
 - [M14 — CKB record commitments, batched audit verification and reusable PactAgent-funded cell capacity](architecture/M14-CKB-ONCHAIN-RECORDS.md).
 
 These are accepted product directions, **not implemented features, independent security approval or permission to deploy**. Internal staff administration does not include managing integrating applications' employees. Existing M2 draft work and M8 settlement scope remain separate.
+
+## M15 launch documentation and developer experience (planned)
+
+- [M15 — Production documentation, developer experience and knowledge base](architecture/M15-PRODUCTION-DOCUMENTATION.md): public integrator guides, validated API/SDK examples, internal operations docs, documentation website and evidence-preserving historical cleanup. This is **future scope**, not a published docs site or permission to begin implementation.
