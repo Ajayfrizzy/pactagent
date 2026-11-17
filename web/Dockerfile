@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM node:26.12.1-bookworm-slim@sha256:88e480776c6149ff1d098cd304f44bf18057fb5d284a3329b78162d29821e28c AS base
+FROM node:26.13.0-bookworm-slim@sha256:add5c17c14752c54d2f3d519ec46a3815684d41c33f198bcb09fb998f7dcbf68 AS base
 # Patch Debian packages in the pinned Node image; fail closed if the apt CVE fix is unavailable.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends --only-upgrade apt libapt-pkg6.0 perl-base \
