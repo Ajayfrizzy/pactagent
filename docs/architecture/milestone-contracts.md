@@ -58,6 +58,10 @@ The original milestone table above predates these product decisions. Read the ap
 
 These product decisions do not rewrite historical implementation reports, grant specialist approvals or automatically start work. M14 planning can occur separately from the numbered sequence and should not gate Base or Bitcoin settlement.
 
+## M15 — Production documentation and developer experience (planned)
+
+[M15 scope and acceptance contract](M15-PRODUCTION-DOCUMENTATION.md) records the future launch-documentation milestone: a public integrator docs site, independently usable quickstarts, SDK/OpenAPI/webhook guides tied to released behavior, private operator runbooks, and controlled cleanup of obsolete hackathon-facing material. M15 is a consolidation/release-readiness gate, not permission to deploy or delete archived security/migration evidence. Technical documentation continues during each prior milestone, and M15 publishes only independently verified launch-scope capabilities. It must not block CKB/Base escrow behavior with optional documentation or cross-chain anchor dependencies.
+
 ## Shared implementation acceptance
 
 Every money change includes positive and adversarial tests for authorization, conservation, replay, timeout races and tenant scope, appropriate to its implementation layer. Record exact commands and outcomes; skipped tests are not passes. Runtime changes follow repository lint/test/build/OpenAPI checks, DB integration/upgrade checks when applicable, and actual chain VM/transaction tests for contract authorization. Update API examples and decision/threat registers alongside changes.
