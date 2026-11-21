@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM node:26.11.1-bookworm-slim@sha256:86f07bc9c5dce4578cf37e5a418b7bfc7f817cda25cde66e2b66e95ed86c4567 AS base
+FROM node:26.13.1-bookworm-slim@sha256:5df79989ed685e09f0a98019db4cebfb22fb9df1a53c0161664a011f7ff6b0f1 AS base
 # Apply Debian security fixes released after the pinned Node image was built.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends --only-upgrade perl-base \
